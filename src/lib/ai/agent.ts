@@ -207,7 +207,14 @@ function parseEditReply(raw: string, fallbackReply: string): AgentResponse {
       : fallbackReply;
   const parsed = safeParseWorkspace(data.workspace);
   if (!parsed.success) {
-    throw new Error(`Agent returned an invalid workspace: ${parsed.error.message}`);
+    // Pin the failure to the exact field so the server log says e.g.
+    // `pages.3.blocks.1 — Invalid discriminator value` instead of a wall of
+    // Zod text. This is what tells truncation apart from a real schema miss.
+    const issue = parsed.error.issues[0];
+    const where = issue
+      ? `${issue.path.join(".") || "(root)"} — ${issue.message}`
+      : parsed.error.message;
+    throw new Error(`Agent returned an invalid workspace: ${where}`);
   }
   return { reply, changed: true, workspace: parsed.data };
 }

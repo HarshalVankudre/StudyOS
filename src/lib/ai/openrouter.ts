@@ -36,9 +36,25 @@ export async function chatCompletion(
 
   const data = await res.json();
   recordUsage(data?.usage);
-  const content: unknown = data?.choices?.[0]?.message?.content;
-  if (typeof content !== "string") {
+  const choice = data?.choices?.[0];
+  const content: unknown = choice?.message?.content;
+  // GLM is a reasoning model and its reasoning tokens count against
+  // `max_tokens`. When the budget runs out, OpenRouter returns finish_reason
+  // "length" with content that is either empty or cut off mid-JSON. Surface
+  // that as its own error so logs separate a truncation (raise max_tokens)
+  // from a transport failure or a genuinely empty reply.
+  if (typeof content !== "string" || content.length === 0) {
+    if (choice?.finish_reason === "length") {
+      throw new Error(
+        `OpenRouter response was truncated before any text (max_tokens=${maxTokens} too low)`,
+      );
+    }
     throw new Error("OpenRouter returned no text content");
+  }
+  if (choice.finish_reason === "length") {
+    throw new Error(
+      `OpenRouter response was truncated mid-output (max_tokens=${maxTokens} too low); the JSON is incomplete`,
+    );
   }
   return content;
 }
