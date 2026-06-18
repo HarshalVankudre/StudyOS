@@ -245,8 +245,8 @@ export function AgentChat({
   };
 
   return (
-    <aside className="flex w-[390px] shrink-0 flex-col border-l border-ink/10 bg-paper">
-      <div className="flex items-center justify-between border-b border-ink/10 px-4 py-3">
+    <aside className="flex w-[390px] shrink-0 flex-col border-l border-line bg-paper">
+      <div className="flex items-center justify-between border-b border-line px-4 py-3">
         <div className="flex items-center gap-2">
           <span className="relative grid h-8 w-8 shrink-0 place-items-center rounded-full bg-ink">
             {busy && (
@@ -271,7 +271,7 @@ export function AgentChat({
         <button
           onClick={onClose}
           aria-label={dict.agentChat.closeChat}
-          className="rounded p-1 text-ink-soft/60 transition hover:bg-ink/5 hover:text-ink"
+          className="rounded p-1 text-ink-soft/60 transition hover:bg-hover hover:text-ink"
         >
           ✕
         </button>
@@ -288,7 +288,7 @@ export function AgentChat({
                 <button
                   key={suggestion}
                   onClick={() => send(suggestion)}
-                  className="rounded-lg border border-ink/15 bg-white px-3 py-2 text-left text-sm text-ink-soft transition hover:border-ink/40 hover:text-ink"
+                  className="rounded-md border border-line-strong bg-card px-3 py-2 text-left text-sm text-ink-soft transition hover:border-ink/40 hover:text-ink"
                 >
                   {suggestion}
                 </button>
@@ -306,7 +306,7 @@ export function AgentChat({
             </div>
           ) : (
             <div key={item.id} className="flex flex-col items-start gap-1.5">
-              <div className="max-w-[94%] rounded-2xl rounded-bl-sm border border-ink/10 bg-white px-3.5 py-2 text-sm text-ink">
+              <div className="max-w-[94%] rounded-2xl rounded-bl-sm border border-line bg-card px-3.5 py-2 text-sm text-ink">
                 <MessageResponse>{item.content}</MessageResponse>
               </div>
 
@@ -319,7 +319,7 @@ export function AgentChat({
                         send(choice.value, choice.label, item.id)
                       }
                       disabled={busy}
-                      className="group flex items-center justify-between rounded-lg border border-ink/15 bg-white px-3 py-2 text-left text-sm text-ink transition hover:border-ink hover:bg-lime/20 disabled:opacity-50"
+                      className="group flex items-center justify-between rounded-md border border-line-strong bg-card px-3 py-2 text-left text-sm text-ink transition hover:border-ink hover:bg-lime/20 disabled:opacity-50"
                     >
                       <span>{choice.label}</span>
                       <span className="text-ink-soft transition group-hover:translate-x-0.5 group-hover:text-ink">
@@ -336,10 +336,10 @@ export function AgentChat({
                     }
                     disabled={busy}
                     aria-expanded={Boolean(otherOpen[item.id])}
-                    className={`group flex items-center justify-between rounded-lg border px-3 py-2 text-left text-sm transition disabled:opacity-50 ${
+                    className={`group flex items-center justify-between rounded-md border px-3 py-2 text-left text-sm transition disabled:opacity-50 ${
                       otherOpen[item.id]
                         ? "border-ink bg-ink text-paper"
-                        : "border-ink/15 bg-white text-ink hover:border-ink hover:bg-lime/20"
+                        : "border-line-strong bg-card text-ink hover:border-ink hover:bg-lime/20"
                     }`}
                   >
                     <span className="flex items-center gap-1.5">
@@ -357,7 +357,7 @@ export function AgentChat({
                     </span>
                   </button>
                   {otherOpen[item.id] && (
-                    <div className="flex items-center gap-2 rounded-lg border border-ink/20 bg-white p-2 focus-within:border-ink/50">
+                    <div className="flex items-center gap-2 rounded-md border border-line-strong bg-card p-2 focus-within:border-ink/50">
                       <input
                         autoFocus
                         value={otherReplies[item.id] ?? ""}
@@ -403,7 +403,7 @@ export function AgentChat({
                   {item.affectedAreas?.slice(0, 3).map((area) => (
                     <span
                       key={area.id}
-                      className="rounded-full bg-ink/5 px-2 py-0.5 text-[10px] text-ink-soft"
+                      className="rounded-full bg-hover px-2 py-0.5 text-[10px] text-ink-soft"
                     >
                       {area.icon} {area.label}
                     </span>
@@ -417,9 +417,9 @@ export function AgentChat({
         {busy && <AgentProgressCard activity={activity} onCancel={cancel} />}
       </div>
 
-      <div className="border-t border-ink/10 p-3">
+      <div className="border-t border-line p-3">
         {error && <p className="mb-2 px-1 text-xs text-rose-500">{error}</p>}
-        <div className="flex items-end gap-2 rounded-xl border border-ink/15 bg-white px-3 py-2 transition focus-within:border-ink/40">
+        <div className="flex items-end gap-2 rounded-md border border-line-strong bg-card px-3 py-2 transition focus-within:border-ink/40">
           <textarea
             value={text}
             onChange={(event) => setText(event.target.value)}
@@ -442,7 +442,7 @@ export function AgentChat({
             onClick={() => send(text)}
             disabled={busy || !text.trim()}
             aria-label={dict.agentChat.send}
-            className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-ink text-paper transition enabled:hover:bg-ink/90 disabled:opacity-40"
+            className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-ink text-paper transition enabled:hover:bg-ink/90 disabled:opacity-40"
           >
             ↑
           </button>
@@ -465,11 +465,11 @@ function AgentProgressCard({
   const { dict } = useI18n();
   return (
     <div
-      className="ai-pop overflow-hidden rounded-xl border border-ink/15 bg-white shadow-[0_16px_40px_-28px_rgba(26,23,18,0.55)]"
+      className="ai-pop overflow-hidden rounded-md border border-line-strong bg-card shadow-[0_16px_40px_-28px_rgba(26,23,18,0.55)]"
       role="status"
       aria-live="polite"
     >
-      <div className="relative overflow-hidden border-b border-ink/10 bg-ink px-4 py-3 text-paper">
+      <div className="relative overflow-hidden border-b border-line bg-ink px-4 py-3 text-paper">
         <div
           className="paper-grid pointer-events-none absolute inset-0 opacity-[0.07]"
           aria-hidden
@@ -528,8 +528,8 @@ function AgentProgressCard({
                       state.status === "complete"
                         ? "border-lime-deep bg-lime/40"
                         : state.status === "working"
-                          ? "border-ink/20 bg-paper"
-                          : "border-ink/10 bg-white"
+                          ? "border-line-strong bg-paper"
+                          : "border-line bg-card"
                     }`}
                   >
                     {state.status === "complete" ? "✓" : (area.icon ?? "•")}
@@ -571,7 +571,7 @@ function AgentProgressCard({
               >
                 <span
                   className={`grid h-5 w-5 place-items-center rounded-full text-[10px] ${
-                    done ? "bg-lime text-ink" : "bg-ink/5"
+                    done ? "bg-lime text-ink" : "bg-hover"
                   }`}
                 >
                   {done ? "✓" : "·"}

@@ -61,7 +61,7 @@ export default async function BuyCreditsPage() {
         </div>
 
         {/* Credit pack */}
-        <div className="mx-auto mt-10 max-w-sm rounded-2xl border-2 border-ink bg-white p-8 text-center shadow-[0_24px_60px_-30px_rgba(26,23,18,0.45)]">
+        <div className="mx-auto mt-10 max-w-sm rounded-2xl border-2 border-ink bg-card p-8 text-center shadow-[0_24px_60px_-30px_rgba(26,23,18,0.45)]">
           <p className="text-sm font-semibold uppercase tracking-wide text-ink-soft">
             {P.pack}
           </p>

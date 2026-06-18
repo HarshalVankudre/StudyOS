@@ -44,7 +44,7 @@ export function AiActivity({
       aria-live="polite"
       aria-label={`${resolvedTitle}: ${current.label}`}
     >
-      <div className="w-[min(22rem,90vw)] rounded-xl border border-ink/10 bg-white p-7 shadow-[0_24px_60px_-28px_rgba(26,23,18,0.35)]">
+      <div className="w-[min(22rem,90vw)] rounded-xl border border-ink/10 bg-card p-7 shadow-[0_24px_60px_-28px_rgba(26,23,18,0.35)]">
         <div className="flex items-center gap-3">
           <span
             className="h-5 w-5 shrink-0 animate-spin rounded-full border-2 border-ink/15 border-t-ink"

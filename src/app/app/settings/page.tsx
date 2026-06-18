@@ -68,7 +68,7 @@ export default async function SettingsPage() {
         <p className="mt-1 text-sm text-ink-soft">{S.subtitle}</p>
 
         {/* Profile */}
-        <section className="mt-8 rounded-2xl border border-ink/10 bg-white/60 p-6">
+        <section className="mt-8 rounded-2xl border border-ink/10 bg-card/60 p-6">
           <h2 className="font-display text-lg font-bold">{S.profile}</h2>
           <div className="mt-4 flex items-center gap-4">
             <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-ink text-lg font-bold text-paper">
@@ -80,7 +80,7 @@ export default async function SettingsPage() {
                 <p className="truncate text-sm text-ink-soft">{email}</p>
               )}
             </div>
-            <ManageAccountButton className="shrink-0 rounded-lg border border-ink/15 bg-white px-4 py-2 text-sm font-semibold text-ink transition hover:border-ink/40">
+            <ManageAccountButton className="shrink-0 rounded-lg border border-ink/15 bg-card px-4 py-2 text-sm font-semibold text-ink transition hover:border-ink/40">
               {dict.account.manageAccount}
             </ManageAccountButton>
           </div>
@@ -89,7 +89,7 @@ export default async function SettingsPage() {
         {/* Plan & billing */}
         <section
           id="billing"
-          className="mt-6 scroll-mt-20 rounded-2xl border border-ink/10 bg-white/60 p-6"
+          className="mt-6 scroll-mt-20 rounded-2xl border border-ink/10 bg-card/60 p-6"
         >
           <div className="flex items-center justify-between">
             <h2 className="font-display text-lg font-bold">{S.subscription}</h2>
@@ -128,7 +128,7 @@ export default async function SettingsPage() {
                 </form>
                 <Link
                   href="/pricing"
-                  className="rounded-lg border border-ink/15 bg-white px-5 py-2.5 text-sm font-semibold text-ink transition hover:border-ink/40"
+                  className="rounded-lg border border-ink/15 bg-card px-5 py-2.5 text-sm font-semibold text-ink transition hover:border-ink/40"
                 >
                   {S.comparePlans}
                 </Link>
@@ -138,7 +138,7 @@ export default async function SettingsPage() {
         </section>
 
         {/* Credits */}
-        <section className="mt-6 rounded-2xl border border-ink/10 bg-white/60 p-6">
+        <section className="mt-6 rounded-2xl border border-ink/10 bg-card/60 p-6">
           <div className="flex items-center justify-between">
             <h2 className="font-display text-lg font-bold">
               {dict.credits.label}
@@ -165,7 +165,7 @@ export default async function SettingsPage() {
             </form>
             <Link
               href="/pricing#credits"
-              className="rounded-lg border border-ink/15 bg-white px-5 py-2.5 text-sm font-semibold text-ink transition hover:border-ink/40"
+              className="rounded-lg border border-ink/15 bg-card px-5 py-2.5 text-sm font-semibold text-ink transition hover:border-ink/40"
             >
               {S.viewPricing}
             </Link>

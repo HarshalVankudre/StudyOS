@@ -53,8 +53,8 @@ export function DatabaseView({
 
   return (
     <section className="my-4">
-      <div className="mb-2 flex flex-wrap items-center gap-x-3 border-b border-zinc-200">
-        <div className="flex items-center gap-1.5 pb-2 text-sm font-medium text-zinc-500">
+      <div className="mb-2 flex flex-wrap items-center gap-x-3 border-b border-line">
+        <div className="flex items-center gap-1.5 pb-2 text-sm font-medium text-ink-soft">
           <input
             value={database.icon ?? ""}
             onChange={(e) =>
@@ -65,7 +65,7 @@ export function DatabaseView({
             }
             aria-label={dict.db.databaseIcon}
             maxLength={8}
-            className="w-7 rounded bg-transparent text-center outline-none hover:bg-zinc-100 focus:bg-white focus:ring-1 focus:ring-zinc-300"
+            className="w-7 rounded bg-transparent text-center outline-none hover:bg-hover focus:bg-card focus:ring-1 focus:ring-ink/20"
           />
           <input
             value={database.name}
@@ -76,7 +76,7 @@ export function DatabaseView({
               })
             }
             aria-label={dict.db.nameAria}
-            className="w-40 rounded bg-transparent px-1 text-sm font-medium text-zinc-600 outline-none hover:bg-zinc-100 focus:bg-white focus:ring-1 focus:ring-zinc-300"
+            className="w-40 rounded bg-transparent px-1 text-sm font-medium text-ink-soft outline-none hover:bg-hover focus:bg-card focus:ring-1 focus:ring-ink/20"
           />
         </div>
         <div className="flex items-center gap-0.5">
@@ -86,8 +86,8 @@ export function DatabaseView({
               onClick={() => setActiveViewId(v.id)}
               className={`-mb-px border-b-2 px-2 pb-2 text-sm transition ${
                 v.id === view.id
-                  ? "border-zinc-800 font-medium text-zinc-800"
-                  : "border-transparent text-zinc-400 hover:text-zinc-600"
+                  ? "border-ink font-medium text-ink"
+                  : "border-transparent text-ink-faint hover:text-ink-soft"
               }`}
             >
               <span className="mr-1 text-xs">{VIEW_ICON[v.type]}</span>
@@ -275,12 +275,12 @@ function DatabaseSettings({
   };
 
   return (
-    <details className="mb-3 border border-zinc-200 bg-zinc-50/60">
-      <summary className="cursor-pointer select-none px-3 py-2 font-mono text-[10px] uppercase tracking-wider text-zinc-500 hover:text-zinc-700">
+    <details className="mb-3 rounded-md border border-line bg-surface">
+      <summary className="cursor-pointer select-none px-3 py-2 font-mono text-[10px] uppercase tracking-wider text-ink-soft hover:text-ink">
         {dict.dbSettings.customize}
       </summary>
-      <div className="border-t border-zinc-200 p-3">
-        <label className="block text-xs font-medium text-zinc-500">
+      <div className="border-t border-line p-3">
+        <label className="block text-xs font-medium text-ink-soft">
           {dict.dbSettings.description}
           <input
             value={database.description ?? ""}
@@ -293,18 +293,18 @@ function DatabaseSettings({
               })
             }
             placeholder={dict.dbSettings.descriptionPlaceholder}
-            className="mt-1 w-full rounded border border-zinc-200 bg-white px-2.5 py-1.5 text-sm font-normal text-zinc-700 outline-none focus:border-zinc-400"
+            className="mt-1 w-full rounded border border-line bg-card px-2.5 py-1.5 text-sm font-normal text-ink outline-none focus:border-ink/40"
           />
         </label>
 
         <div className="mt-4">
           <div className="mb-2 flex items-center justify-between">
-            <span className="font-mono text-[10px] uppercase tracking-wider text-zinc-500">
+            <span className="font-mono text-[10px] uppercase tracking-wider text-ink-soft">
               {dict.dbSettings.fields}
             </span>
             <button
               onClick={addProperty}
-              className="text-xs font-medium text-zinc-500 hover:text-zinc-800"
+              className="text-xs font-medium text-ink-soft hover:text-ink"
             >
               {dict.dbSettings.addField}
             </button>
@@ -313,7 +313,7 @@ function DatabaseSettings({
             {database.properties.map((property) => (
               <div
                 key={property.id}
-                className="border border-zinc-200 bg-white p-2"
+                className="border border-line bg-card p-2"
               >
                 <div className="flex flex-wrap items-center gap-2">
                   <input
@@ -327,7 +327,7 @@ function DatabaseSettings({
                       })
                     }
                     aria-label={dict.dbSettings.fieldName}
-                    className="min-w-32 flex-1 rounded border border-zinc-200 px-2 py-1 text-sm text-zinc-700 outline-none focus:border-zinc-400"
+                    className="min-w-32 flex-1 rounded border border-line px-2 py-1 text-sm text-ink outline-none focus:border-ink/40"
                   />
                   <select
                     value={property.type}
@@ -338,7 +338,7 @@ function DatabaseSettings({
                       )
                     }
                     aria-label={dict.dbSettings.fieldType}
-                    className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-600 outline-none focus:border-zinc-400"
+                    className="rounded border border-line bg-card px-2 py-1 text-xs text-ink-soft outline-none focus:border-ink/40"
                   >
                     {PROPERTY_TYPES.map((type) => (
                       <option key={type.value} value={type.value}>
@@ -350,7 +350,7 @@ function DatabaseSettings({
                     onClick={() => deleteProperty(property.id)}
                     disabled={database.properties.length <= 1}
                     title={dict.dbSettings.deleteField}
-                    className="px-1 text-zinc-300 transition enabled:hover:text-rose-500 disabled:opacity-30"
+                    className="px-1 text-ink-faint/60 transition enabled:hover:text-rose-500 disabled:opacity-30"
                   >
                     ✕
                   </button>
@@ -370,7 +370,7 @@ function DatabaseSettings({
                         }
                       })
                     }
-                    className="mt-2 w-full rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-600"
+                    className="mt-2 w-full rounded border border-line bg-card px-2 py-1 text-xs text-ink-soft"
                   >
                     <option value="">{dict.dbSettings.chooseRelatedDatabase}</option>
                     {workspace.databases
@@ -390,7 +390,7 @@ function DatabaseSettings({
                     {property.options?.map((option) => (
                       <span
                         key={option.id}
-                        className="flex items-center gap-1 rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1"
+                        className="flex items-center gap-1 rounded-full border border-line bg-surface px-2 py-1"
                       >
                         <input
                           value={option.label}
@@ -408,13 +408,13 @@ function DatabaseSettings({
                             })
                           }
                           aria-label={dict.dbSettings.optionLabel}
-                          className="w-24 bg-transparent text-xs text-zinc-600 outline-none"
+                          className="w-24 bg-transparent text-xs text-ink-soft outline-none"
                         />
                         <button
                           onClick={() =>
                             deleteOption(property.id, option.id)
                           }
-                          className="text-[10px] text-zinc-300 hover:text-rose-500"
+                          className="text-[10px] text-ink-faint/60 hover:text-rose-500"
                         >
                           ✕
                         </button>
@@ -422,7 +422,7 @@ function DatabaseSettings({
                     ))}
                     <button
                       onClick={() => addOption(property.id)}
-                      className="rounded-full border border-dashed border-zinc-300 px-2 py-1 text-xs text-zinc-400 hover:text-zinc-700"
+                      className="rounded-full border border-dashed border-line-strong px-2 py-1 text-xs text-ink-faint hover:text-ink"
                     >
                       {dict.dbSettings.addOption}
                     </button>
@@ -435,12 +435,12 @@ function DatabaseSettings({
 
         <div className="mt-5">
           <div className="mb-2 flex items-center justify-between">
-            <span className="font-mono text-[10px] uppercase tracking-wider text-zinc-500">
+            <span className="font-mono text-[10px] uppercase tracking-wider text-ink-soft">
               {dict.dbSettings.views}
             </span>
             <button
               onClick={addView}
-              className="text-xs font-medium text-zinc-500 hover:text-zinc-800"
+              className="text-xs font-medium text-ink-soft hover:text-ink"
             >
               {dict.dbSettings.addView}
             </button>
@@ -449,7 +449,7 @@ function DatabaseSettings({
             {database.views.map((view) => (
               <div
                 key={view.id}
-                className="flex flex-wrap items-center gap-2 border border-zinc-200 bg-white p-2"
+                className="flex flex-wrap items-center gap-2 border border-line bg-card p-2"
               >
                 <input
                   value={view.name}
@@ -463,7 +463,7 @@ function DatabaseSettings({
                     })
                   }
                   aria-label={dict.dbSettings.viewName}
-                  className="min-w-28 flex-1 rounded border border-zinc-200 px-2 py-1 text-sm text-zinc-700 outline-none focus:border-zinc-400"
+                  className="min-w-28 flex-1 rounded border border-line px-2 py-1 text-sm text-ink outline-none focus:border-ink/40"
                 />
                 <select
                   value={view.type}
@@ -490,7 +490,7 @@ function DatabaseSettings({
                           : undefined;
                     })
                   }
-                  className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-600"
+                  className="rounded border border-line bg-card px-2 py-1 text-xs text-ink-soft"
                 >
                   {Object.keys(VIEW_ICON).map((type) => (
                     <option key={type} value={type}>
@@ -512,7 +512,7 @@ function DatabaseSettings({
                         }
                       })
                     }
-                    className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-600"
+                    className="rounded border border-line bg-card px-2 py-1 text-xs text-ink-soft"
                   >
                     <option value="">{dict.dbSettings.groupBy}</option>
                     {database.properties
@@ -542,7 +542,7 @@ function DatabaseSettings({
                         }
                       })
                     }
-                    className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-600"
+                    className="rounded border border-line bg-card px-2 py-1 text-xs text-ink-soft"
                   >
                     <option value="">{dict.dbSettings.dateField}</option>
                     {database.properties
@@ -558,7 +558,7 @@ function DatabaseSettings({
                   onClick={() => deleteView(view.id)}
                   disabled={database.views.length <= 1}
                   title={dict.dbSettings.deleteView}
-                  className="px-1 text-zinc-300 transition enabled:hover:text-rose-500 disabled:opacity-30"
+                  className="px-1 text-ink-faint/60 transition enabled:hover:text-rose-500 disabled:opacity-30"
                 >
                   ✕
                 </button>
@@ -647,11 +647,11 @@ function TableView({ db, view }: { db: Database; view: DBView }) {
   const props = visibleProps(db, view);
 
   return (
-    <div className="overflow-hidden rounded-lg border border-zinc-200">
+    <div className="overflow-hidden rounded-md border border-line bg-card shadow-card">
       <div className="overflow-x-auto">
         <table className="w-full border-collapse text-sm">
           <thead>
-            <tr className="border-b border-zinc-200 bg-zinc-50 text-left text-xs font-medium uppercase tracking-wide text-zinc-400">
+            <tr className="border-b border-line bg-surface text-left font-mono text-[10.5px] uppercase tracking-wide text-ink-faint">
               {props.map((p) => (
                 <th key={p.id} className="px-3 py-2 font-medium">
                   {p.name}
@@ -664,7 +664,7 @@ function TableView({ db, view }: { db: Database; view: DBView }) {
             {db.rows.map((row) => (
               <tr
                 key={row.id}
-                className="group border-b border-zinc-100 last:border-0 hover:bg-zinc-50/50"
+                className="group border-b border-line last:border-0 hover:bg-hover"
               >
                 {props.map((p) => (
                   <td key={p.id} className="px-2 py-1 align-top">
@@ -680,7 +680,7 @@ function TableView({ db, view }: { db: Database; view: DBView }) {
                   <button
                     onClick={() => deleteRow(row.id)}
                     title={dict.db.deleteRow}
-                    className="text-zinc-300 opacity-0 transition hover:text-rose-500 group-hover:opacity-100"
+                    className="text-ink-faint/60 opacity-0 transition hover:text-rose-500 group-hover:opacity-100"
                   >
                     ✕
                   </button>
@@ -692,7 +692,7 @@ function TableView({ db, view }: { db: Database; view: DBView }) {
       </div>
       <button
         onClick={() => addRow()}
-        className="w-full border-t border-zinc-100 px-3 py-2 text-left text-sm text-zinc-400 transition hover:bg-zinc-50 hover:text-zinc-600"
+        className="w-full border-t border-line px-3 py-2 text-left text-sm text-ink-faint transition hover:bg-hover hover:text-ink-soft"
       >
         {dict.db.newRow}
       </button>
@@ -723,7 +723,7 @@ function EditableCell({
     });
 
   const base =
-    "w-full rounded bg-transparent px-1 py-0.5 outline-none focus:bg-white focus:ring-1 focus:ring-zinc-300";
+    "w-full rounded bg-transparent px-1 py-0.5 outline-none focus:bg-card focus:ring-1 focus:ring-ink/20";
 
   // Remount uncontrolled cells onto AI-supplied values after an AI edit; manual
   // typing leaves `rev` unchanged, so the caret stays put. (See WorkspaceCtx.rev.)
@@ -736,7 +736,7 @@ function EditableCell({
           type="checkbox"
           checked={Boolean(value)}
           onChange={(e) => setCell(e.target.checked)}
-          className="h-4 w-4 rounded border-zinc-300 text-indigo-600"
+          className="h-4 w-4 rounded border-line-strong text-lime"
         />
       );
     case "number":
@@ -746,7 +746,7 @@ function EditableCell({
           type="number"
           defaultValue={value === null || value === undefined ? "" : String(value)}
           onBlur={(e) => setCell(e.target.value === "" ? null : Number(e.target.value))}
-          className={`${base} tabular-nums text-zinc-700`}
+          className={`${base} tabular-nums text-ink`}
         />
       );
     case "date":
@@ -756,7 +756,7 @@ function EditableCell({
           type="date"
           defaultValue={typeof value === "string" ? value : ""}
           onBlur={(e) => setCell(e.target.value || null)}
-          className={`${base} text-zinc-600`}
+          className={`${base} text-ink-soft`}
         />
       );
     case "url":
@@ -767,7 +767,7 @@ function EditableCell({
           placeholder={dict.db.empty}
           defaultValue={typeof value === "string" ? value : ""}
           onBlur={(e) => setCell(e.target.value || null)}
-          className={`${base} text-indigo-600`}
+          className={`${base} text-lime`}
         />
       );
     case "select":
@@ -776,7 +776,7 @@ function EditableCell({
         <select
           value={typeof value === "string" ? value : ""}
           onChange={(e) => setCell(e.target.value || null)}
-          className={`${base} text-zinc-700`}
+          className={`${base} text-ink`}
         >
           <option value="">{dict.db.empty}</option>
           {prop.options?.map((o) => (
@@ -798,7 +798,7 @@ function EditableCell({
             )
           }
           aria-label={prop.name}
-          className={`${base} min-h-14 text-zinc-700`}
+          className={`${base} min-h-14 text-ink`}
         >
           {prop.options?.map((option) => (
             <option key={option.id} value={option.id}>
@@ -824,7 +824,7 @@ function EditableCell({
             )
           }
           aria-label={prop.name}
-          className={`${base} min-h-14 text-zinc-700`}
+          className={`${base} min-h-14 text-ink`}
         >
           {related?.rows.map((row) => (
             <option key={row.id} value={row.id}>
@@ -843,7 +843,7 @@ function EditableCell({
           key={k}
           defaultValue={typeof value === "string" ? value : ""}
           onBlur={(e) => setCell(e.target.value)}
-          className={`${base} text-zinc-800`}
+          className={`${base} text-ink`}
         />
       );
   }
@@ -890,7 +890,7 @@ function BoardView({ db, view }: { db: Database; view: DBView }) {
               e.preventDefault();
               dropInto(opt.id);
             }}
-            className={`w-64 shrink-0 rounded-lg p-1 transition ${
+            className={`w-64 shrink-0 rounded-md p-1 transition ${
               isOver ? "bg-lime/20 ring-2 ring-lime-deep/40" : ""
             }`}
           >
@@ -900,13 +900,13 @@ function BoardView({ db, view }: { db: Database; view: DBView }) {
               >
                 {opt.label}
               </span>
-              <span className="text-xs text-zinc-400">{rows.length}</span>
+              <span className="text-xs text-ink-faint">{rows.length}</span>
             </div>
             <div className="space-y-2">
               {rows.map((r) => (
                 <div
                   key={r.id}
-                  className="group rounded-lg border border-zinc-200 bg-white p-3 shadow-sm"
+                  className="group rounded-md border border-line bg-card p-3 shadow-sm"
                 >
                   <div className="mb-2 flex items-start gap-1">
                     <span
@@ -921,7 +921,7 @@ function BoardView({ db, view }: { db: Database; view: DBView }) {
                         setOverOpt(null);
                       }}
                       title={dict.db.dragHint}
-                      className="mt-1 cursor-grab select-none leading-none text-zinc-300 transition hover:text-zinc-500 active:cursor-grabbing"
+                      className="mt-1 cursor-grab select-none leading-none text-ink-faint/60 transition hover:text-ink-soft active:cursor-grabbing"
                     >
                       ⠿
                     </span>
@@ -930,12 +930,12 @@ function BoardView({ db, view }: { db: Database; view: DBView }) {
                       defaultValue={String(r.cells[title.id] ?? "")}
                       onBlur={(e) => setCell(r.id, title.id, e.target.value)}
                       placeholder={dict.db.untitled}
-                      className="min-w-0 flex-1 rounded bg-transparent text-sm font-medium text-zinc-800 outline-none focus:bg-zinc-50"
+                      className="min-w-0 flex-1 rounded bg-transparent text-sm font-medium text-ink outline-none focus:bg-hover"
                     />
                     <button
                       onClick={() => deleteRow(r.id)}
                       title={dict.db.deleteCard}
-                      className="text-zinc-300 opacity-0 transition hover:text-rose-500 group-hover:opacity-100"
+                      className="text-ink-faint/60 opacity-0 transition hover:text-rose-500 group-hover:opacity-100"
                     >
                       ✕
                     </button>
@@ -947,7 +947,7 @@ function BoardView({ db, view }: { db: Database; view: DBView }) {
                           key={p.id}
                           className="flex items-center gap-2 text-xs"
                         >
-                          <span className="w-16 shrink-0 truncate text-zinc-400">
+                          <span className="w-16 shrink-0 truncate text-ink-faint">
                             {p.name}
                           </span>
                           <div className="min-w-0 flex-1">
@@ -966,7 +966,7 @@ function BoardView({ db, view }: { db: Database; view: DBView }) {
               ))}
               <button
                 onClick={() => addRow({ [groupProp.id]: opt.id })}
-                className="w-full rounded-lg border border-dashed border-zinc-200 px-3 py-2 text-left text-xs text-zinc-400 transition hover:border-zinc-300 hover:text-zinc-600"
+                className="w-full rounded-md border border-dashed border-line px-3 py-2 text-left text-xs text-ink-faint transition hover:border-line-strong hover:text-ink-soft"
               >
                 {dict.db.newCard}
               </button>
@@ -1040,9 +1040,9 @@ function CalendarView({ db, view }: { db: Database; view: DBView }) {
   );
 
   return (
-    <div className="rounded-lg border border-zinc-200">
-      <div className="flex items-center justify-between border-b border-zinc-200 px-3 py-2">
-        <span className="text-sm font-medium text-zinc-700">
+    <div className="rounded-md border border-line bg-card shadow-card">
+      <div className="flex items-center justify-between border-b border-line px-3 py-2">
+        <span className="font-display text-[15px] font-bold text-ink">
           {new Intl.DateTimeFormat(locale, { month: "long" }).format(
             new Date(Date.UTC(cursor.year, cursor.month, 1)),
           )}{" "}
@@ -1051,14 +1051,14 @@ function CalendarView({ db, view }: { db: Database; view: DBView }) {
         <div className="flex gap-1">
           <button
             onClick={() => move(-1)}
-            className="rounded px-2 py-1 text-sm text-zinc-500 hover:bg-zinc-100"
+            className="rounded px-2 py-1 text-sm text-ink-soft hover:bg-hover"
             aria-label={dict.db.prevMonth}
           >
             ‹
           </button>
           <button
             onClick={() => move(1)}
-            className="rounded px-2 py-1 text-sm text-zinc-500 hover:bg-zinc-100"
+            className="rounded px-2 py-1 text-sm text-ink-soft hover:bg-hover"
             aria-label={dict.db.nextMonth}
           >
             ›
@@ -1066,7 +1066,7 @@ function CalendarView({ db, view }: { db: Database; view: DBView }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-7 border-b border-zinc-200 bg-zinc-50 text-center text-xs font-medium text-zinc-400">
+      <div className="grid grid-cols-7 border-b border-line bg-surface text-center font-mono text-[10.5px] uppercase tracking-wide text-ink-faint">
         {weekdays.map((w) => (
           <div key={w} className="py-1.5">
             {w}
@@ -1103,18 +1103,18 @@ function CalendarView({ db, view }: { db: Database; view: DBView }) {
                     }
                   : undefined
               }
-              className={`group/cell min-h-[92px] border-b border-r border-zinc-100 p-1.5 [&:nth-child(7n)]:border-r-0 ${
+              className={`group/cell min-h-[92px] border-b border-r border-line p-1.5 [&:nth-child(7n)]:border-r-0 ${
                 isOver ? "bg-lime/20" : ""
               }`}
             >
               {day && (
                 <>
                   <div className="mb-1 flex items-center justify-between">
-                    <span className="text-xs text-zinc-400">{day}</span>
+                    <span className="text-xs text-ink-faint">{day}</span>
                     <button
                       onClick={() => addOn(day)}
                       title={dict.db.addOnDay}
-                      className="text-sm leading-none text-zinc-300 opacity-0 transition hover:text-zinc-700 group-hover/cell:opacity-100"
+                      className="text-sm leading-none text-ink-faint/60 opacity-0 transition hover:text-ink group-hover/cell:opacity-100"
                     >
                       +
                     </button>
@@ -1135,7 +1135,7 @@ function CalendarView({ db, view }: { db: Database; view: DBView }) {
                             if (e.key === "Escape") setEditingId(null);
                           }}
                           placeholder={dict.db.untitled}
-                          className="w-full rounded px-1.5 py-0.5 text-[11px] font-medium text-zinc-700 outline-none ring-1 ring-zinc-300"
+                          className="w-full rounded px-1.5 py-0.5 text-[11px] font-medium text-ink outline-none ring-1 ring-ink/20"
                         />
                       ) : (
                         <div

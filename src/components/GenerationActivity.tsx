@@ -84,14 +84,14 @@ export function GenerationActivity({
           </div>
           <button
             onClick={onCancel}
-            className="shrink-0 rounded-lg border border-ink/15 bg-white px-3.5 py-2 text-sm text-ink-soft transition hover:border-ink/40 hover:text-ink"
+            className="shrink-0 rounded-lg border border-ink/15 bg-card px-3.5 py-2 text-sm text-ink-soft transition hover:border-ink/40 hover:text-ink"
           >
             {dict.common.cancel}
           </button>
         </div>
 
         {/* The workspace, building itself */}
-        <div className="mt-7 flex-1 overflow-hidden rounded-2xl border border-ink/12 bg-white shadow-[0_30px_70px_-42px_rgba(26,23,18,0.45)]">
+        <div className="mt-7 flex-1 overflow-hidden rounded-2xl border border-ink/12 bg-card shadow-[0_30px_70px_-42px_rgba(26,23,18,0.45)]">
           {/* Title bar */}
           <div className="flex items-center gap-2 border-b border-ink/10 bg-paper/60 px-4 py-2.5">
             <span className="h-2.5 w-2.5 rounded-full bg-ink/10" />
@@ -310,7 +310,7 @@ function ListBuild({ cp }: { cp: ComponentProgress }) {
           <div
             key={i}
             className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 transition-all duration-500 ${
-              on ? "border-ink/10 bg-white opacity-100" : "border-transparent opacity-45"
+              on ? "border-ink/10 bg-card opacity-100" : "border-transparent opacity-45"
             } ${writing ? "ring-1 ring-lime/40" : ""}`}
           >
             <span
@@ -356,7 +356,7 @@ function BoardBuild({ cp }: { cp: ComponentProgress }) {
                 key={i}
                 className={`rounded-lg border p-2.5 transition-all duration-500 ${
                   on
-                    ? "translate-y-0 border-ink/10 bg-white opacity-100 shadow-sm"
+                    ? "translate-y-0 border-ink/10 bg-card opacity-100 shadow-sm"
                     : "translate-y-1 border-dashed border-ink/10 bg-paper/40 opacity-50"
                 }`}
                 style={{ transitionDelay: `${i * 60}ms` }}
@@ -394,7 +394,7 @@ function CalendarBuild({ cp }: { cp: ComponentProgress }) {
             <div
               key={i}
               className={`relative aspect-square rounded-md border transition-all duration-500 ${
-                on ? "border-ink/10 bg-white" : "border-transparent bg-ink/[0.04]"
+                on ? "border-ink/10 bg-card" : "border-transparent bg-ink/[0.04]"
               }`}
               style={{ transitionDelay: `${(i % 7) * 25}ms` }}
             >
@@ -423,7 +423,7 @@ function DashboardBuild({ cp }: { cp: ComponentProgress }) {
             <div
               key={i}
               className={`rounded-lg border p-3 transition-all duration-500 ${
-                on ? "border-ink/10 bg-white opacity-100" : "border-ink/[0.06] opacity-45"
+                on ? "border-ink/10 bg-card opacity-100" : "border-ink/[0.06] opacity-45"
               }`}
             >
               <span

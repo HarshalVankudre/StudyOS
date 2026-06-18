@@ -96,12 +96,12 @@ export function PageView({ page }: { page: Page }) {
       {/* Add a block / widget */}
       <div className="mt-3">
         {addOpen ? (
-          <div className="flex flex-wrap items-center gap-1.5 rounded-md border border-ink/15 bg-paper p-2">
+          <div className="flex flex-wrap items-center gap-1.5 rounded-md border border-line-strong bg-paper p-2">
             {BLOCK_TYPES.map((bt) => (
               <button
                 key={bt.type}
                 onClick={() => addBlock(bt.type)}
-                className="flex items-center gap-1.5 rounded border border-ink/10 bg-white px-2.5 py-1.5 text-sm text-ink transition hover:border-ink/40"
+                className="flex items-center gap-1.5 rounded border border-line bg-card px-2.5 py-1.5 text-sm text-ink transition hover:border-ink/40"
               >
                 <span className="font-mono text-xs text-ink-soft">{bt.icon}</span>
                 {dict.page.blockTypes[bt.type as keyof typeof dict.page.blockTypes]}
@@ -213,7 +213,7 @@ function BlockView({ pageId, block }: { pageId: string; block: Block }) {
               })
             }
             aria-label={dict.page.headingLevel}
-            className="rounded border border-transparent bg-transparent px-1 py-0.5 font-mono text-[10px] text-ink-soft outline-none hover:border-ink/15 focus:border-ink/30"
+            className="rounded border border-transparent bg-transparent px-1 py-0.5 font-mono text-[10px] text-ink-soft outline-none hover:border-line-strong focus:border-ink/30"
           >
             <option value={1}>H1</option>
             <option value={2}>H2</option>
@@ -235,7 +235,7 @@ function BlockView({ pageId, block }: { pageId: string; block: Block }) {
           defaultValue={block.text}
           onBlur={(e) => commitText(e.target.value)}
           placeholder={dict.page.placeholders.paragraph}
-          className={`py-1 text-[15px] leading-7 text-zinc-700 placeholder:text-ink-soft/40 ${textInputClass}`}
+          className={`py-1 text-[15px] leading-7 text-ink placeholder:text-ink-soft/40 ${textInputClass}`}
         />
       );
     case "todo":
@@ -252,7 +252,7 @@ function BlockView({ pageId, block }: { pageId: string; block: Block }) {
                 if (b && b.type === "todo") b.checked = e.target.checked;
               })
             }
-            className="h-4 w-4 rounded border-zinc-300 text-indigo-600"
+            className="h-4 w-4 rounded border-line-strong text-lime"
           />
           <input
             key={k}
@@ -260,15 +260,15 @@ function BlockView({ pageId, block }: { pageId: string; block: Block }) {
             onBlur={(e) => commitText(e.target.value)}
             placeholder={dict.page.placeholders.todo}
             className={`flex-1 rounded bg-transparent px-1 outline-none focus:bg-paper ${
-              block.checked ? "text-zinc-400 line-through" : "text-zinc-700"
+              block.checked ? "text-ink-faint line-through" : "text-ink"
             }`}
           />
         </div>
       );
     case "bulleted_list_item":
       return (
-        <div className="flex items-center gap-2 py-0.5 text-[15px] text-zinc-700">
-          <span className="text-zinc-400">•</span>
+        <div className="flex items-center gap-2 py-0.5 text-[15px] text-ink">
+          <span className="text-ink-faint">•</span>
           <input
             key={k}
             defaultValue={block.text}
@@ -280,8 +280,8 @@ function BlockView({ pageId, block }: { pageId: string; block: Block }) {
       );
     case "numbered_list_item":
       return (
-        <div className="flex items-center gap-2 py-0.5 text-[15px] text-zinc-700">
-          <span className="font-mono text-xs text-zinc-400">1.</span>
+        <div className="flex items-center gap-2 py-0.5 text-[15px] text-ink">
+          <span className="font-mono text-xs text-ink-faint">1.</span>
           <input
             key={k}
             defaultValue={block.text}
@@ -292,7 +292,7 @@ function BlockView({ pageId, block }: { pageId: string; block: Block }) {
       );
     case "quote":
       return (
-        <div className="border-l-2 border-zinc-300 py-1 pl-4 text-[15px] italic text-zinc-600">
+        <div className="border-l-2 border-line-strong py-1 pl-4 text-[15px] italic text-ink-soft">
           <input
             key={k}
             defaultValue={block.text}
@@ -303,7 +303,7 @@ function BlockView({ pageId, block }: { pageId: string; block: Block }) {
       );
     case "callout":
       return (
-        <div className="my-3 flex gap-3 rounded-lg border border-ink/10 bg-paper p-4 text-[15px] text-zinc-700">
+        <div className="my-3 flex gap-3 rounded-md border border-line bg-paper p-4 text-[15px] text-ink">
           <input
             value={block.emoji ?? ""}
             onChange={(e) =>
@@ -328,7 +328,7 @@ function BlockView({ pageId, block }: { pageId: string; block: Block }) {
         </div>
       );
     case "divider":
-      return <hr className="my-4 border-ink/10" />;
+      return <hr className="my-4 border-line" />;
     case "database_view":
       return <DatabaseView databaseId={block.databaseId} viewId={block.viewId} />;
     default:

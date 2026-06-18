@@ -4,55 +4,100 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  /* StudyOS brand — "study desk": paper, ink, highlighter */
-  --paper: #f6f5ee;
-  --ink: #1a1712;
-  --ink-soft: #5c574a;
-  --line: #1a171214;
-  --lime: #c9f24c;
-  --lime-deep: #abe22d;
+  /* StudyOS — editorial "study desk": warm paper, ink, indigo accent.
+     Palette ported from the StudyOS.dc design system. */
+  --bg: #f2f1ef;
+  --surface: #f9f8f6;
+  --surface-2: #ffffff;
+  --text: #1a1a17;
+  --text-soft: #5c5c56;
+  --text-faint: #97978e;
+  --border-c: rgba(20, 20, 16, 0.1);
+  --border-strong-c: rgba(20, 20, 16, 0.16);
+  --hover-c: rgba(20, 20, 16, 0.04);
+  --accent: #4b53d9;
+  --accent-on: #ffffff;
+  --accent-deep: #3a41c0;
+  --accent-faint: rgba(75, 83, 217, 0.1);
+  --shadow: 0 1px 1px rgba(20, 20, 16, 0.03);
+  --shadow-lg: 0 18px 48px -30px rgba(20, 20, 16, 0.26);
+
+  /* Brand utility aliases the whole app relies on (bg-paper, text-ink, …) */
+  --paper: var(--bg);
+  --ink: #1a1a17;
+  --ink-soft: #5c5c56;
+  --ink-faint: #97978e;
+  --line: var(--border-c);
+  --line-strong: var(--border-strong-c);
+  --lime: #4b53d9;
+  --lime-deep: #3a41c0;
 
   /* shadcn/ui semantic tokens, themed to the brand */
-  --radius: 0.5rem;
-  --background: #f6f5ee;
-  --foreground: #1a1712;
+  --radius: 0.375rem;
+  --background: #f2f1ef;
+  --foreground: #1a1a17;
   --card: #ffffff;
-  --card-foreground: #1a1712;
+  --card-foreground: #1a1a17;
   --popover: #ffffff;
-  --popover-foreground: #1a1712;
-  --primary: #1a1712;
-  --primary-foreground: #f6f5ee;
-  --secondary: #eeede4;
-  --secondary-foreground: #1a1712;
-  --muted: #eeede4;
-  --muted-foreground: #5c574a;
-  --accent: #c9f24c;
-  --accent-foreground: #1a1712;
+  --popover-foreground: #1a1a17;
+  --primary: #1a1a17;
+  --primary-foreground: #ffffff;
+  --secondary: #f9f8f6;
+  --secondary-foreground: #1a1a17;
+  --muted: #f9f8f6;
+  --muted-foreground: #5c5c56;
+  --accent-bg: #e8e7e5;
+  --accent-foreground: #1a1a17;
   --destructive: #e11d48;
-  --border: #1a171220;
-  --input: #1a171220;
-  --ring: #1a1712;
+  --border: rgba(20, 20, 16, 0.1);
+  --input: rgba(20, 20, 16, 0.16);
+  --ring: #4b53d9;
 }
 
 .dark {
-  --background: #16140f;
-  --foreground: #f6f5ee;
-  --card: #1f1c16;
-  --card-foreground: #f6f5ee;
-  --popover: #1f1c16;
-  --popover-foreground: #f6f5ee;
-  --primary: #f6f5ee;
-  --primary-foreground: #1a1712;
-  --secondary: #2a261e;
-  --secondary-foreground: #f6f5ee;
-  --muted: #2a261e;
-  --muted-foreground: #b8b1a0;
-  --accent: #c9f24c;
-  --accent-foreground: #1a1712;
+  --bg: #0e0e0c;
+  --surface: #161613;
+  --surface-2: #1c1c19;
+  --text: #ecebe6;
+  --text-soft: #a0a096;
+  --text-faint: #62625a;
+  --border-c: rgba(255, 255, 255, 0.08);
+  --border-strong-c: rgba(255, 255, 255, 0.15);
+  --hover-c: rgba(255, 255, 255, 0.05);
+  --accent: #8088ff;
+  --accent-on: #0e0e0c;
+  --accent-deep: #9aa0ff;
+  --accent-faint: rgba(128, 136, 255, 0.15);
+  --shadow: 0 1px 1px rgba(0, 0, 0, 0.25);
+  --shadow-lg: 0 24px 60px -34px rgba(0, 0, 0, 0.8);
+
+  --paper: var(--bg);
+  --ink: #ecebe6;
+  --ink-soft: #a0a096;
+  --ink-faint: #62625a;
+  --line: var(--border-c);
+  --line-strong: var(--border-strong-c);
+  --lime: #8088ff;
+  --lime-deep: #9aa0ff;
+
+  --background: #0e0e0c;
+  --foreground: #ecebe6;
+  --card: #1d1d1a;
+  --card-foreground: #ecebe6;
+  --popover: #1d1d1a;
+  --popover-foreground: #ecebe6;
+  --primary: #ecebe6;
+  --primary-foreground: #1a1a17;
+  --secondary: #1c1c19;
+  --secondary-foreground: #ecebe6;
+  --muted: #1c1c19;
+  --muted-foreground: #a0a096;
+  --accent-bg: #26261f;
+  --accent-foreground: #ecebe6;
   --destructive: #fb7185;
-  --border: #ffffff1f;
-  --input: #ffffff1f;
-  --ring: #d8d2c2;
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.15);
+  --ring: #8088ff;
 }
 
 @theme inline {
@@ -69,28 +114,39 @@
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
+  --color-accent: var(--accent-bg);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --radius-xl: calc(var(--radius) + 6px);
 
   /* StudyOS brand utilities (the whole app relies on these) */
   --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
   --color-ink: var(--ink);
   --color-ink-soft: var(--ink-soft);
+  --color-ink-faint: var(--ink-faint);
   --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
   --color-lime: var(--lime);
   --color-lime-deep: var(--lime-deep);
+  --color-lime-on: var(--accent-on);
+  --color-lime-faint: var(--accent-faint);
+  --color-hover: var(--hover-c);
 
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-  --font-display: var(--font-bricolage);
+  /* dark-mode-aware elevation */
+  --shadow-card: var(--shadow);
+  --shadow-pop: var(--shadow-lg);
+
+  --font-sans: var(--font-hanken);
+  --font-mono: var(--font-jetbrains);
+  --font-display: var(--font-newsreader);
 }
 
 @layer base {
@@ -100,11 +156,31 @@
   body {
     @apply bg-background text-foreground;
   }
+  ::selection {
+    background: var(--accent);
+    color: var(--accent-on);
+  }
+  /* Thin, ink-tinted scrollbars to match the editorial chrome */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong-c) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: var(--border-strong-c);
+    border-radius: 6px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
 }
 
 body {
-  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system,
+  font-family: var(--font-hanken), ui-sans-serif, system-ui, -apple-system,
     sans-serif;
+  transition: background 0.4s ease, color 0.4s ease;
 }
 
 /* ---------- Motion ---------- */

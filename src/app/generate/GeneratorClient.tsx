@@ -344,7 +344,7 @@ function DescribeStage({
         {dict.generate.describe.subtitle}
       </p>
 
-      <div className="mt-8 rounded-xl border border-ink/15 bg-white shadow-sm transition focus-within:border-ink/40">
+      <div className="mt-8 rounded-xl border border-ink/15 bg-card shadow-sm transition focus-within:border-ink/40">
         <textarea
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
@@ -376,7 +376,7 @@ function DescribeStage({
               key={ex.text}
               onClick={() => onExample(ex.text)}
               disabled={busy}
-              className="group flex items-center gap-2 rounded-lg border border-ink/15 bg-white px-3.5 py-2 text-left text-sm transition hover:border-ink/40 disabled:opacity-50"
+              className="group flex items-center gap-2 rounded-lg border border-ink/15 bg-card px-3.5 py-2 text-left text-sm transition hover:border-ink/40 disabled:opacity-50"
             >
               <span>{ex.emoji}</span>
               <span className="text-ink-soft transition group-hover:text-ink">
@@ -452,7 +452,7 @@ function QuestionsStage({
           return (
             <div
               key={q.id}
-              className="reveal rounded-xl border border-ink/10 bg-white p-5 shadow-sm"
+              className="reveal rounded-xl border border-ink/10 bg-card p-5 shadow-sm"
               style={{ animationDelay: `${qi * 70}ms` }}
             >
               <div className="mb-3 flex items-baseline justify-between gap-3">
@@ -477,7 +477,7 @@ function QuestionsStage({
                       className={`flex items-center gap-1.5 rounded-lg border px-3.5 py-1.5 text-sm transition disabled:opacity-60 ${
                         on
                           ? "border-ink bg-ink font-medium text-paper"
-                          : "border-ink/15 bg-white text-ink-soft hover:border-ink/40 hover:text-ink"
+                          : "border-ink/15 bg-card text-ink-soft hover:border-ink/40 hover:text-ink"
                       }`}
                     >
                       {o.emoji && <span>{o.emoji}</span>}
@@ -492,7 +492,7 @@ function QuestionsStage({
                   className={`flex items-center gap-1.5 rounded-lg border px-3.5 py-1.5 text-sm transition disabled:opacity-60 ${
                     customOpen
                       ? "border-ink bg-ink font-medium text-paper"
-                      : "border-ink/15 bg-white text-ink-soft hover:border-ink/40 hover:text-ink"
+                      : "border-ink/15 bg-card text-ink-soft hover:border-ink/40 hover:text-ink"
                   }`}
                 >
                   <span>✍️</span>

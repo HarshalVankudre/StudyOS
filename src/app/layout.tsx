@@ -1,24 +1,26 @@
 import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
-import { Bricolage_Grotesque, Geist, Geist_Mono } from "next/font/google";
+import { Hanken_Grotesk, JetBrains_Mono, Newsreader } from "next/font/google";
 import "./globals.css";
 import { getI18n } from "@/lib/i18n/server";
 import { I18nProvider } from "@/lib/i18n/client";
 import { clerkLocalization } from "@/lib/i18n/clerk";
+import { ThemeProvider } from "@/components/ThemeProvider";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const hanken = Hanken_Grotesk({
+  variable: "--font-hanken",
   subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const jetbrainsMono = JetBrains_Mono({
+  variable: "--font-jetbrains",
   subsets: ["latin"],
 });
 
-const bricolage = Bricolage_Grotesque({
-  variable: "--font-bricolage",
+const newsreader = Newsreader({
+  variable: "--font-newsreader",
   subsets: ["latin"],
+  style: ["normal", "italic"],
 });
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -40,17 +42,20 @@ export default async function RootLayout({
     <html
       lang={locale}
       dir={dir}
-      className={`${geistSans.variable} ${geistMono.variable} ${bricolage.variable} h-full antialiased`}
+      suppressHydrationWarning
+      className={`${hanken.variable} ${jetbrainsMono.variable} ${newsreader.variable} h-full antialiased`}
     >
       <body className="flex min-h-full flex-col">
-        <I18nProvider locale={locale} dictionary={dict}>
-          <ClerkProvider
-            localization={clerkLocalization(locale)}
-            appearance={{ variables: { colorPrimary: "#1a1712" } }}
-          >
-            {children}
-          </ClerkProvider>
-        </I18nProvider>
+        <ThemeProvider>
+          <I18nProvider locale={locale} dictionary={dict}>
+            <ClerkProvider
+              localization={clerkLocalization(locale)}
+              appearance={{ variables: { colorPrimary: "#1a1a17" } }}
+            >
+              {children}
+            </ClerkProvider>
+          </I18nProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

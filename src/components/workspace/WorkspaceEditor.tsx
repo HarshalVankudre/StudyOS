@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { updateWorkspaceAction } from "@/app/app/actions";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { useI18n } from "@/lib/i18n/client";
 import type { Workspace } from "@/lib/workspace/types";
 import { AccountMenu } from "@/components/account/AccountMenu";
@@ -102,10 +103,17 @@ export function WorkspaceEditor({
 
   return (
     <WorkspaceProvider value={{ workspace, update, status, rev }}>
-      <div className="flex h-screen w-full overflow-hidden bg-white text-ink">
+      <div className="flex h-screen w-full overflow-hidden bg-paper text-ink">
         {/* Sidebar */}
-        <aside className="flex w-60 shrink-0 flex-col border-r border-ink/10 bg-paper">
-          <div className="flex items-center gap-2 px-3 py-4">
+        <aside className="flex w-60 shrink-0 flex-col border-r border-line bg-surface">
+          <Link
+            href="/app"
+            className="flex items-center gap-1.5 px-4 pb-1 pt-4 font-display text-[15px] font-extrabold tracking-tight text-ink"
+          >
+            StudyOS
+            <span className="mb-1.5 h-1 w-1 rounded-full bg-lime" aria-hidden />
+          </Link>
+          <div className="flex items-center gap-2 px-3 pb-2 pt-1">
             <input
               value={workspace.icon ?? ""}
               onChange={(e) =>
@@ -115,7 +123,7 @@ export function WorkspaceEditor({
               }
               aria-label={dict.editor.workspaceIcon}
               maxLength={8}
-              className="w-8 rounded bg-transparent text-center text-xl outline-none hover:bg-ink/5 focus:bg-white focus:ring-1 focus:ring-ink/20"
+              className="h-8 w-8 rounded-md bg-transparent text-center text-xl outline-none hover:bg-hover focus:bg-card focus:ring-1 focus:ring-ink/20"
             />
             <input
               value={workspace.name}
@@ -124,7 +132,7 @@ export function WorkspaceEditor({
                   d.name = e.target.value;
                 })
               }
-              className="w-full truncate rounded px-1 py-0.5 font-display text-sm font-bold text-ink outline-none hover:bg-ink/5 focus:bg-white focus:ring-1 focus:ring-ink/20"
+              className="w-full truncate rounded-md px-1 py-0.5 font-display text-sm font-bold text-ink outline-none hover:bg-hover focus:bg-card focus:ring-1 focus:ring-ink/20"
             />
           </div>
 
@@ -137,8 +145,8 @@ export function WorkspaceEditor({
                     onClick={() => setActivePageId(page.id)}
                     className={`flex flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition ${
                       active
-                        ? "bg-ink/[0.08] font-medium text-ink"
-                        : "text-ink-soft hover:bg-ink/5"
+                        ? "bg-hover font-medium text-ink"
+                        : "text-ink-soft hover:bg-hover"
                     }`}
                   >
                     <span className="w-5 text-center">{page.icon}</span>
@@ -158,7 +166,7 @@ export function WorkspaceEditor({
             })}
             <button
               onClick={addPage}
-              className="mt-1 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-ink-soft transition hover:bg-ink/5 hover:text-ink"
+              className="mt-1 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-ink-soft transition hover:bg-hover hover:text-ink"
             >
               <span className="w-5 text-center">+</span>
               <span>{dict.editor.newPage}</span>
@@ -167,7 +175,7 @@ export function WorkspaceEditor({
 
           <Link
             href="/app"
-            className="border-t border-ink/10 px-4 py-2.5 text-xs text-ink-soft transition hover:bg-ink/5 hover:text-ink"
+            className="border-t border-line px-4 py-2.5 text-xs text-ink-soft transition hover:bg-hover hover:text-ink"
           >
             {dict.editor.allWorkspaces}
           </Link>
@@ -177,28 +185,29 @@ export function WorkspaceEditor({
 
         {/* Main */}
         <main className="flex flex-1 flex-col overflow-hidden">
-          <div className="flex items-center justify-between border-b border-ink/10 px-6 py-2.5">
-            <div className="flex items-center gap-1.5 text-sm text-ink-soft">
+          <div className="flex items-center justify-between border-b border-line px-6 py-2.5">
+            <div className="flex items-center gap-1.5 font-mono text-[11px] text-ink-faint">
               <span>
                 {workspace.icon} {workspace.name}
               </span>
               <span>/</span>
-              <span className="text-ink">
+              <span className="text-ink-soft">
                 {activePage?.icon} {activePage?.title}
               </span>
             </div>
             <div className="flex items-center gap-3">
+              <ThemeToggle />
               <LanguageSwitcher compact />
               <button
                 onClick={() => setAiOpen((v) => !v)}
                 aria-pressed={aiOpen}
-                className={`flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-semibold transition ${
+                className={`flex items-center gap-2 rounded-md border px-3.5 py-1.5 text-xs font-semibold transition ${
                   aiOpen
-                    ? "bg-ink/10 text-ink hover:bg-ink/15"
-                    : "bg-ink text-paper hover:bg-ink/90"
+                    ? "border-line bg-hover text-ink"
+                    : "border-line-strong bg-card text-ink hover:bg-hover"
                 }`}
               >
-                <span className="text-[13px] leading-none">✦</span>
+                <span className="h-1.5 w-1.5 rounded-full bg-lime" aria-hidden />
                 {aiOpen ? dict.editor.closeAgent : dict.editor.askAi}
               </button>
               <SaveIndicator status={status} />

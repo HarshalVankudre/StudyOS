@@ -62,7 +62,7 @@ export function AccountMenu({
 
   const menu = (
     <div
-      className={`absolute z-30 overflow-hidden rounded-xl border border-ink/10 bg-white shadow-[0_18px_50px_-22px_rgba(26,23,18,0.45)] ${
+      className={`absolute z-30 overflow-hidden rounded-xl border border-ink/10 bg-card shadow-[0_18px_50px_-22px_rgba(26,23,18,0.45)] ${
         isHeader
           ? `top-[calc(100%+8px)] w-64 ${dir === "rtl" ? "left-0" : "right-0"}`
           : "bottom-[calc(100%+6px)] left-2 right-2"

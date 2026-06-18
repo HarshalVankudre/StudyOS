@@ -86,7 +86,7 @@ export function LanguageSwitcher({
         <ul
           role="listbox"
           aria-label={dict.language.label}
-          className={`absolute z-50 mt-2 max-h-80 w-48 overflow-y-auto rounded-xl border border-ink/10 bg-white p-1 shadow-[0_24px_60px_-28px_rgba(26,23,18,0.45)] ${
+          className={`absolute z-50 mt-2 max-h-80 w-48 overflow-y-auto rounded-xl border border-ink/10 bg-card p-1 shadow-[0_24px_60px_-28px_rgba(26,23,18,0.45)] ${
             dir === "rtl" ? "left-0" : "right-0"
           }`}
         >

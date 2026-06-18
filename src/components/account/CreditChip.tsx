@@ -45,7 +45,7 @@ export function CreditChip({
         aria-haspopup="menu"
         aria-expanded={open}
         title={dict.credits.label}
-        className="flex items-center gap-1.5 rounded-full border border-ink/15 px-3 py-1 text-xs font-semibold text-ink transition hover:border-ink/40 hover:bg-white"
+        className="flex items-center gap-1.5 rounded-full border border-ink/15 px-3 py-1 text-xs font-semibold text-ink transition hover:border-ink/40 hover:bg-card"
       >
         <span className="text-lime-deep" aria-hidden>
           ●
@@ -56,7 +56,7 @@ export function CreditChip({
       {open && (
         <div
           role="menu"
-          className={`absolute top-[calc(100%+8px)] z-30 w-60 overflow-hidden rounded-xl border border-ink/10 bg-white p-4 shadow-[0_18px_50px_-22px_rgba(26,23,18,0.45)] ${
+          className={`absolute top-[calc(100%+8px)] z-30 w-60 overflow-hidden rounded-xl border border-ink/10 bg-card p-4 shadow-[0_18px_50px_-22px_rgba(26,23,18,0.45)] ${
             dir === "rtl" ? "left-0" : "right-0"
           }`}
         >
