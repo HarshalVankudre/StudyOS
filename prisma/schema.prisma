@@ -6,6 +6,9 @@
 generator client {
   provider = "prisma-client-js"
   output   = "../src/generated/prisma"
+  // "native" keeps local dev (Windows) working; "debian-openssl-3.0.x" is the
+  // query-engine binary for the node:22-slim (Debian bookworm) Cloud Run image.
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
 datasource db {

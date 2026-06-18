@@ -1,0 +1,14 @@
+node_modules
+.next
+.git
+.gitignore
+.env
+.env.*
+*.log
+.vercel
+README.md
+Dockerfile
+.dockerignore
+.gcloudignore
+cloudbuild.yaml
+.claude

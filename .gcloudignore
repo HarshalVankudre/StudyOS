@@ -1,0 +1,11 @@
+# Files NOT uploaded to Cloud Build. The image is built from source inside
+# Cloud Build, so local node_modules/.next are unnecessary; .env* are secret.
+.git
+node_modules
+.next
+.env
+.env.*
+*.log
+.vercel
+.claude
+src/generated

@@ -1,0 +1,65 @@
+# StudyOS — build the container and deploy to Cloud Run.
+# Used both for the first manual deploy (gcloud builds submit) and the
+# GitHub push trigger (auto-redeploy on main).
+substitutions:
+  _REGION: us-east4
+  _SERVICE: studyos
+  _REPO: studyos
+  # NEXT_PUBLIC_* are publishable/public values, passed as build args so they
+  # inline into the client bundle. Provided via --substitutions / trigger config.
+  _NPM_CLERK_PK: ""
+  _NPM_CLERK_SIGNIN: ""
+  _NPM_CLERK_SIGNUP: ""
+  _NPM_CLERK_SIGNIN_FB: ""
+  _NPM_CLERK_SIGNUP_FB: ""
+  _NPM_STRIPE_PK: ""
+
+steps:
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        docker build \
+          --build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY="${_NPM_CLERK_PK}" \
+          --build-arg NEXT_PUBLIC_CLERK_SIGN_IN_URL="${_NPM_CLERK_SIGNIN}" \
+          --build-arg NEXT_PUBLIC_CLERK_SIGN_UP_URL="${_NPM_CLERK_SIGNUP}" \
+          --build-arg NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL="${_NPM_CLERK_SIGNIN_FB}" \
+          --build-arg NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL="${_NPM_CLERK_SIGNUP_FB}" \
+          --build-arg NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY="${_NPM_STRIPE_PK}" \
+          -t "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:latest" \
+          .
+
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    args: ['push', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:latest']
+
+  - id: deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE}
+      - --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:latest
+      - --region=${_REGION}
+      - --allow-unauthenticated
+      - --cpu=4
+      - --memory=8Gi
+      - --min-instances=1
+      - --max-instances=10
+      - --timeout=600
+      - --concurrency=80
+      - --port=8080
+      - --set-secrets=DATABASE_URL=DATABASE_URL:latest,DATABASE_URL_UNPOOLED=DATABASE_URL_UNPOOLED:latest,CLERK_SECRET_KEY=CLERK_SECRET_KEY:latest,OPENROUTER_API_KEY=OPENROUTER_API_KEY:latest,STRIPE_SECRET_KEY=STRIPE_SECRET_KEY:latest,STRIPE_PRICE_PRO=STRIPE_PRICE_PRO:latest,STRIPE_WEBHOOK_SECRET=STRIPE_WEBHOOK_SECRET:latest
+      - --update-env-vars=^@^NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${_NPM_CLERK_PK}@NEXT_PUBLIC_CLERK_SIGN_IN_URL=${_NPM_CLERK_SIGNIN}@NEXT_PUBLIC_CLERK_SIGN_UP_URL=${_NPM_CLERK_SIGNUP}@NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL=${_NPM_CLERK_SIGNIN_FB}@NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL=${_NPM_CLERK_SIGNUP_FB}@NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=${_NPM_STRIPE_PK}
+
+images:
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:latest'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: 'E2_HIGHCPU_8'
+
+timeout: 1800s
