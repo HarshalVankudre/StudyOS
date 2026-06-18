@@ -1,26 +1,151 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* StudyOS brand — "study desk": paper, ink, highlighter */
+  --paper: #f6f5ee;
+  --ink: #1a1712;
+  --ink-soft: #5c574a;
+  --line: #1a171214;
+  --lime: #c9f24c;
+  --lime-deep: #abe22d;
+
+  /* shadcn/ui semantic tokens, themed to the brand */
+  --radius: 0.5rem;
+  --background: #f6f5ee;
+  --foreground: #1a1712;
+  --card: #ffffff;
+  --card-foreground: #1a1712;
+  --popover: #ffffff;
+  --popover-foreground: #1a1712;
+  --primary: #1a1712;
+  --primary-foreground: #f6f5ee;
+  --secondary: #eeede4;
+  --secondary-foreground: #1a1712;
+  --muted: #eeede4;
+  --muted-foreground: #5c574a;
+  --accent: #c9f24c;
+  --accent-foreground: #1a1712;
+  --destructive: #e11d48;
+  --border: #1a171220;
+  --input: #1a171220;
+  --ring: #1a1712;
+}
+
+.dark {
+  --background: #16140f;
+  --foreground: #f6f5ee;
+  --card: #1f1c16;
+  --card-foreground: #f6f5ee;
+  --popover: #1f1c16;
+  --popover-foreground: #f6f5ee;
+  --primary: #f6f5ee;
+  --primary-foreground: #1a1712;
+  --secondary: #2a261e;
+  --secondary-foreground: #f6f5ee;
+  --muted: #2a261e;
+  --muted-foreground: #b8b1a0;
+  --accent: #c9f24c;
+  --accent-foreground: #1a1712;
+  --destructive: #fb7185;
+  --border: #ffffff1f;
+  --input: #ffffff1f;
+  --ring: #d8d2c2;
 }
 
 @theme inline {
+  /* shadcn tokens → Tailwind utilities */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  /* StudyOS brand utilities (the whole app relies on these) */
+  --color-paper: var(--paper);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-line: var(--line);
+  --color-lime: var(--lime);
+  --color-lime-deep: var(--lime-deep);
+
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --font-display: var(--font-bricolage);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
   }
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system,
+    sans-serif;
+}
+
+/* ---------- Motion ---------- */
+
+/* Staggered reveal on load */
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.reveal {
+  opacity: 0;
+  animation: fade-up 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
+}
+
+/* Cross-fade for the AI status line */
+@keyframes ai-fade {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.ai-fade {
+  animation: ai-fade 0.4s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    opacity: 1;
+    animation: none;
+  }
+  .ai-fade {
+    animation: none;
+  }
 }

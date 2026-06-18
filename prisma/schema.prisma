@@ -1,0 +1,37 @@
+// StudyOS database schema.
+// Local SQLite for development; swap `provider`/`url` for Postgres (Neon) at deploy.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// A saved workspace. The full workspace tree is stored as JSON in `data`;
+// `name`/`icon` are denormalized so we can list workspaces without parsing it.
+// `ownerId` defaults to "local" until real auth (Clerk) is added.
+model Workspace {
+  id        String   @id
+  ownerId   String   @default("local")
+  name      String
+  icon      String?
+  data      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ownerId])
+}
+
+// One row per user (Clerk user id) tracking their Stripe subscription.
+model Subscription {
+  userId               String    @id
+  stripeCustomerId     String?
+  stripeSubscriptionId String?
+  status               String    @default("free")
+  currentPeriodEnd     DateTime?
+  updatedAt            DateTime  @updatedAt
+}
