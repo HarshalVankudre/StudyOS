@@ -126,3 +126,15 @@ export function safeParseWorkspace(data: unknown) {
     | { success: true; data: Workspace }
     | { success: false; error: z.ZodError };
 }
+
+// Re-exported piece schemas so the AI agent's patch operations validate their
+// payloads against the exact same shapes the renderer expects.
+export {
+  cellValue as cellValueSchema,
+  databaseProperty as databasePropertySchema,
+  databaseRow as databaseRowSchema,
+  databaseView as databaseViewSchema,
+  database as databaseSchema,
+  block as blockSchema,
+  page as pageSchema,
+};

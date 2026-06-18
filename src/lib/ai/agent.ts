@@ -16,6 +16,7 @@ import {
   type AgentResponse,
 } from "./agent-shared";
 import { extractJson, WORKSPACE_SHAPE, languageDirective } from "./generate";
+import { applyAgentOps, agentOpSchema, type AgentOp } from "./agent-ops";
 import { chatCompletion, type ChatMessage } from "./openrouter";
 import { DEFAULT_LOCALE, type Locale } from "@/lib/i18n/config";
 import { getDictionary } from "@/lib/i18n/dictionaries";
@@ -139,15 +140,34 @@ export async function executeAgentEdit(
           .map((area) => `${area.type}:${area.id}:${area.label}`)
           .join(", ")}`,
         "",
-        "Return the complete updated workspace and a concise reply.",
+        "Return a concise reply and ONLY the operations needed for this change.",
       ].join("\n"),
     },
   ];
 
-  const raw = await chatCompletion(model, messages, 7000);
-  const result = parseEditReply(raw, getDictionary(locale).ai.agent.fallbackReply);
+  // Operations are small, so this call stays cheap and fast no matter how large
+  // the workspace is — the model never re-emits unchanged data.
+  const raw = await chatCompletion(model, messages, 8000);
+  const { reply, ops } = parseEditReply(
+    raw,
+    getDictionary(locale).ai.agent.fallbackReply,
+  );
+
+  // Apply the patch to the saved workspace, then validate the WHOLE result so a
+  // bad operation can never persist a broken workspace.
+  const applied = safeParseWorkspace(applyAgentOps(current, ops));
+  if (!applied.success) {
+    const issue = applied.error.issues[0];
+    const where = issue
+      ? `${issue.path.join(".") || "(root)"} — ${issue.message}`
+      : applied.error.message;
+    throw new Error(`Agent edit produced an invalid workspace: ${where}`);
+  }
+
   return {
-    ...result,
+    reply,
+    changed: true,
+    workspace: applied.data,
     affectedAreas: decision.affectedAreas,
   };
 }
@@ -199,24 +219,27 @@ function inferAllRelevantAreas(workspace: Workspace): AgentArea[] {
   return workspaceAreas(workspace).slice(0, 10);
 }
 
-function parseEditReply(raw: string, fallbackReply: string): AgentResponse {
-  const data = extractJson(raw) as Record<string, unknown>;
-  const reply =
-    typeof data.reply === "string" && data.reply.trim()
-      ? data.reply.trim()
-      : fallbackReply;
-  const parsed = safeParseWorkspace(data.workspace);
+const editReplySchema = z.object({
+  reply: z.string().optional(),
+  ops: z.array(agentOpSchema).min(1),
+});
+
+function parseEditReply(
+  raw: string,
+  fallbackReply: string,
+): { reply: string; ops: AgentOp[] } {
+  const parsed = editReplySchema.safeParse(extractJson(raw));
   if (!parsed.success) {
     // Pin the failure to the exact field so the server log says e.g.
-    // `pages.3.blocks.1 — Invalid discriminator value` instead of a wall of
-    // Zod text. This is what tells truncation apart from a real schema miss.
+    // `ops.0.databaseId — Required` instead of a wall of Zod text.
     const issue = parsed.error.issues[0];
     const where = issue
       ? `${issue.path.join(".") || "(root)"} — ${issue.message}`
       : parsed.error.message;
-    throw new Error(`Agent returned an invalid workspace: ${where}`);
+    throw new Error(`Agent returned invalid edit operations: ${where}`);
   }
-  return { reply, changed: true, workspace: parsed.data };
+  const reply = parsed.data.reply?.trim() || fallbackReply;
+  return { reply, ops: parsed.data.ops };
 }
 
 function requireAgentKey() {
@@ -264,22 +287,41 @@ function buildPlannerSystemPrompt(areas: AgentArea[], locale: Locale): string {
 function buildEditorSystemPrompt(locale: Locale): string {
   return [
     "You are the StudyOS workspace editor. The planning layer has already approved a clear edit.",
+    "Apply the change as the SMALLEST possible list of operations. NEVER resend the whole workspace — only emit what actually changes.",
     "Return exactly one JSON object and nothing else:",
-    '{"reply":"<1–3 concise sentences describing the result>","workspace":<COMPLETE updated workspace>}',
+    '{"reply":"<1–3 concise sentences describing the result>","ops":[ ...operations... ]}',
     "",
-    "GLOBAL CONSISTENCY RULES:",
-    "- You have a complete overview of the workspace. Apply the request everywhere it logically affects, including linked pages, database views, select options, dashboard blocks, calendars, schedules, and related starter rows.",
-    "- Use the approved affected-area list as the minimum scope, but update another area if required to keep references and data consistent.",
-    "- Preserve everything unrelated. Keep existing ids and values unless the request requires changing them.",
-    "- Return the COMPLETE workspace, never a patch or fragment.",
-    "- Invent unique ids for new entities.",
+    "Each operation is one of (always reuse the EXACT ids from the current workspace):",
+    '- {"op":"update_row","databaseId":"<id>","rowId":"<id>","cells":{"<propertyId>":<value>}}   // change only these cells',
+    '- {"op":"add_row","databaseId":"<id>","row":{"id":"<new>","cells":{...}}}',
+    '- {"op":"delete_row","databaseId":"<id>","rowId":"<id>"}',
+    '- {"op":"update_database","databaseId":"<id>","name"?,"icon"?,"description"?}',
+    '- {"op":"add_database","database":<full Database>}',
+    '- {"op":"delete_database","databaseId":"<id>"}',
+    '- {"op":"replace_database","database":<full Database with the SAME id>}   // only for large single-database restructuring',
+    '- {"op":"add_property","databaseId":"<id>","property":<DatabaseProperty>}',
+    '- {"op":"update_property","databaseId":"<id>","property":<DatabaseProperty with the SAME id>}',
+    '- {"op":"delete_property","databaseId":"<id>","propertyId":"<id>"}',
+    '- {"op":"add_view","databaseId":"<id>","view":<DatabaseView>}',
+    '- {"op":"update_view","databaseId":"<id>","view":<DatabaseView with the SAME id>}',
+    '- {"op":"delete_view","databaseId":"<id>","viewId":"<id>"}',
+    '- {"op":"add_page","page":<full Page>}',
+    '- {"op":"update_page","pageId":"<id>","title"?,"icon"?}',
+    '- {"op":"delete_page","pageId":"<id>"}',
+    '- {"op":"set_page_blocks","pageId":"<id>","blocks":[<Block>...]}   // replace a page\'s blocks',
+    '- {"op":"replace_page","page":<full Page with the SAME id>}',
+    '- {"op":"update_workspace","name"?,"icon"?,"homePageId"?}',
+    "",
+    "RULES:",
+    "- Emit ONLY operations needed for the request; never touch unrelated rows, properties, views, pages, or databases.",
+    "- Apply the request everywhere it logically affects (e.g. adding a course may need new rows in several databases, a new select option, and a dashboard block) — but express each as its own minimal operation.",
+    "- Reuse existing ids exactly. Invent new unique ids only for brand-new rows/properties/views/pages/databases.",
     "- cells are keyed by property id. select/status values are option ids; multi_select/relation are arrays of ids; dates are ISO strings; checkboxes are booleans; numbers are numbers.",
-    "- If adding a database, expose it with a database_view block. New pages need an icon and useful blocks.",
-    "- Keep homePageId valid. Never leave broken database/view references.",
-    "- Unknown real-world facts should remain TBD rather than being invented.",
+    "- When adding a database, also surface it with a database_view block on a relevant page (via set_page_blocks or replace_page). Never leave broken database/view references.",
+    "- Unknown real-world facts should remain TBD rather than invented.",
     "- Valid colors: zinc, red, rose, orange, amber, yellow, lime, green, emerald, teal, cyan, sky, blue, indigo, violet, purple, fuchsia, pink.",
     "",
-    "The workspace must match this shape:",
+    "Shapes for any full objects you include (Database/Page/Block/etc.):",
     WORKSPACE_SHAPE,
     languageDirective(locale),
   ].join("\n");
