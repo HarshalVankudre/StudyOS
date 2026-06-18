@@ -333,6 +333,9 @@ export const fr = {
       build: "Créer mon espace de travail",
       answeredNone: "Répondez à quelques-unes, ou lancez directement — c’est vous qui décidez",
       answeredCount: "{n} / {total} répondues",
+      other: "Autre",
+      otherPlaceholder: "Saisissez votre propre préférence…",
+      otherAria: "Autre réponse pour {question}",
     },
   },
 

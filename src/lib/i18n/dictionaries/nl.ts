@@ -334,6 +334,9 @@ export const nl = {
       build: "Bouw mijn werkruimte",
       answeredNone: "Beantwoord er een paar, of bouw gewoon — jij beslist",
       answeredCount: "{n} / {total} beantwoord",
+      other: "Anders",
+      otherPlaceholder: "Typ je eigen voorkeur…",
+      otherAria: "Ander antwoord voor {question}",
     },
   },
 
@@ -616,6 +619,11 @@ export const nl = {
     label: "AI-credits",
     amount: "{count} credits",
     buy: "Credits kopen",
+    metaTitle: "Credits kopen · StudyOS",
+    pageIntro:
+      "Credits drijven elke AI-aanvraag aan — werkruimtes genereren en chatten met de agent. Vul op elk moment aan; credits verlopen nooit.",
+    oneTimeExpire: "Eenmalige aankoop · veilig afrekenen · credits verlopen nooit",
+    wantMore: "Wil je het meest capabele model en inbegrepen credits?",
     spentOn: "Besteed aan AI-generaties en agentbewerkingen.",
     addedBanner: "{added} credits toegevoegd — je hebt er nu {total}.",
     outGenerate:

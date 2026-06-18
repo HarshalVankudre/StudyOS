@@ -346,6 +346,9 @@ export const en = {
       build: "Build my workspace",
       answeredNone: "Answer some, or just build — your call",
       answeredCount: "{n} / {total} answered",
+      other: "Other",
+      otherPlaceholder: "Type your own preference…",
+      otherAria: "Other answer for {question}",
     },
   },
 

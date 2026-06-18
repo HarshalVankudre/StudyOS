@@ -333,6 +333,9 @@ export const ja = {
       build: "ワークスペースを構築",
       answeredNone: "いくつか答えても、そのまま構築してもOKです",
       answeredCount: "{n} / {total} 件回答済み",
+      other: "その他",
+      otherPlaceholder: "あなた自身の希望を入力…",
+      otherAria: "「{question}」へのその他の回答",
     },
   },
 
@@ -615,6 +618,11 @@ export const ja = {
     label: "AIクレジット",
     amount: "{count} クレジット",
     buy: "クレジットを購入",
+    metaTitle: "クレジットを購入 · StudyOS",
+    pageIntro:
+      "クレジットはすべての AI リクエストの原動力です——ワークスペースの生成やエージェントとのチャットに使われます。いつでもチャージでき、クレジットは無期限です。",
+    oneTimeExpire: "一回限りの購入 · 安全な決済 · クレジットは無期限",
+    wantMore: "最も高性能なモデルと付属クレジットが必要ですか？",
     spentOn: "AIの生成とエージェントの編集に使われます。",
     addedBanner: "{added} クレジットを追加しました — 現在 {total} クレジットあります。",
     outGenerate:

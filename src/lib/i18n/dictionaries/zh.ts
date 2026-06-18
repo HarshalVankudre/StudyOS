@@ -334,6 +334,9 @@ export const zh = {
       build: "搭建我的工作空间",
       answeredNone: "回答几个，或直接搭建 —— 由你决定",
       answeredCount: "已回答 {n} / {total}",
+      other: "其他",
+      otherPlaceholder: "输入你自己的偏好…",
+      otherAria: "“{question}”的其他回答",
     },
   },
 
@@ -616,6 +619,11 @@ export const zh = {
     label: "AI 积分",
     amount: "{count} 个积分",
     buy: "购买积分",
+    metaTitle: "购买积分 · StudyOS",
+    pageIntro:
+      "积分为每一次 AI 请求提供动力——生成工作区以及与智能体对话。随时充值；积分永不过期。",
+    oneTimeExpire: "一次性购买 · 安全结账 · 积分永不过期",
+    wantMore: "想要最强大的模型和随附积分吗？",
     spentOn: "用于 AI 生成和智能体编辑。",
     addedBanner: "已添加 {added} 个积分 —— 你现在共有 {total} 个。",
     outGenerate:

@@ -334,6 +334,9 @@ export const de = {
       build: "Meinen Workspace bauen",
       answeredNone: "Beantworte ein paar oder bau einfach los — du entscheidest",
       answeredCount: "{n} / {total} beantwortet",
+      other: "Sonstiges",
+      otherPlaceholder: "Gib deine eigene Vorliebe ein…",
+      otherAria: "Andere Antwort für {question}",
     },
   },
 

@@ -496,7 +496,7 @@ function QuestionsStage({
                   }`}
                 >
                   <span>✍️</span>
-                  Other
+                  {dict.generate.questions.other}
                 </button>
               </div>
               {customOpen && (
@@ -512,8 +512,10 @@ function QuestionsStage({
                     }
                     disabled={building}
                     maxLength={240}
-                    placeholder="Type your own preference…"
-                    aria-label={`Other answer for ${q.question}`}
+                    placeholder={dict.generate.questions.otherPlaceholder}
+                    aria-label={t(dict.generate.questions.otherAria, {
+                      question: q.question,
+                    })}
                     className="min-w-0 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-ink-soft/50"
                   />
                 </div>

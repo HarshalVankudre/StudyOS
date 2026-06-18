@@ -333,6 +333,9 @@ export const es = {
       build: "Construir mi espacio de trabajo",
       answeredNone: "Responde algunas, o simplemente constrúyelo — tú decides",
       answeredCount: "{n} / {total} respondidas",
+      other: "Otro",
+      otherPlaceholder: "Escribe tu propia preferencia…",
+      otherAria: "Otra respuesta para {question}",
     },
   },
 

@@ -334,6 +334,9 @@ export const pt = {
       build: "Criar meu espaço de trabalho",
       answeredNone: "Responda algumas, ou apenas crie — você decide",
       answeredCount: "{n} / {total} respondidas",
+      other: "Outro",
+      otherPlaceholder: "Digite sua própria preferência…",
+      otherAria: "Outra resposta para {question}",
     },
   },
 
@@ -616,6 +619,11 @@ export const pt = {
     label: "Créditos de IA",
     amount: "{count} créditos",
     buy: "Comprar créditos",
+    metaTitle: "Comprar créditos · StudyOS",
+    pageIntro:
+      "Os créditos movem cada solicitação de IA — gerar espaços de trabalho e conversar com o agente. Recarregue quando quiser; os créditos nunca expiram.",
+    oneTimeExpire: "Compra única · checkout seguro · os créditos nunca expiram",
+    wantMore: "Quer o modelo mais avançado e créditos incluídos?",
     spentOn: "Gastos em gerações de IA e edições do agente.",
     addedBanner: "Adicionados {added} créditos — agora você tem {total}.",
     outGenerate:

@@ -334,6 +334,9 @@ export const it = {
       build: "Crea il mio spazio",
       answeredNone: "Rispondi ad alcune, oppure crea direttamente — decidi tu",
       answeredCount: "{n} / {total} con risposta",
+      other: "Altro",
+      otherPlaceholder: "Scrivi la tua preferenza…",
+      otherAria: "Altra risposta per {question}",
     },
   },
 
