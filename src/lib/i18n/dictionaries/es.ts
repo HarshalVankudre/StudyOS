@@ -180,6 +180,7 @@ export const es = {
       ],
       ctaSignedOut: "Empieza gratis",
       ctaSignedIn: "Abre tus espacios de trabajo",
+      bulletCredits: "{count} créditos de IA de inicio",
     },
     pro: {
       badge: "El más popular",
@@ -197,6 +198,7 @@ export const es = {
       manageBilling: "Gestionar facturación",
       upgrade: "Mejorar a Pro",
       ctaSignedOut: "Empieza con Pro",
+      bulletCredits: "{count} créditos de IA incluidos",
     },
     comparison: {
       title: "Compara planes",
@@ -216,6 +218,8 @@ export const es = {
         generations: "Generaciones de espacios de trabajo",
         support: "Soporte",
         earlyAccess: "Acceso anticipado a nuevas funciones",
+        credits: "Créditos de IA incluidos",
+        buyMore: "Compra más créditos cuando quieras",
       },
       values: {
         standard: "Estándar",
@@ -225,6 +229,20 @@ export const es = {
         community: "Comunidad",
         priority: "Prioritario",
       },
+    },
+    credits: {
+      heading: "La IA funciona con créditos",
+      intro:
+        "Cada solicitud de IA gasta créditos según lo que hace — un ajuste rápido cuesta poco, construir un espacio de trabajo completo cuesta más. Pro viene cargado de créditos y puedes recargar cuando quieras.",
+      freeIncludes: "Gratis incluye {count} créditos de inicio",
+      proIncludes: "Pro incluye {count} créditos",
+      neverExpire: "Recarga cuando quieras — los créditos nunca caducan",
+      balance: "Tu saldo: {count} créditos",
+      pack: "Paquete de créditos",
+      unit: "créditos",
+      buy: "Comprar {count} créditos",
+      signUpToBuy: "Regístrate para comprar créditos",
+      oneTime: "Compra única · pago seguro",
     },
     faqTitle: "Preguntas",
     faq: [
@@ -590,6 +608,70 @@ export const es = {
       describeBeforeGenerating:
         "Describe tus estudios antes de generar un espacio de trabajo.",
     },
+  },
+
+  // ---- Credits ----------------------------------------------------------
+  credits: {
+    label: "Créditos de IA",
+    amount: "{count} créditos",
+    buy: "Comprar créditos",
+    metaTitle: "Comprar créditos · StudyOS",
+    pageIntro:
+      "Los créditos impulsan cada solicitud de IA — generar espacios de trabajo y chatear con el agente. Recarga cuando quieras; los créditos nunca caducan.",
+    oneTimeExpire: "Compra única · pago seguro · los créditos nunca caducan",
+    wantMore: "¿Quieres el modelo más potente y créditos incluidos?",
+    spentOn: "Se gastan en generaciones de IA y ediciones del agente.",
+    addedBanner: "Se añadieron {added} créditos — ahora tienes {total}.",
+    outGenerate:
+      "Te has quedado sin créditos de IA. Añade más desde la página de Precios para seguir generando.",
+    outAgent:
+      "Te has quedado sin créditos de IA. Añade más desde la página de Precios para seguir usando el agente.",
+  },
+
+  // ---- Account menu -----------------------------------------------------
+  account: {
+    pro: "Pro",
+    free: "Gratis",
+    fallbackName: "Cuenta",
+    viewProfile: "Ver perfil",
+    manageProfile: "Gestionar perfil",
+    subscriptionPayments: "Suscripción y pagos",
+    buyCredits: "Comprar créditos",
+    settings: "Ajustes",
+    signOut: "Cerrar sesión",
+    manageAccount: "Gestionar cuenta",
+    creditsAndPlan: "{credits} créditos · {plan}",
+  },
+
+  // ---- Account settings page --------------------------------------------
+  settings: {
+    metaTitle: "Ajustes de la cuenta · StudyOS",
+    back: "← Espacios de trabajo",
+    title: "Ajustes de la cuenta",
+    subtitle: "Gestiona tu perfil, tu plan, tus pagos y tus créditos.",
+    profile: "Perfil",
+    yourAccount: "Tu cuenta",
+    subscription: "Suscripción",
+    proDesc:
+      "Tienes Pro — el modelo más potente y soporte prioritario. Gestiona tu suscripción, tus métodos de pago y tus facturas a continuación.",
+    freeDesc:
+      "Estás en el plan Gratis. Mejora a Pro para conseguir el modelo más potente, créditos incluidos y soporte prioritario.",
+    manageSubscription: "Gestionar suscripción y pagos",
+    upgrade: "Mejorar a Pro",
+    comparePlans: "Comparar planes",
+    creditsDesc:
+      "Los créditos impulsan cada solicitud de IA. Recarga cuando quieras — los créditos nunca caducan.",
+    buyPack: "Comprar {count} créditos · ${price}",
+    viewPricing: "Ver precios",
+    signOut: "Cerrar sesión",
+  },
+
+  // ---- Workspace card (delete control) ----------------------------------
+  workspaceCard: {
+    delete: "Eliminar espacio de trabajo",
+    deleteAria: "Eliminar {name}",
+    deleteConfirm:
+      "¿Eliminar “{name}”?\n\nEsto elimina permanentemente el espacio de trabajo y todo lo que contiene. No se puede deshacer.",
   },
 
   // ---- Mock generator scaffolding (no-API-key fallback) ------------------

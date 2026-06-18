@@ -181,6 +181,7 @@ export const nl = {
       ],
       ctaSignedOut: "Begin gratis",
       ctaSignedIn: "Open je werkruimtes",
+      bulletCredits: "{count} AI-startcredits",
     },
     pro: {
       badge: "Meest gekozen",
@@ -198,6 +199,7 @@ export const nl = {
       manageBilling: "Facturatie beheren",
       upgrade: "Upgraden naar Pro",
       ctaSignedOut: "Aan de slag met Pro",
+      bulletCredits: "{count} AI-credits inbegrepen",
     },
     comparison: {
       title: "Vergelijk abonnementen",
@@ -217,6 +219,8 @@ export const nl = {
         generations: "Werkruimtegeneraties",
         support: "Support",
         earlyAccess: "Vroege toegang tot nieuwe functies",
+        credits: "Inbegrepen AI-credits",
+        buyMore: "Koop altijd meer credits",
       },
       values: {
         standard: "Standaard",
@@ -226,6 +230,20 @@ export const nl = {
         community: "Community",
         priority: "Prioriteit",
       },
+    },
+    credits: {
+      heading: "AI draait op credits",
+      intro:
+        "Elke AI-aanvraag kost credits op basis van hoeveel werk hij doet — een snelle aanpassing kost weinig, een hele werkruimte bouwen kost meer. Pro komt boordevol credits, en je kunt altijd bijvullen.",
+      freeIncludes: "Gratis bevat {count} startcredits",
+      proIncludes: "Pro bevat {count} credits",
+      neverExpire: "Vul altijd bij — credits verlopen nooit",
+      balance: "Je saldo: {count} credits",
+      pack: "Creditpakket",
+      unit: "credits",
+      buy: "Koop {count} credits",
+      signUpToBuy: "Meld je aan om credits te kopen",
+      oneTime: "Eenmalige aankoop · veilig afrekenen",
     },
     faqTitle: "Vragen",
     faq: [
@@ -591,6 +609,65 @@ export const nl = {
       describeBeforeGenerating:
         "Beschrijf je studie voordat je een werkruimte genereert.",
     },
+  },
+
+  // ---- Credits ----------------------------------------------------------
+  credits: {
+    label: "AI-credits",
+    amount: "{count} credits",
+    buy: "Credits kopen",
+    spentOn: "Besteed aan AI-generaties en agentbewerkingen.",
+    addedBanner: "{added} credits toegevoegd — je hebt er nu {total}.",
+    outGenerate:
+      "Je AI-credits zijn op. Voeg er meer toe via de Prijzen-pagina om te blijven genereren.",
+    outAgent:
+      "Je AI-credits zijn op. Voeg er meer toe via de Prijzen-pagina om de agent te blijven gebruiken.",
+  },
+
+  // ---- Account menu -----------------------------------------------------
+  account: {
+    pro: "Pro",
+    free: "Gratis",
+    fallbackName: "Account",
+    viewProfile: "Profiel bekijken",
+    manageProfile: "Profiel beheren",
+    subscriptionPayments: "Abonnement & betalingen",
+    buyCredits: "Credits kopen",
+    settings: "Instellingen",
+    signOut: "Uitloggen",
+    manageAccount: "Account beheren",
+    creditsAndPlan: "{credits} credits · {plan}",
+  },
+
+  // ---- Account settings page --------------------------------------------
+  settings: {
+    metaTitle: "Accountinstellingen · StudyOS",
+    back: "← Werkruimtes",
+    title: "Accountinstellingen",
+    subtitle: "Beheer je profiel, abonnement, betalingen en credits.",
+    profile: "Profiel",
+    yourAccount: "Je account",
+    subscription: "Abonnement",
+    proDesc:
+      "Je hebt Pro — het krachtigste model en prioriteitssupport. Beheer hieronder je abonnement, betaalmethoden en facturen.",
+    freeDesc:
+      "Je zit op het Gratis-abonnement. Upgrade naar Pro voor het krachtigste model, inbegrepen credits en prioriteitssupport.",
+    manageSubscription: "Abonnement & betalingen beheren",
+    upgrade: "Upgraden naar Pro",
+    comparePlans: "Abonnementen vergelijken",
+    creditsDesc:
+      "Credits voeden elke AI-aanvraag. Vul altijd bij — credits verlopen nooit.",
+    buyPack: "Koop {count} credits · ${price}",
+    viewPricing: "Prijzen bekijken",
+    signOut: "Uitloggen",
+  },
+
+  // ---- Workspace card (delete control) ----------------------------------
+  workspaceCard: {
+    delete: "Werkruimte verwijderen",
+    deleteAria: "{name} verwijderen",
+    deleteConfirm:
+      "“{name}” verwijderen?\n\nHiermee verwijder je de werkruimte en alles erin definitief. Dit kan niet ongedaan worden gemaakt.",
   },
 
   // ---- Mock generator scaffolding (no-API-key fallback) ------------------

@@ -26,14 +26,14 @@ export async function generateMetadata(): Promise<Metadata> {
 type Cell = boolean | string;
 
 export default async function PricingPage() {
-  const { dict } = await getI18n();
+  const { dict, t, locale } = await getI18n();
   const { userId } = await auth();
   const signedIn = Boolean(userId);
   const pro = signedIn ? await isPro() : false;
   const credits = userId ? await getCreditBalance(userId) : 0;
 
   const FREE_BULLETS = [
-    `${FREE_SIGNUP_CREDITS} starter AI credits`,
+    t(dict.pricing.free.bulletCredits, { count: FREE_SIGNUP_CREDITS }),
     dict.pricing.free.bullets[0],
     dict.pricing.free.bullets[1],
     dict.pricing.free.bullets[2],
@@ -42,7 +42,9 @@ export default async function PricingPage() {
 
   const PRO_BULLETS = [
     dict.pricing.pro.bullets[0],
-    `${PRO_SIGNUP_CREDITS.toLocaleString()} AI credits included`,
+    t(dict.pricing.pro.bulletCredits, {
+      count: PRO_SIGNUP_CREDITS.toLocaleString(locale),
+    }),
     dict.pricing.pro.bullets[2],
     dict.pricing.pro.bullets[3],
   ];
@@ -60,11 +62,15 @@ export default async function PricingPage() {
       pro: dict.pricing.comparison.values.mostCapable,
     },
     {
-      feature: "Included AI credits",
+      feature: dict.pricing.comparison.features.credits,
       free: String(FREE_SIGNUP_CREDITS),
-      pro: PRO_SIGNUP_CREDITS.toLocaleString(),
+      pro: PRO_SIGNUP_CREDITS.toLocaleString(locale),
     },
-    { feature: "Buy more credits anytime", free: true, pro: true },
+    {
+      feature: dict.pricing.comparison.features.buyMore,
+      free: true,
+      pro: true,
+    },
     {
       feature: dict.pricing.comparison.features.support,
       free: dict.pricing.comparison.values.community,
@@ -231,29 +237,32 @@ export default async function PricingPage() {
             <div className="grid gap-8 sm:grid-cols-[1.3fr_1fr] sm:items-center">
               <div>
                 <h2 className="font-display text-2xl font-bold tracking-tight sm:text-3xl">
-                  AI runs on credits
+                  {dict.pricing.credits.heading}
                 </h2>
                 <p className="mt-3 text-ink-soft">
-                  Every AI request spends credits based on how much it does — a
-                  quick tweak costs a little, building a whole workspace costs
-                  more. Pro comes loaded with credits, and you can top up
-                  anytime.
+                  {dict.pricing.credits.intro}
                 </p>
                 <ul className="mt-4 space-y-2 text-sm">
                   <Feature>
-                    Free includes {FREE_SIGNUP_CREDITS} starter credits
+                    {t(dict.pricing.credits.freeIncludes, {
+                      count: FREE_SIGNUP_CREDITS,
+                    })}
                   </Feature>
                   <Feature>
-                    Pro includes {PRO_SIGNUP_CREDITS.toLocaleString()} credits
+                    {t(dict.pricing.credits.proIncludes, {
+                      count: PRO_SIGNUP_CREDITS.toLocaleString(locale),
+                    })}
                   </Feature>
-                  <Feature>Top up anytime — credits never expire</Feature>
+                  <Feature>{dict.pricing.credits.neverExpire}</Feature>
                 </ul>
                 {signedIn && (
                   <p className="mt-5 inline-flex items-center gap-2 rounded-full bg-ink/5 px-3.5 py-1.5 text-sm font-semibold text-ink">
                     <span className="text-lime-deep" aria-hidden>
                       ●
                     </span>
-                    Your balance: {credits.toLocaleString()} credits
+                    {t(dict.pricing.credits.balance, {
+                      count: credits.toLocaleString(locale),
+                    })}
                   </p>
                 )}
               </div>
@@ -261,12 +270,14 @@ export default async function PricingPage() {
               {/* Buy a credit pack */}
               <div className="rounded-xl border border-ink/15 bg-white p-6 text-center shadow-sm">
                 <p className="text-sm font-semibold uppercase tracking-wide text-ink-soft">
-                  Credit pack
+                  {dict.pricing.credits.pack}
                 </p>
                 <div className="mt-2 font-display text-4xl font-extrabold">
-                  {CREDIT_PACK_SIZE.toLocaleString()}
+                  {CREDIT_PACK_SIZE.toLocaleString(locale)}
                 </div>
-                <p className="text-sm text-ink-soft">credits</p>
+                <p className="text-sm text-ink-soft">
+                  {dict.pricing.credits.unit}
+                </p>
                 <div className="mt-3 font-display text-2xl font-bold">
                   ${CREDIT_PACK_PRICE_USD}
                 </div>
@@ -277,7 +288,9 @@ export default async function PricingPage() {
                         type="submit"
                         className="w-full rounded-lg bg-ink px-5 py-3 text-sm font-semibold text-paper transition hover:bg-ink/90"
                       >
-                        Buy {CREDIT_PACK_SIZE.toLocaleString()} credits
+                        {t(dict.pricing.credits.buy, {
+                          count: CREDIT_PACK_SIZE.toLocaleString(locale),
+                        })}
                       </button>
                     </form>
                   ) : (
@@ -285,12 +298,12 @@ export default async function PricingPage() {
                       href="/sign-up"
                       className="block rounded-lg bg-ink px-5 py-3 text-sm font-semibold text-paper transition hover:bg-ink/90"
                     >
-                      Sign up to buy credits
+                      {dict.pricing.credits.signUpToBuy}
                     </Link>
                   )}
                 </div>
                 <p className="mt-3 text-xs text-ink-soft/70">
-                  One-time purchase · secure checkout
+                  {dict.pricing.credits.oneTime}
                 </p>
               </div>
             </div>

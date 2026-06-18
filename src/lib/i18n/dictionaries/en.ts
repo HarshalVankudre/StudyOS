@@ -193,6 +193,7 @@ export const en = {
       ],
       ctaSignedOut: "Get started free",
       ctaSignedIn: "Open your workspaces",
+      bulletCredits: "{count} starter AI credits",
     },
     pro: {
       badge: "Most popular",
@@ -210,6 +211,7 @@ export const en = {
       manageBilling: "Manage billing",
       upgrade: "Upgrade to Pro",
       ctaSignedOut: "Get started with Pro",
+      bulletCredits: "{count} AI credits included",
     },
     comparison: {
       title: "Compare plans",
@@ -229,6 +231,8 @@ export const en = {
         generations: "Workspace generations",
         support: "Support",
         earlyAccess: "Early access to new features",
+        credits: "Included AI credits",
+        buyMore: "Buy more credits anytime",
       },
       values: {
         standard: "Standard",
@@ -238,6 +242,20 @@ export const en = {
         community: "Community",
         priority: "Priority",
       },
+    },
+    credits: {
+      heading: "AI runs on credits",
+      intro:
+        "Every AI request spends credits based on how much it does — a quick tweak costs a little, building a whole workspace costs more. Pro comes loaded with credits, and you can top up anytime.",
+      freeIncludes: "Free includes {count} starter credits",
+      proIncludes: "Pro includes {count} credits",
+      neverExpire: "Top up anytime — credits never expire",
+      balance: "Your balance: {count} credits",
+      pack: "Credit pack",
+      unit: "credits",
+      buy: "Buy {count} credits",
+      signUpToBuy: "Sign up to buy credits",
+      oneTime: "One-time purchase · secure checkout",
     },
     faqTitle: "Questions",
     faq: [
@@ -603,6 +621,70 @@ export const en = {
       describeBeforeGenerating:
         "Describe your studies before generating a workspace.",
     },
+  },
+
+  // ---- Credits ----------------------------------------------------------
+  credits: {
+    label: "AI credits",
+    amount: "{count} credits",
+    buy: "Buy credits",
+    metaTitle: "Buy credits · StudyOS",
+    pageIntro:
+      "Credits power every AI request — generating workspaces and chatting with the agent. Top up anytime; credits never expire.",
+    oneTimeExpire: "One-time purchase · secure checkout · credits never expire",
+    wantMore: "Want the most capable model and included credits?",
+    spentOn: "Spent on AI generations and agent edits.",
+    addedBanner: "Added {added} credits — you now have {total}.",
+    outGenerate:
+      "You’re out of AI credits. Add more from the Pricing page to keep generating.",
+    outAgent:
+      "You’re out of AI credits. Add more from the Pricing page to keep using the agent.",
+  },
+
+  // ---- Account menu -----------------------------------------------------
+  account: {
+    pro: "Pro",
+    free: "Free",
+    fallbackName: "Account",
+    viewProfile: "View profile",
+    manageProfile: "Manage profile",
+    subscriptionPayments: "Subscription & payments",
+    buyCredits: "Buy credits",
+    settings: "Settings",
+    signOut: "Sign out",
+    manageAccount: "Manage account",
+    creditsAndPlan: "{credits} credits · {plan}",
+  },
+
+  // ---- Account settings page --------------------------------------------
+  settings: {
+    metaTitle: "Account settings · StudyOS",
+    back: "← Workspaces",
+    title: "Account settings",
+    subtitle: "Manage your profile, plan, payments, and credits.",
+    profile: "Profile",
+    yourAccount: "Your account",
+    subscription: "Subscription",
+    proDesc:
+      "You’re on Pro — the most capable model and priority support. Manage your subscription, payment methods, and invoices below.",
+    freeDesc:
+      "You’re on the Free plan. Upgrade to Pro for the most capable model, included credits, and priority support.",
+    manageSubscription: "Manage subscription & payments",
+    upgrade: "Upgrade to Pro",
+    comparePlans: "Compare plans",
+    creditsDesc:
+      "Credits power every AI request. Top up anytime — credits never expire.",
+    buyPack: "Buy {count} credits · ${price}",
+    viewPricing: "View pricing",
+    signOut: "Sign out",
+  },
+
+  // ---- Workspace card (delete control) ----------------------------------
+  workspaceCard: {
+    delete: "Delete workspace",
+    deleteAria: "Delete {name}",
+    deleteConfirm:
+      "Delete “{name}”?\n\nThis permanently removes the workspace and everything in it. This can’t be undone.",
   },
 
   // ---- Mock generator scaffolding (no-API-key fallback) ------------------

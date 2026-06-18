@@ -9,6 +9,7 @@ import {
   CREDIT_PACK_SIZE,
   getCreditBalance,
 } from "@/lib/credits";
+import { getI18n } from "@/lib/i18n/server";
 import { ManageAccountButton } from "@/components/account/ManageAccountButton";
 import {
   buyCreditsAction,
@@ -16,23 +17,28 @@ import {
   startCheckoutAction,
 } from "../billing-actions";
 
-export const metadata: Metadata = { title: "Account settings · StudyOS" };
+export async function generateMetadata(): Promise<Metadata> {
+  const { dict } = await getI18n();
+  return { title: dict.settings.metaTitle };
+}
 
 export default async function SettingsPage() {
   const { userId } = await auth();
   if (!userId) redirect("/sign-in");
 
-  const [user, pro, credits] = await Promise.all([
+  const [user, pro, credits, { dict, t, locale }] = await Promise.all([
     currentUser(),
     isPro(),
     getCreditBalance(userId),
+    getI18n(),
   ]);
+  const S = dict.settings;
 
   const email = user?.emailAddresses?.[0]?.emailAddress;
   const name =
     [user?.firstName, user?.lastName].filter(Boolean).join(" ") ||
     email ||
-    "Your account";
+    S.yourAccount;
   const initial = (user?.firstName || name || "?").charAt(0).toUpperCase();
 
   return (
@@ -50,22 +56,20 @@ export default async function SettingsPage() {
             href="/app"
             className="text-sm text-ink-soft transition hover:text-ink"
           >
-            ← Workspaces
+            {S.back}
           </Link>
         </div>
       </header>
 
       <main className="mx-auto max-w-3xl px-6 py-12">
         <h1 className="font-display text-3xl font-bold tracking-tight">
-          Account settings
+          {S.title}
         </h1>
-        <p className="mt-1 text-sm text-ink-soft">
-          Manage your profile, plan, payments, and credits.
-        </p>
+        <p className="mt-1 text-sm text-ink-soft">{S.subtitle}</p>
 
         {/* Profile */}
         <section className="mt-8 rounded-2xl border border-ink/10 bg-white/60 p-6">
-          <h2 className="font-display text-lg font-bold">Profile</h2>
+          <h2 className="font-display text-lg font-bold">{S.profile}</h2>
           <div className="mt-4 flex items-center gap-4">
             <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-ink text-lg font-bold text-paper">
               {initial}
@@ -77,7 +81,7 @@ export default async function SettingsPage() {
               )}
             </div>
             <ManageAccountButton className="shrink-0 rounded-lg border border-ink/15 bg-white px-4 py-2 text-sm font-semibold text-ink transition hover:border-ink/40">
-              Manage account
+              {dict.account.manageAccount}
             </ManageAccountButton>
           </div>
         </section>
@@ -88,20 +92,18 @@ export default async function SettingsPage() {
           className="mt-6 scroll-mt-20 rounded-2xl border border-ink/10 bg-white/60 p-6"
         >
           <div className="flex items-center justify-between">
-            <h2 className="font-display text-lg font-bold">Subscription</h2>
+            <h2 className="font-display text-lg font-bold">{S.subscription}</h2>
             <span
               className={`rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide ${
                 pro ? "bg-ink text-paper" : "bg-ink/10 text-ink"
               }`}
             >
-              {pro ? "Pro" : "Free"}
+              {pro ? dict.account.pro : dict.account.free}
             </span>
           </div>
 
           <p className="mt-3 text-sm text-ink-soft">
-            {pro
-              ? "You're on Pro — the most capable model and priority support. Manage your subscription, payment methods, and invoices below."
-              : "You're on the Free plan. Upgrade to Pro for the most capable model, included credits, and priority support."}
+            {pro ? S.proDesc : S.freeDesc}
           </p>
 
           <div className="mt-5 flex flex-wrap gap-3">
@@ -111,7 +113,7 @@ export default async function SettingsPage() {
                   type="submit"
                   className="rounded-lg bg-ink px-5 py-2.5 text-sm font-semibold text-paper transition hover:bg-ink/90"
                 >
-                  Manage subscription & payments
+                  {S.manageSubscription}
                 </button>
               </form>
             ) : (
@@ -121,14 +123,14 @@ export default async function SettingsPage() {
                     type="submit"
                     className="rounded-lg bg-ink px-5 py-2.5 text-sm font-semibold text-paper transition hover:bg-ink/90"
                   >
-                    Upgrade to Pro
+                    {S.upgrade}
                   </button>
                 </form>
                 <Link
                   href="/pricing"
                   className="rounded-lg border border-ink/15 bg-white px-5 py-2.5 text-sm font-semibold text-ink transition hover:border-ink/40"
                 >
-                  Compare plans
+                  {S.comparePlans}
                 </Link>
               </>
             )}
@@ -138,33 +140,34 @@ export default async function SettingsPage() {
         {/* Credits */}
         <section className="mt-6 rounded-2xl border border-ink/10 bg-white/60 p-6">
           <div className="flex items-center justify-between">
-            <h2 className="font-display text-lg font-bold">AI credits</h2>
+            <h2 className="font-display text-lg font-bold">
+              {dict.credits.label}
+            </h2>
             <span className="inline-flex items-center gap-1.5 rounded-full bg-ink/5 px-3 py-1 text-sm font-semibold text-ink">
               <span className="text-lime-deep" aria-hidden>
                 ●
               </span>
-              {credits.toLocaleString()} credits
+              {t(dict.credits.amount, { count: credits.toLocaleString(locale) })}
             </span>
           </div>
-          <p className="mt-3 text-sm text-ink-soft">
-            Credits power every AI request. Top up anytime — credits never
-            expire.
-          </p>
+          <p className="mt-3 text-sm text-ink-soft">{S.creditsDesc}</p>
           <div className="mt-5 flex flex-wrap gap-3">
             <form action={buyCreditsAction}>
               <button
                 type="submit"
                 className="rounded-lg bg-ink px-5 py-2.5 text-sm font-semibold text-paper transition hover:bg-ink/90"
               >
-                Buy {CREDIT_PACK_SIZE.toLocaleString()} credits · $
-                {CREDIT_PACK_PRICE_USD}
+                {t(S.buyPack, {
+                  count: CREDIT_PACK_SIZE.toLocaleString(locale),
+                  price: CREDIT_PACK_PRICE_USD,
+                })}
               </button>
             </form>
             <Link
               href="/pricing#credits"
               className="rounded-lg border border-ink/15 bg-white px-5 py-2.5 text-sm font-semibold text-ink transition hover:border-ink/40"
             >
-              View pricing
+              {S.viewPricing}
             </Link>
           </div>
         </section>
@@ -173,7 +176,7 @@ export default async function SettingsPage() {
         <div className="mt-8 text-center">
           <SignOutButton redirectUrl="/">
             <button className="text-sm font-medium text-ink-soft transition hover:text-rose-600">
-              Sign out
+              {S.signOut}
             </button>
           </SignOutButton>
         </div>

@@ -180,6 +180,7 @@ export const ja = {
       ],
       ctaSignedOut: "無料で始める",
       ctaSignedIn: "ワークスペースを開く",
+      bulletCredits: "{count} クレジットのスターターAIクレジット",
     },
     pro: {
       badge: "一番人気",
@@ -197,6 +198,7 @@ export const ja = {
       manageBilling: "請求を管理",
       upgrade: "Pro にアップグレード",
       ctaSignedOut: "Pro で始める",
+      bulletCredits: "{count} クレジットのAIクレジット込み",
     },
     comparison: {
       title: "プランを比較",
@@ -216,6 +218,8 @@ export const ja = {
         generations: "ワークスペースの生成",
         support: "サポート",
         earlyAccess: "新機能への先行アクセス",
+        credits: "含まれるAIクレジット",
+        buyMore: "いつでもクレジットを追加購入",
       },
       values: {
         standard: "標準",
@@ -225,6 +229,20 @@ export const ja = {
         community: "コミュニティ",
         priority: "優先",
       },
+    },
+    credits: {
+      heading: "AIはクレジットで動きます",
+      intro:
+        "AIリクエストはその処理量に応じてクレジットを消費します — ちょっとした調整なら少しだけ、ワークスペースをまるごと構築するならもっと多く。Pro にはクレジットがたっぷり含まれ、いつでも追加できます。",
+      freeIncludes: "無料プランには {count} クレジットのスターターが含まれます",
+      proIncludes: "Pro には {count} クレジットが含まれます",
+      neverExpire: "いつでも追加 — クレジットは期限切れになりません",
+      balance: "残高：{count} クレジット",
+      pack: "クレジットパック",
+      unit: "クレジット",
+      buy: "{count} クレジットを購入",
+      signUpToBuy: "サインアップしてクレジットを購入",
+      oneTime: "一回限りの購入 · 安全な決済",
     },
     faqTitle: "よくある質問",
     faq: [
@@ -590,6 +608,65 @@ export const ja = {
       describeBeforeGenerating:
         "ワークスペースを生成する前に、学習内容を説明してください。",
     },
+  },
+
+  // ---- Credits ----------------------------------------------------------
+  credits: {
+    label: "AIクレジット",
+    amount: "{count} クレジット",
+    buy: "クレジットを購入",
+    spentOn: "AIの生成とエージェントの編集に使われます。",
+    addedBanner: "{added} クレジットを追加しました — 現在 {total} クレジットあります。",
+    outGenerate:
+      "AIクレジットが残っていません。生成を続けるには、料金ページからクレジットを追加してください。",
+    outAgent:
+      "AIクレジットが残っていません。エージェントを使い続けるには、料金ページからクレジットを追加してください。",
+  },
+
+  // ---- Account menu -----------------------------------------------------
+  account: {
+    pro: "Pro",
+    free: "無料",
+    fallbackName: "アカウント",
+    viewProfile: "プロフィールを表示",
+    manageProfile: "プロフィールを管理",
+    subscriptionPayments: "サブスクリプションと支払い",
+    buyCredits: "クレジットを購入",
+    settings: "設定",
+    signOut: "サインアウト",
+    manageAccount: "アカウントを管理",
+    creditsAndPlan: "{credits} クレジット · {plan}",
+  },
+
+  // ---- Account settings page --------------------------------------------
+  settings: {
+    metaTitle: "アカウント設定 · StudyOS",
+    back: "← ワークスペース",
+    title: "アカウント設定",
+    subtitle: "プロフィール、プラン、支払い、クレジットを管理します。",
+    profile: "プロフィール",
+    yourAccount: "あなたのアカウント",
+    subscription: "サブスクリプション",
+    proDesc:
+      "Pro をご利用中です — 最も高性能なモデルと優先サポート。サブスクリプション、支払い方法、請求書は以下で管理できます。",
+    freeDesc:
+      "無料プランをご利用中です。Pro にアップグレードすると、最も高性能なモデル、含まれるクレジット、優先サポートが得られます。",
+    manageSubscription: "サブスクリプションと支払いを管理",
+    upgrade: "Pro にアップグレード",
+    comparePlans: "プランを比較",
+    creditsDesc:
+      "クレジットがすべてのAIリクエストを動かします。いつでも追加 — クレジットは期限切れになりません。",
+    buyPack: "{count} クレジットを購入 · ${price}",
+    viewPricing: "料金を見る",
+    signOut: "サインアウト",
+  },
+
+  // ---- Workspace card (delete control) ----------------------------------
+  workspaceCard: {
+    delete: "ワークスペースを削除",
+    deleteAria: "{name} を削除",
+    deleteConfirm:
+      "「{name}」を削除しますか？\n\nワークスペースとその中身がすべて完全に削除されます。この操作は取り消せません。",
   },
 
   // ---- Mock generator scaffolding (no-API-key fallback) ------------------

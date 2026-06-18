@@ -92,8 +92,7 @@ export async function POST(request: Request) {
         if (!(await hasCredits(userId))) {
           send({
             type: "error",
-            message:
-              "You're out of AI credits. Add more from the Pricing page to keep using the agent.",
+            message: T.credits.outAgent,
           });
           finish();
           return;

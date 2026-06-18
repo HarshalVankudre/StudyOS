@@ -181,6 +181,7 @@ export const de = {
       ],
       ctaSignedOut: "Kostenlos loslegen",
       ctaSignedIn: "Deine Workspaces öffnen",
+      bulletCredits: "{count} KI-Credits zum Start",
     },
     pro: {
       badge: "Am beliebtesten",
@@ -198,6 +199,7 @@ export const de = {
       manageBilling: "Abrechnung verwalten",
       upgrade: "Auf Pro upgraden",
       ctaSignedOut: "Mit Pro loslegen",
+      bulletCredits: "{count} KI-Credits inklusive",
     },
     comparison: {
       title: "Tarife vergleichen",
@@ -217,6 +219,8 @@ export const de = {
         generations: "Workspace-Generierungen",
         support: "Support",
         earlyAccess: "Früher Zugang zu neuen Funktionen",
+        credits: "Inkludierte KI-Credits",
+        buyMore: "Jederzeit weitere Credits kaufen",
       },
       values: {
         standard: "Standard",
@@ -226,6 +230,20 @@ export const de = {
         community: "Community",
         priority: "Priorisiert",
       },
+    },
+    credits: {
+      heading: "KI läuft mit Credits",
+      intro:
+        "Jede KI-Anfrage verbraucht Credits, je nachdem, wie viel sie leistet — eine schnelle Anpassung kostet wenig, einen ganzen Workspace zu bauen kostet mehr. Pro kommt randvoll mit Credits, und du kannst jederzeit aufladen.",
+      freeIncludes: "Kostenlos enthält {count} Start-Credits",
+      proIncludes: "Pro enthält {count} Credits",
+      neverExpire: "Jederzeit aufladen — Credits verfallen nie",
+      balance: "Dein Guthaben: {count} Credits",
+      pack: "Credit-Paket",
+      unit: "Credits",
+      buy: "{count} Credits kaufen",
+      signUpToBuy: "Registriere dich, um Credits zu kaufen",
+      oneTime: "Einmaliger Kauf · sichere Bezahlung",
     },
     faqTitle: "Fragen",
     faq: [
@@ -591,6 +609,70 @@ export const de = {
       describeBeforeGenerating:
         "Beschreibe dein Studium, bevor du einen Workspace generierst.",
     },
+  },
+
+  // ---- Credits ----------------------------------------------------------
+  credits: {
+    label: "KI-Credits",
+    amount: "{count} Credits",
+    buy: "Credits kaufen",
+    metaTitle: "Credits kaufen · StudyOS",
+    pageIntro:
+      "Credits treiben jede KI-Anfrage an — Workspaces generieren und mit dem Agenten chatten. Lade jederzeit auf; Credits verfallen nie.",
+    oneTimeExpire: "Einmaliger Kauf · sichere Bezahlung · Credits verfallen nie",
+    wantMore: "Willst du das leistungsfähigste Modell und inkludierte Credits?",
+    spentOn: "Werden für KI-Generierungen und Agent-Bearbeitungen ausgegeben.",
+    addedBanner: "{added} Credits hinzugefügt — du hast jetzt {total}.",
+    outGenerate:
+      "Deine KI-Credits sind aufgebraucht. Lade auf der Preise-Seite mehr nach, um weiter zu generieren.",
+    outAgent:
+      "Deine KI-Credits sind aufgebraucht. Lade auf der Preise-Seite mehr nach, um den Agenten weiter zu nutzen.",
+  },
+
+  // ---- Account menu -----------------------------------------------------
+  account: {
+    pro: "Pro",
+    free: "Kostenlos",
+    fallbackName: "Konto",
+    viewProfile: "Profil ansehen",
+    manageProfile: "Profil verwalten",
+    subscriptionPayments: "Abo & Zahlungen",
+    buyCredits: "Credits kaufen",
+    settings: "Einstellungen",
+    signOut: "Abmelden",
+    manageAccount: "Konto verwalten",
+    creditsAndPlan: "{credits} Credits · {plan}",
+  },
+
+  // ---- Account settings page --------------------------------------------
+  settings: {
+    metaTitle: "Kontoeinstellungen · StudyOS",
+    back: "← Workspaces",
+    title: "Kontoeinstellungen",
+    subtitle: "Verwalte dein Profil, deinen Tarif, deine Zahlungen und deine Credits.",
+    profile: "Profil",
+    yourAccount: "Dein Konto",
+    subscription: "Abo",
+    proDesc:
+      "Du bist auf Pro — das leistungsfähigste Modell und priorisierter Support. Verwalte unten dein Abo, deine Zahlungsmethoden und deine Rechnungen.",
+    freeDesc:
+      "Du bist im Kostenlos-Tarif. Upgrade auf Pro für das leistungsfähigste Modell, inkludierte Credits und priorisierten Support.",
+    manageSubscription: "Abo & Zahlungen verwalten",
+    upgrade: "Auf Pro upgraden",
+    comparePlans: "Tarife vergleichen",
+    creditsDesc:
+      "Credits treiben jede KI-Anfrage an. Lade jederzeit auf — Credits verfallen nie.",
+    buyPack: "{count} Credits kaufen · ${price}",
+    viewPricing: "Preise ansehen",
+    signOut: "Abmelden",
+  },
+
+  // ---- Workspace card (delete control) ----------------------------------
+  workspaceCard: {
+    delete: "Workspace löschen",
+    deleteAria: "{name} löschen",
+    deleteConfirm:
+      "„{name}“ löschen?\n\nDadurch werden der Workspace und alles darin dauerhaft entfernt. Das kann nicht rückgängig gemacht werden.",
   },
 
   // ---- Mock generator scaffolding (no-API-key fallback) ------------------

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useClerk, useUser } from "@clerk/nextjs";
 import { useEffect, useRef, useState } from "react";
 import { getAccountSummaryAction } from "@/app/app/account-actions";
+import { useI18n } from "@/lib/i18n/client";
 
 interface AccountSummary {
   pro: boolean;
@@ -25,6 +26,7 @@ export function AccountMenu({
 }) {
   const { user } = useUser();
   const { openUserProfile, signOut } = useClerk();
+  const { dict, t, locale, dir } = useI18n();
   const [open, setOpen] = useState(false);
   const [summary, setSummary] = useState<AccountSummary | null>(null);
   const ref = useRef<HTMLDivElement>(null);
@@ -53,7 +55,7 @@ export function AccountMenu({
   }, [open]);
 
   const email = user?.primaryEmailAddress?.emailAddress;
-  const name = user?.fullName || email || "Account";
+  const name = user?.fullName || email || dict.account.fallbackName;
   const initial = (user?.firstName || name || "?").charAt(0).toUpperCase();
   const pro = summary?.pro ?? false;
   const isHeader = variant === "header";
@@ -62,7 +64,7 @@ export function AccountMenu({
     <div
       className={`absolute z-30 overflow-hidden rounded-xl border border-ink/10 bg-white shadow-[0_18px_50px_-22px_rgba(26,23,18,0.45)] ${
         isHeader
-          ? "right-0 top-[calc(100%+8px)] w-64"
+          ? `top-[calc(100%+8px)] w-64 ${dir === "rtl" ? "left-0" : "right-0"}`
           : "bottom-[calc(100%+6px)] left-2 right-2"
       }`}
       role="menu"
@@ -76,10 +78,14 @@ export function AccountMenu({
               pro ? "bg-ink text-paper" : "bg-ink/10 text-ink"
             }`}
           >
-            {pro ? "Pro" : "Free"}
+            {pro ? dict.account.pro : dict.account.free}
           </span>
           <span className="text-xs text-ink-soft">
-            {summary ? `${summary.credits.toLocaleString()} credits` : "…"}
+            {summary
+              ? t(dict.credits.amount, {
+                  count: summary.credits.toLocaleString(locale),
+                })
+              : "…"}
           </span>
         </div>
       </div>
@@ -87,7 +93,7 @@ export function AccountMenu({
       <div className="py-1">
         <MenuButton
           icon="👤"
-          label="Manage profile"
+          label={dict.account.manageProfile}
           onClick={() => {
             setOpen(false);
             openUserProfile();
@@ -95,19 +101,19 @@ export function AccountMenu({
         />
         <MenuLink
           icon="💳"
-          label="Subscription & payments"
+          label={dict.account.subscriptionPayments}
           href="/app/settings#billing"
           onNavigate={() => setOpen(false)}
         />
         <MenuLink
           icon="✦"
-          label="Buy credits"
+          label={dict.account.buyCredits}
           href="/app/credits"
           onNavigate={() => setOpen(false)}
         />
         <MenuLink
           icon="⚙"
-          label="Settings"
+          label={dict.account.settings}
           href="/app/settings"
           onNavigate={() => setOpen(false)}
         />
@@ -116,7 +122,7 @@ export function AccountMenu({
       <div className="border-t border-ink/10 py-1">
         <MenuButton
           icon="⎋"
-          label="Sign out"
+          label={dict.account.signOut}
           danger
           onClick={() => signOut({ redirectUrl: "/" })}
         />
@@ -164,8 +170,11 @@ export function AccountMenu({
           </span>
           <span className="block truncate text-xs text-ink-soft">
             {summary
-              ? `${summary.credits.toLocaleString()} credits · ${pro ? "Pro" : "Free"}`
-              : email || "View profile"}
+              ? t(dict.account.creditsAndPlan, {
+                  credits: summary.credits.toLocaleString(locale),
+                  plan: pro ? dict.account.pro : dict.account.free,
+                })
+              : email || dict.account.viewProfile}
           </span>
         </span>
         <span className="text-ink-soft/60" aria-hidden>

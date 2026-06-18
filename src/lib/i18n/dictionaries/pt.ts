@@ -181,6 +181,7 @@ export const pt = {
       ],
       ctaSignedOut: "Comece grátis",
       ctaSignedIn: "Abrir seus espaços de trabalho",
+      bulletCredits: "{count} créditos de IA iniciais",
     },
     pro: {
       badge: "Mais popular",
@@ -198,6 +199,7 @@ export const pt = {
       manageBilling: "Gerenciar cobrança",
       upgrade: "Fazer upgrade para o Pro",
       ctaSignedOut: "Começar com o Pro",
+      bulletCredits: "{count} créditos de IA inclusos",
     },
     comparison: {
       title: "Comparar planos",
@@ -217,6 +219,8 @@ export const pt = {
         generations: "Gerações de espaços de trabalho",
         support: "Suporte",
         earlyAccess: "Acesso antecipado a novos recursos",
+        credits: "Créditos de IA inclusos",
+        buyMore: "Compre mais créditos quando quiser",
       },
       values: {
         standard: "Padrão",
@@ -226,6 +230,20 @@ export const pt = {
         community: "Comunidade",
         priority: "Prioritário",
       },
+    },
+    credits: {
+      heading: "A IA funciona com créditos",
+      intro:
+        "Cada solicitação de IA gasta créditos conforme o quanto ela faz — um ajuste rápido custa pouco, criar um espaço de trabalho inteiro custa mais. O Pro vem carregado de créditos, e você pode recarregar quando quiser.",
+      freeIncludes: "O Grátis inclui {count} créditos iniciais",
+      proIncludes: "O Pro inclui {count} créditos",
+      neverExpire: "Recarregue quando quiser — os créditos nunca expiram",
+      balance: "Seu saldo: {count} créditos",
+      pack: "Pacote de créditos",
+      unit: "créditos",
+      buy: "Comprar {count} créditos",
+      signUpToBuy: "Cadastre-se para comprar créditos",
+      oneTime: "Compra única · checkout seguro",
     },
     faqTitle: "Perguntas",
     faq: [
@@ -591,6 +609,65 @@ export const pt = {
       describeBeforeGenerating:
         "Descreva seus estudos antes de gerar um espaço de trabalho.",
     },
+  },
+
+  // ---- Credits ----------------------------------------------------------
+  credits: {
+    label: "Créditos de IA",
+    amount: "{count} créditos",
+    buy: "Comprar créditos",
+    spentOn: "Gastos em gerações de IA e edições do agente.",
+    addedBanner: "Adicionados {added} créditos — agora você tem {total}.",
+    outGenerate:
+      "Seus créditos de IA acabaram. Adicione mais na página de Preços para continuar gerando.",
+    outAgent:
+      "Seus créditos de IA acabaram. Adicione mais na página de Preços para continuar usando o agente.",
+  },
+
+  // ---- Account menu -----------------------------------------------------
+  account: {
+    pro: "Pro",
+    free: "Grátis",
+    fallbackName: "Conta",
+    viewProfile: "Ver perfil",
+    manageProfile: "Gerenciar perfil",
+    subscriptionPayments: "Assinatura e pagamentos",
+    buyCredits: "Comprar créditos",
+    settings: "Configurações",
+    signOut: "Sair",
+    manageAccount: "Gerenciar conta",
+    creditsAndPlan: "{credits} créditos · {plan}",
+  },
+
+  // ---- Account settings page --------------------------------------------
+  settings: {
+    metaTitle: "Configurações da conta · StudyOS",
+    back: "← Espaços de trabalho",
+    title: "Configurações da conta",
+    subtitle: "Gerencie seu perfil, plano, pagamentos e créditos.",
+    profile: "Perfil",
+    yourAccount: "Sua conta",
+    subscription: "Assinatura",
+    proDesc:
+      "Você está no Pro — o modelo mais avançado e suporte prioritário. Gerencie sua assinatura, formas de pagamento e faturas abaixo.",
+    freeDesc:
+      "Você está no plano Grátis. Faça upgrade para o Pro e tenha o modelo mais avançado, créditos inclusos e suporte prioritário.",
+    manageSubscription: "Gerenciar assinatura e pagamentos",
+    upgrade: "Fazer upgrade para o Pro",
+    comparePlans: "Comparar planos",
+    creditsDesc:
+      "Os créditos alimentam cada solicitação de IA. Recarregue quando quiser — os créditos nunca expiram.",
+    buyPack: "Comprar {count} créditos · ${price}",
+    viewPricing: "Ver preços",
+    signOut: "Sair",
+  },
+
+  // ---- Workspace card (delete control) ----------------------------------
+  workspaceCard: {
+    delete: "Excluir espaço de trabalho",
+    deleteAria: "Excluir {name}",
+    deleteConfirm:
+      "Excluir “{name}”?\n\nIsso remove permanentemente o espaço de trabalho e tudo o que há nele. Isso não pode ser desfeito.",
   },
 
   // ---- Mock generator scaffolding (no-API-key fallback) ------------------

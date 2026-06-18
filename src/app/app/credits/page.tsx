@@ -7,15 +7,24 @@ import {
   CREDIT_PACK_SIZE,
   getCreditBalance,
 } from "@/lib/credits";
+import { getI18n } from "@/lib/i18n/server";
 import { buyCreditsAction } from "../billing-actions";
 
-export const metadata: Metadata = { title: "Buy credits · StudyOS" };
+export async function generateMetadata(): Promise<Metadata> {
+  const { dict } = await getI18n();
+  return { title: dict.credits.metaTitle };
+}
 
 export default async function BuyCreditsPage() {
   const { userId } = await auth();
   if (!userId) redirect("/sign-in");
 
-  const credits = await getCreditBalance(userId);
+  const [credits, { dict, t, locale }] = await Promise.all([
+    getCreditBalance(userId),
+    getI18n(),
+  ]);
+  const C = dict.credits;
+  const P = dict.pricing.credits;
 
   return (
     <div className="min-h-screen bg-paper text-ink antialiased">
@@ -32,7 +41,7 @@ export default async function BuyCreditsPage() {
             href="/app"
             className="text-sm text-ink-soft transition hover:text-ink"
           >
-            ← Workspaces
+            {dict.settings.back}
           </Link>
         </div>
       </header>
@@ -40,29 +49,26 @@ export default async function BuyCreditsPage() {
       <main className="mx-auto max-w-2xl px-6 py-16">
         <div className="text-center">
           <h1 className="font-display text-4xl font-extrabold tracking-tight">
-            Buy credits
+            {C.buy}
           </h1>
-          <p className="mx-auto mt-3 max-w-md text-ink-soft">
-            Credits power every AI request — generating workspaces and chatting
-            with the agent. Top up anytime; credits never expire.
-          </p>
+          <p className="mx-auto mt-3 max-w-md text-ink-soft">{C.pageIntro}</p>
           <p className="mt-5 inline-flex items-center gap-2 rounded-full bg-ink/5 px-4 py-1.5 text-sm font-semibold text-ink">
             <span className="text-lime-deep" aria-hidden>
               ●
             </span>
-            Your balance: {credits.toLocaleString()} credits
+            {t(P.balance, { count: credits.toLocaleString(locale) })}
           </p>
         </div>
 
         {/* Credit pack */}
         <div className="mx-auto mt-10 max-w-sm rounded-2xl border-2 border-ink bg-white p-8 text-center shadow-[0_24px_60px_-30px_rgba(26,23,18,0.45)]">
           <p className="text-sm font-semibold uppercase tracking-wide text-ink-soft">
-            Credit pack
+            {P.pack}
           </p>
           <div className="mt-3 font-display text-6xl font-extrabold">
-            {CREDIT_PACK_SIZE.toLocaleString()}
+            {CREDIT_PACK_SIZE.toLocaleString(locale)}
           </div>
-          <p className="text-sm text-ink-soft">credits</p>
+          <p className="text-sm text-ink-soft">{P.unit}</p>
           <div className="mt-4 font-display text-3xl font-bold">
             ${CREDIT_PACK_PRICE_USD}
           </div>
@@ -71,18 +77,16 @@ export default async function BuyCreditsPage() {
               type="submit"
               className="w-full rounded-lg bg-ink px-5 py-3.5 text-sm font-semibold text-paper transition hover:bg-ink/90"
             >
-              Buy {CREDIT_PACK_SIZE.toLocaleString()} credits
+              {t(P.buy, { count: CREDIT_PACK_SIZE.toLocaleString(locale) })}
             </button>
           </form>
-          <p className="mt-3 text-xs text-ink-soft/70">
-            One-time purchase · secure checkout · credits never expire
-          </p>
+          <p className="mt-3 text-xs text-ink-soft/70">{C.oneTimeExpire}</p>
         </div>
 
         <p className="mt-8 text-center text-sm text-ink-soft">
-          Want the most capable model and included credits?{" "}
+          {C.wantMore}{" "}
           <Link href="/pricing" className="font-semibold text-ink underline">
-            Compare plans
+            {dict.settings.comparePlans}
           </Link>
         </p>
       </main>

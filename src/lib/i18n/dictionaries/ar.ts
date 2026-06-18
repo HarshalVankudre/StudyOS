@@ -181,6 +181,7 @@ export const ar = {
       ],
       ctaSignedOut: "ابدأ مجانًا",
       ctaSignedIn: "افتح مساحات عملك",
+      bulletCredits: "{count} رصيد ذكاء اصطناعي للبدء",
     },
     pro: {
       badge: "الأكثر رواجًا",
@@ -198,6 +199,7 @@ export const ar = {
       manageBilling: "إدارة الفوترة",
       upgrade: "الترقية إلى Pro",
       ctaSignedOut: "ابدأ مع Pro",
+      bulletCredits: "{count} رصيد ذكاء اصطناعي مُضمَّن",
     },
     comparison: {
       title: "قارن الخطط",
@@ -217,6 +219,8 @@ export const ar = {
         generations: "إنشاءات مساحات العمل",
         support: "الدعم",
         earlyAccess: "وصول مبكر إلى المزايا الجديدة",
+        credits: "أرصدة الذكاء الاصطناعي المُضمَّنة",
+        buyMore: "اشترِ مزيدًا من الأرصدة في أي وقت",
       },
       values: {
         standard: "قياسي",
@@ -226,6 +230,20 @@ export const ar = {
         community: "المجتمع",
         priority: "أولوية",
       },
+    },
+    credits: {
+      heading: "يعمل الذكاء الاصطناعي بالأرصدة",
+      intro:
+        "يستهلك كل طلب ذكاء اصطناعي أرصدة بحسب حجم عمله — فالتعديل السريع يكلّف القليل، وبناء مساحة عمل كاملة يكلّف أكثر. تأتي Pro محمّلة بالأرصدة، ويمكنك إعادة الشحن في أي وقت.",
+      freeIncludes: "تشمل الخطة المجانية {count} رصيدًا للبدء",
+      proIncludes: "تشمل Pro {count} رصيدًا",
+      neverExpire: "أعِد الشحن في أي وقت — الأرصدة لا تنتهي صلاحيتها",
+      balance: "رصيدك: {count} رصيدًا",
+      pack: "حزمة أرصدة",
+      unit: "أرصدة",
+      buy: "اشترِ {count} رصيدًا",
+      signUpToBuy: "سجّل لشراء الأرصدة",
+      oneTime: "شراء لمرة واحدة · دفع آمن",
     },
     faqTitle: "أسئلة",
     faq: [
@@ -591,6 +609,65 @@ export const ar = {
       describeBeforeGenerating:
         "صِف دراستك قبل إنشاء مساحة عمل.",
     },
+  },
+
+  // ---- Credits ----------------------------------------------------------
+  credits: {
+    label: "أرصدة الذكاء الاصطناعي",
+    amount: "{count} رصيدًا",
+    buy: "شراء أرصدة",
+    spentOn: "تُنفَق على إنشاءات الذكاء الاصطناعي وتعديلات الوكيل.",
+    addedBanner: "أُضيف {added} رصيدًا — لديك الآن {total}.",
+    outGenerate:
+      "نفدت أرصدة الذكاء الاصطناعي لديك. أضِف المزيد من صفحة الأسعار لمواصلة الإنشاء.",
+    outAgent:
+      "نفدت أرصدة الذكاء الاصطناعي لديك. أضِف المزيد من صفحة الأسعار لمواصلة استخدام الوكيل.",
+  },
+
+  // ---- Account menu -----------------------------------------------------
+  account: {
+    pro: "Pro",
+    free: "مجاني",
+    fallbackName: "الحساب",
+    viewProfile: "عرض الملف الشخصي",
+    manageProfile: "إدارة الملف الشخصي",
+    subscriptionPayments: "الاشتراك والمدفوعات",
+    buyCredits: "شراء أرصدة",
+    settings: "الإعدادات",
+    signOut: "تسجيل الخروج",
+    manageAccount: "إدارة الحساب",
+    creditsAndPlan: "{credits} رصيدًا · {plan}",
+  },
+
+  // ---- Account settings page --------------------------------------------
+  settings: {
+    metaTitle: "إعدادات الحساب · StudyOS",
+    back: "← مساحات العمل",
+    title: "إعدادات الحساب",
+    subtitle: "أدِر ملفك الشخصي وخطتك ومدفوعاتك وأرصدتك.",
+    profile: "الملف الشخصي",
+    yourAccount: "حسابك",
+    subscription: "الاشتراك",
+    proDesc:
+      "أنت على خطة Pro — النموذج الأقوى ودعم ذو أولوية. أدِر اشتراكك وطرق الدفع والفواتير أدناه.",
+    freeDesc:
+      "أنت على الخطة المجانية. ارقَ إلى Pro للحصول على النموذج الأقوى والأرصدة المُضمَّنة ودعم ذي أولوية.",
+    manageSubscription: "إدارة الاشتراك والمدفوعات",
+    upgrade: "الترقية إلى Pro",
+    comparePlans: "قارن الخطط",
+    creditsDesc:
+      "تشغّل الأرصدة كل طلب ذكاء اصطناعي. أعِد الشحن في أي وقت — الأرصدة لا تنتهي صلاحيتها.",
+    buyPack: "اشترِ {count} رصيدًا · ${price}",
+    viewPricing: "عرض الأسعار",
+    signOut: "تسجيل الخروج",
+  },
+
+  // ---- Workspace card (delete control) ----------------------------------
+  workspaceCard: {
+    delete: "حذف مساحة العمل",
+    deleteAria: "حذف {name}",
+    deleteConfirm:
+      "هل تريد حذف «{name}»؟\n\nيؤدي هذا إلى إزالة مساحة العمل وكل ما فيها نهائيًا. لا يمكن التراجع عن ذلك.",
   },
 
   // ---- Mock generator scaffolding (no-API-key fallback) ------------------

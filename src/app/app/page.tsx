@@ -95,8 +95,10 @@ export default async function AppHome({
         {sp.credits && (
           <div className="mb-6 flex items-center gap-2 rounded-lg border border-ink/15 bg-lime/10 px-4 py-3 text-sm font-medium text-ink">
             <span className="h-1.5 w-1.5 rounded-full bg-lime" aria-hidden />
-            Added {Number(sp.credits).toLocaleString(locale)} credits — you now have{" "}
-            {credits.toLocaleString(locale)}.
+            {t(dict.credits.addedBanner, {
+              added: Number(sp.credits).toLocaleString(locale),
+              total: credits.toLocaleString(locale),
+            })}
           </div>
         )}
 

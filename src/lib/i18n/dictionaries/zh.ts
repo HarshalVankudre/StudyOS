@@ -181,6 +181,7 @@ export const zh = {
       ],
       ctaSignedOut: "免费开始使用",
       ctaSignedIn: "打开你的工作空间",
+      bulletCredits: "{count} 个入门 AI 积分",
     },
     pro: {
       badge: "最受欢迎",
@@ -198,6 +199,7 @@ export const zh = {
       manageBilling: "管理账单",
       upgrade: "升级到 Pro",
       ctaSignedOut: "开始使用 Pro",
+      bulletCredits: "包含 {count} 个 AI 积分",
     },
     comparison: {
       title: "方案对比",
@@ -217,6 +219,8 @@ export const zh = {
         generations: "工作空间生成次数",
         support: "支持",
         earlyAccess: "新功能抢先体验",
+        credits: "包含的 AI 积分",
+        buyMore: "随时购买更多积分",
       },
       values: {
         standard: "标准",
@@ -226,6 +230,20 @@ export const zh = {
         community: "社区",
         priority: "优先",
       },
+    },
+    credits: {
+      heading: "AI 由积分驱动",
+      intro:
+        "每次 AI 请求都会按其工作量消耗积分 —— 一个小调整花费一点点，搭建整个工作空间则花费更多。Pro 自带充足积分，你也可以随时充值。",
+      freeIncludes: "免费版包含 {count} 个入门积分",
+      proIncludes: "Pro 版包含 {count} 个积分",
+      neverExpire: "随时充值 —— 积分永不过期",
+      balance: "你的余额：{count} 个积分",
+      pack: "积分包",
+      unit: "积分",
+      buy: "购买 {count} 个积分",
+      signUpToBuy: "注册以购买积分",
+      oneTime: "一次性购买 · 安全结账",
     },
     faqTitle: "常见问题",
     faq: [
@@ -591,6 +609,65 @@ export const zh = {
       describeBeforeGenerating:
         "请先描述你的学习情况，再生成工作空间。",
     },
+  },
+
+  // ---- Credits ----------------------------------------------------------
+  credits: {
+    label: "AI 积分",
+    amount: "{count} 个积分",
+    buy: "购买积分",
+    spentOn: "用于 AI 生成和智能体编辑。",
+    addedBanner: "已添加 {added} 个积分 —— 你现在共有 {total} 个。",
+    outGenerate:
+      "你的 AI 积分已用完。请在定价页面添加更多积分以继续生成。",
+    outAgent:
+      "你的 AI 积分已用完。请在定价页面添加更多积分以继续使用智能体。",
+  },
+
+  // ---- Account menu -----------------------------------------------------
+  account: {
+    pro: "Pro",
+    free: "免费",
+    fallbackName: "账户",
+    viewProfile: "查看个人资料",
+    manageProfile: "管理个人资料",
+    subscriptionPayments: "订阅与付款",
+    buyCredits: "购买积分",
+    settings: "设置",
+    signOut: "退出登录",
+    manageAccount: "管理账户",
+    creditsAndPlan: "{credits} 个积分 · {plan}",
+  },
+
+  // ---- Account settings page --------------------------------------------
+  settings: {
+    metaTitle: "账户设置 · StudyOS",
+    back: "← 工作空间",
+    title: "账户设置",
+    subtitle: "管理你的个人资料、方案、付款和积分。",
+    profile: "个人资料",
+    yourAccount: "你的账户",
+    subscription: "订阅",
+    proDesc:
+      "你已是 Pro 用户 —— 享受最强大的模型和优先支持。可在下方管理你的订阅、付款方式和发票。",
+    freeDesc:
+      "你正在使用免费方案。升级到 Pro 即可获得最强大的模型、包含的积分和优先支持。",
+    manageSubscription: "管理订阅与付款",
+    upgrade: "升级到 Pro",
+    comparePlans: "对比方案",
+    creditsDesc:
+      "积分为每次 AI 请求提供动力。随时充值 —— 积分永不过期。",
+    buyPack: "购买 {count} 个积分 · ${price}",
+    viewPricing: "查看定价",
+    signOut: "退出登录",
+  },
+
+  // ---- Workspace card (delete control) ----------------------------------
+  workspaceCard: {
+    delete: "删除工作空间",
+    deleteAria: "删除 {name}",
+    deleteConfirm:
+      "删除“{name}”？\n\n这将永久移除该工作空间及其中的一切。此操作无法撤销。",
   },
 
   // ---- Mock generator scaffolding (no-API-key fallback) ------------------
