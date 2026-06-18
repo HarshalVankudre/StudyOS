@@ -10,7 +10,12 @@ import {
 } from "@/lib/ai/generation-progress";
 import { formatPreferences } from "@/lib/ai/onboarding";
 import { modelForPlan } from "@/lib/ai/plans";
+import { addUsage, withUsageMeter } from "@/lib/ai/usage-meter";
 import { getUserPlan } from "@/lib/billing";
+import { chargeCredits, hasCredits, usageToCredits } from "@/lib/credits";
+import { getLocale } from "@/lib/i18n/server";
+import { getDictionary, type Dictionary } from "@/lib/i18n/dictionaries";
+import { fmt } from "@/lib/i18n/interpolate";
 import { saveNewWorkspace } from "@/lib/workspace/store";
 import type { Workspace } from "@/lib/workspace/types";
 
@@ -33,15 +38,18 @@ const requestSchema = z.object({
 const encoder = new TextEncoder();
 
 export async function POST(request: Request) {
+  const locale = await getLocale();
+  const T = getDictionary(locale);
+
   const { userId } = await auth();
   if (!userId) {
-    return Response.json({ error: "Not authenticated" }, { status: 401 });
+    return Response.json({ error: T.ai.errors.notAuthenticated }, { status: 401 });
   }
 
   const parsed = requestSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return Response.json(
-      { error: "Describe your studies before generating a workspace." },
+      { error: T.ai.errors.describeBeforeGenerating },
       { status: 400 },
     );
   }
@@ -77,20 +85,33 @@ export async function POST(request: Request) {
         const preferences = formatPreferences(answers);
         const model = modelForPlan(await getUserPlan());
 
+        if (!(await hasCredits(userId))) {
+          send({
+            type: "error",
+            message:
+              "You're out of AI credits. Add more from the Pricing page to keep generating.",
+          });
+          finish();
+          return;
+        }
+
         send({
           type: "phase",
           phase: "analyzing",
-          message: "Reading your courses, goals, and preferences",
+          message: T.ai.generate.phase.analyzing,
           progress: 8,
         });
 
         send({
           type: "phase",
           phase: "planning",
-          message: "Choosing the right workspace components",
+          message: T.ai.generate.phase.planning,
           progress: 18,
         });
-        const plan = await planWorkspace(prompt, model, preferences);
+        const planned = await withUsageMeter(() =>
+          planWorkspace(prompt, model, preferences, locale),
+        );
+        const plan = planned.result;
         send({ type: "plan", plan });
         for (const component of plan.components) {
           send({
@@ -104,7 +125,7 @@ export async function POST(request: Request) {
         send({
           type: "phase",
           phase: "generating",
-          message: "Generating your complete workspace in one pass",
+          message: T.ai.generate.phase.generating,
           progress: 30,
         });
 
@@ -133,19 +154,24 @@ export async function POST(request: Request) {
           tick += 1;
         }, 550);
 
-        const workspace = await generateWorkspace(
-          prompt,
-          model,
-          preferences,
-          plan,
+        const generated = await withUsageMeter(() =>
+          generateWorkspace(prompt, model, preferences, plan, locale),
         );
+        const workspace = generated.result;
         if (ticker) clearInterval(ticker);
         ticker = null;
+
+        // Spend credits for the GLM 5.2 tokens this generation actually used.
+        await chargeCredits(
+          userId,
+          usageToCredits(addUsage(planned.usage, generated.usage)),
+          "generate",
+        );
 
         send({
           type: "phase",
           phase: "validating",
-          message: "Checking links, views, fields, and starter data",
+          message: T.ai.generate.phase.validating,
           progress: 88,
         });
         for (const component of plan.components) {
@@ -154,7 +180,7 @@ export async function POST(request: Request) {
             componentId: component.id,
             status: "complete",
             progress: 100,
-            detail: componentDetail(workspace, component.kind),
+            detail: componentDetail(workspace, component.kind, T),
           });
           await sleep(55);
         }
@@ -162,7 +188,7 @@ export async function POST(request: Request) {
         send({
           type: "phase",
           phase: "saving",
-          message: "Saving your editable workspace",
+          message: T.ai.generate.phase.saving,
           progress: 97,
         });
         const workspaceId = await saveNewWorkspace(workspace);
@@ -172,8 +198,7 @@ export async function POST(request: Request) {
         console.error("[StudyOS] streamed generation failed:", error);
         send({
           type: "error",
-          message:
-            "The workspace could not be generated. Please try again with a shorter description.",
+          message: T.ai.generate.error,
         });
         finish();
       }
@@ -192,21 +217,25 @@ export async function POST(request: Request) {
 function componentDetail(
   workspace: Workspace,
   kind: GenerationComponentKind,
+  T: Dictionary,
 ): string {
   const database = (term: string) =>
     workspace.databases.find((item) =>
       `${item.name} ${item.description ?? ""}`.toLowerCase().includes(term),
     );
+  const d = T.ai.generate.detail;
 
   switch (kind) {
     case "dashboard":
-      return `${workspace.pages.length} editable pages connected`;
+      return fmt(d.dashboard, { count: workspace.pages.length });
     case "courses":
-      return `${database("course")?.rows.length ?? 0} courses added`;
+      return fmt(d.courses, { count: database("course")?.rows.length ?? 0 });
     case "assignments":
     case "projects":
     case "exams":
-      return `${database("assignment")?.rows.length ?? 0} tracked items added`;
+      return fmt(d.trackedItems, {
+        count: database("assignment")?.rows.length ?? 0,
+      });
     case "planner": {
       const datedRows = workspace.databases.reduce(
         (total, item) =>
@@ -220,18 +249,18 @@ function componentDetail(
           ).length,
         0,
       );
-      return `${datedRows} items scheduled`;
+      return fmt(d.scheduled, { count: datedRows });
     }
     case "readings":
-      return `${database("reading")?.rows.length ?? 0} reading items added`;
+      return fmt(d.readings, { count: database("reading")?.rows.length ?? 0 });
     case "habits":
-      return `${database("habit")?.rows.length ?? 0} routines added`;
+      return fmt(d.habits, { count: database("habit")?.rows.length ?? 0 });
     case "grades":
-      return `${database("grade")?.rows.length ?? 0} grade rows added`;
+      return fmt(d.grades, { count: database("grade")?.rows.length ?? 0 });
     case "notes":
-      return "Editable note structure created";
+      return d.notes;
     default:
-      return "Component created and connected";
+      return d.generic;
   }
 }
 

@@ -1,5 +1,6 @@
 import type Stripe from "stripe";
 import { setSubscription } from "@/lib/billing";
+import { CREDIT_PACK_SIZE, grantCredits, PRO_SIGNUP_CREDITS } from "@/lib/credits";
 import { stripe } from "@/lib/stripe";
 
 // Stripe → us. Keeps subscription status in sync (renewals, cancellations).
@@ -24,13 +25,18 @@ export async function POST(req: Request) {
   if (event.type === "checkout.session.completed") {
     const s = event.data.object as Stripe.Checkout.Session;
     const userId = s.client_reference_id ?? s.metadata?.userId;
-    if (userId) {
+    if (userId && s.mode === "subscription") {
       await setSubscription(userId, {
         status: "active",
         stripeCustomerId: typeof s.customer === "string" ? s.customer : null,
         stripeSubscriptionId:
           typeof s.subscription === "string" ? s.subscription : null,
       });
+      const key = typeof s.subscription === "string" ? s.subscription : s.id;
+      await grantCredits(userId, PRO_SIGNUP_CREDITS, "pro_signup", `pro_grant:${key}`);
+    } else if (userId && s.mode === "payment" && s.metadata?.kind === "credits") {
+      const amount = Number(s.metadata.credits) || CREDIT_PACK_SIZE;
+      await grantCredits(userId, amount, "credit_purchase", `credit_purchase:${s.id}`);
     }
   } else if (
     event.type === "customer.subscription.updated" ||

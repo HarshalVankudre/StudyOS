@@ -1,22 +1,42 @@
 import type { Metadata } from "next";
-import { UserButton } from "@clerk/nextjs";
+import { auth } from "@clerk/nextjs/server";
 import Link from "next/link";
-import { grantProFromSession, isPro } from "@/lib/billing";
+import { isPro, reconcileCheckoutSession } from "@/lib/billing";
+import { getCreditBalance } from "@/lib/credits";
 import { listWorkspaces } from "@/lib/workspace/store";
+import { getI18n } from "@/lib/i18n/server";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { AccountMenu } from "@/components/account/AccountMenu";
+import { CreditChip } from "@/components/account/CreditChip";
 import { loadDemoAction } from "./actions";
 import { manageBillingAction } from "./billing-actions";
+import { DeleteWorkspaceButton } from "./DeleteWorkspaceButton";
 
-export const metadata: Metadata = { title: "Your workspaces · StudyOS" };
+export async function generateMetadata(): Promise<Metadata> {
+  const { dict } = await getI18n();
+  return { title: dict.meta.appTitle };
+}
 
 export default async function AppHome({
   searchParams,
 }: {
-  searchParams: Promise<{ session_id?: string; upgraded?: string }>;
+  searchParams: Promise<{
+    session_id?: string;
+    upgraded?: string;
+    credits?: string;
+  }>;
 }) {
   const sp = await searchParams;
-  if (sp.session_id) await grantProFromSession(sp.session_id);
+  if (sp.session_id) await reconcileCheckoutSession(sp.session_id);
 
-  const [pro, workspaces] = await Promise.all([isPro(), listWorkspaces()]);
+  const { userId } = await auth();
+  const [pro, workspaces, credits, { dict, t, locale }] = await Promise.all([
+    isPro(),
+    listWorkspaces(),
+    userId ? getCreditBalance(userId) : Promise.resolve(0),
+    getI18n(),
+  ]);
+  const A = dict.app;
 
   return (
     <main className="min-h-screen bg-paper text-ink antialiased">
@@ -30,17 +50,19 @@ export default async function AppHome({
             <span className="mb-2 h-1.5 w-1.5 rounded-full bg-lime" aria-hidden />
           </Link>
           <div className="flex items-center gap-3">
+            <LanguageSwitcher compact />
+            <CreditChip credits={credits} locale={locale} />
             {pro ? (
               <>
                 <span className="rounded-full bg-ink px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-paper">
-                  Pro
+                  {A.pro}
                 </span>
                 <form action={manageBillingAction}>
                   <button
                     type="submit"
                     className="text-sm text-ink-soft transition hover:text-ink"
                   >
-                    Manage
+                    {A.manage}
                   </button>
                 </form>
               </>
@@ -49,16 +71,16 @@ export default async function AppHome({
                 href="/pricing"
                 className="rounded-lg border border-ink/15 px-3.5 py-1.5 text-sm font-semibold text-ink transition hover:border-ink/40 hover:bg-white"
               >
-                Upgrade to Pro
+                {A.upgrade}
               </Link>
             )}
             <Link
               href="/generate"
               className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-paper shadow-sm transition hover:bg-ink/90"
             >
-              Generate
+              {A.generate}
             </Link>
-            <UserButton />
+            <AccountMenu variant="header" />
           </div>
         </div>
       </header>
@@ -67,43 +89,46 @@ export default async function AppHome({
         {sp.upgraded === "1" && pro && (
           <div className="mb-6 flex items-center gap-2 rounded-lg border border-ink/15 bg-lime/10 px-4 py-3 text-sm font-medium text-ink">
             <span className="h-1.5 w-1.5 rounded-full bg-lime" aria-hidden />
-            You&rsquo;re on Pro — your workspaces now use the smarter model.
+            {A.upgradedBanner}
+          </div>
+        )}
+        {sp.credits && (
+          <div className="mb-6 flex items-center gap-2 rounded-lg border border-ink/15 bg-lime/10 px-4 py-3 text-sm font-medium text-ink">
+            <span className="h-1.5 w-1.5 rounded-full bg-lime" aria-hidden />
+            Added {Number(sp.credits).toLocaleString(locale)} credits — you now have{" "}
+            {credits.toLocaleString(locale)}.
           </div>
         )}
 
         <div className="mb-8 flex items-end justify-between">
           <div>
             <h1 className="font-display text-3xl font-bold tracking-tight">
-              Your workspaces
+              {A.title}
             </h1>
-            <p className="mt-1 text-sm text-ink-soft">
-              Everything StudyOS has built for you.
-            </p>
+            <p className="mt-1 text-sm text-ink-soft">{A.subtitle}</p>
           </div>
           <span className="hidden text-sm text-ink-soft sm:block">
-            {workspaces.length} total
+            {t(A.total, { count: workspaces.length })}
           </span>
         </div>
 
         {workspaces.length === 0 ? (
           <div className="rounded-xl border border-dashed border-ink/20 bg-white/50 p-12 text-center">
-            <p className="text-lg font-medium text-ink">No workspaces yet</p>
-            <p className="mt-1 text-sm text-ink-soft">
-              Generate one, or load the demo to look around.
-            </p>
+            <p className="text-lg font-medium text-ink">{A.emptyTitle}</p>
+            <p className="mt-1 text-sm text-ink-soft">{A.emptySubtitle}</p>
             <div className="mt-6 flex flex-wrap justify-center gap-3">
               <Link
                 href="/generate"
                 className="rounded-lg bg-ink px-5 py-2.5 text-sm font-semibold text-paper shadow-sm transition hover:bg-ink/90"
               >
-                Generate a workspace
+                {A.emptyGenerate}
               </Link>
               <form action={loadDemoAction}>
                 <button
                   type="submit"
                   className="rounded-lg border border-ink/15 bg-white px-5 py-2.5 text-sm font-medium text-ink transition hover:border-ink/40"
                 >
-                  Load demo
+                  {A.loadDemo}
                 </button>
               </form>
             </div>
@@ -111,17 +136,23 @@ export default async function AppHome({
         ) : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {workspaces.map((w) => (
-              <Link
-                key={w.id}
-                href={`/app/${w.id}`}
-                className="group rounded-xl border border-ink/10 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-ink/25 hover:shadow-[0_16px_40px_-24px_rgba(26,23,18,0.4)]"
-              >
-                <div className="mb-3 text-3xl">{w.icon ?? "📄"}</div>
-                <div className="font-display font-bold text-ink">{w.name}</div>
-                <div className="mt-1 text-xs text-ink-soft">
-                  updated {new Date(w.updatedAt).toLocaleDateString()}
-                </div>
-              </Link>
+              <div key={w.id} className="group relative">
+                <Link
+                  href={`/app/${w.id}`}
+                  className="block rounded-xl border border-ink/10 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-ink/25 hover:shadow-[0_16px_40px_-24px_rgba(26,23,18,0.4)]"
+                >
+                  <div className="mb-3 text-3xl">{w.icon ?? A.fallbackIcon}</div>
+                  <div className="pr-8 font-display font-bold text-ink">
+                    {w.name}
+                  </div>
+                  <div className="mt-1 text-xs text-ink-soft">
+                    {t(A.updatedAt, {
+                      date: new Date(w.updatedAt).toLocaleDateString(locale),
+                    })}
+                  </div>
+                </Link>
+                <DeleteWorkspaceButton id={w.id} name={w.name} />
+              </div>
             ))}
           </div>
         )}

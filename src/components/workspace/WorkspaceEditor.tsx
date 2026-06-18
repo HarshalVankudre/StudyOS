@@ -3,7 +3,10 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { updateWorkspaceAction } from "@/app/app/actions";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { useI18n } from "@/lib/i18n/client";
 import type { Workspace } from "@/lib/workspace/types";
+import { AccountMenu } from "@/components/account/AccountMenu";
 import { AgentChat } from "./AgentChat";
 import { PageView } from "./PageView";
 import { WorkspaceProvider, type SaveStatus } from "./WorkspaceContext";
@@ -15,6 +18,7 @@ export function WorkspaceEditor({
   id: string;
   initialWorkspace: Workspace;
 }) {
+  const { dict } = useI18n();
   const [workspace, setWorkspace] = useState(initialWorkspace);
   const [activePageId, setActivePageId] = useState(
     initialWorkspace.homePageId ?? initialWorkspace.pages[0]?.id,
@@ -73,10 +77,10 @@ export function WorkspaceEditor({
     update((d) => {
       d.pages.push({
         id,
-        title: "Untitled",
+        title: dict.editor.untitled,
         icon: "📄",
         blocks: [
-          { id: crypto.randomUUID(), type: "heading", level: 1, text: "Untitled" },
+          { id: crypto.randomUUID(), type: "heading", level: 1, text: dict.editor.untitled },
         ],
       });
     });
@@ -109,7 +113,7 @@ export function WorkspaceEditor({
                   d.icon = e.target.value;
                 })
               }
-              aria-label="Workspace icon"
+              aria-label={dict.editor.workspaceIcon}
               maxLength={8}
               className="w-8 rounded bg-transparent text-center text-xl outline-none hover:bg-ink/5 focus:bg-white focus:ring-1 focus:ring-ink/20"
             />
@@ -143,7 +147,7 @@ export function WorkspaceEditor({
                   {workspace.pages.length > 1 && (
                     <button
                       onClick={() => deletePage(page.id)}
-                      title="Delete page"
+                      title={dict.editor.deletePage}
                       className="px-1.5 text-ink-soft/40 opacity-0 transition hover:text-rose-500 group-hover:opacity-100"
                     >
                       ✕
@@ -157,16 +161,18 @@ export function WorkspaceEditor({
               className="mt-1 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-ink-soft transition hover:bg-ink/5 hover:text-ink"
             >
               <span className="w-5 text-center">+</span>
-              <span>New page</span>
+              <span>{dict.editor.newPage}</span>
             </button>
           </nav>
 
           <Link
             href="/app"
-            className="border-t border-ink/10 px-4 py-3 text-xs text-ink-soft transition hover:bg-ink/5 hover:text-ink"
+            className="border-t border-ink/10 px-4 py-2.5 text-xs text-ink-soft transition hover:bg-ink/5 hover:text-ink"
           >
-            ← All workspaces
+            {dict.editor.allWorkspaces}
           </Link>
+
+          <AccountMenu />
         </aside>
 
         {/* Main */}
@@ -182,6 +188,7 @@ export function WorkspaceEditor({
               </span>
             </div>
             <div className="flex items-center gap-3">
+              <LanguageSwitcher compact />
               <button
                 onClick={() => setAiOpen((v) => !v)}
                 aria-pressed={aiOpen}
@@ -192,7 +199,7 @@ export function WorkspaceEditor({
                 }`}
               >
                 <span className="text-[13px] leading-none">✦</span>
-                {aiOpen ? "Close agent" : "Ask AI"}
+                {aiOpen ? dict.editor.closeAgent : dict.editor.askAi}
               </button>
               <SaveIndicator status={status} />
             </div>
@@ -216,8 +223,13 @@ export function WorkspaceEditor({
 }
 
 function SaveIndicator({ status }: { status: SaveStatus }) {
+  const { dict } = useI18n();
   const label =
-    status === "saving" ? "Saving…" : status === "error" ? "Save failed" : "Saved";
+    status === "saving"
+      ? dict.editor.saving
+      : status === "error"
+        ? dict.editor.saveFailed
+        : dict.editor.saved;
   return (
     <span
       className={`flex items-center gap-1.5 text-xs ${status === "error" ? "text-rose-500" : "text-ink-soft"}`}

@@ -20,28 +20,48 @@ import type {
 import { safeParseWorkspace } from "@/lib/workspace/schema";
 import { sampleWorkspace } from "@/lib/workspace/sample";
 import { modelForPlan } from "./plans";
+import { recordUsage } from "./usage-meter";
 import { defaultQuestions, type GenQuestion } from "./onboarding";
 import {
   GENERATION_COMPONENT_KINDS,
   type GenerationComponent,
   type WorkspaceGenerationPlan,
 } from "./generation-progress";
+import { DEFAULT_LOCALE, englishName, type Locale } from "@/lib/i18n/config";
+import { getDictionary } from "@/lib/i18n/dictionaries";
 
 /** Default model when a caller doesn't pass one (free tier). */
 const DEFAULT_MODEL = modelForPlan("free");
+
+/**
+ * Appended to every system prompt so the model writes user-facing content in the
+ * active language. Returns "" for English. Structural tokens (JSON keys, ids,
+ * and the `type`/`kind`/`color` enum values) must stay unchanged.
+ */
+export function languageDirective(locale: Locale): string {
+  if (locale === DEFAULT_LOCALE) return "";
+  const language = englishName(locale);
+  return [
+    "",
+    "LANGUAGE:",
+    `- Write ALL user-facing text in ${language}: workspace name, page titles, database names and descriptions, property names, select/status option labels, row text content, headings, callouts, replies, questions, and choice labels.`,
+    "- Do NOT translate or change JSON keys, ids, or the literal enum values for `type`, `kind`, and `color`. Keep all dates in ISO format (YYYY-MM-DD).",
+  ].join("\n");
+}
 
 export async function generateWorkspace(
   prompt: string,
   model: string = DEFAULT_MODEL,
   preferences = "",
   plan?: WorkspaceGenerationPlan,
+  locale: Locale = DEFAULT_LOCALE,
 ): Promise<Workspace> {
   // Use the real model when an API key is configured; otherwise the local mock.
   // If the real call fails for any reason (bad key, rate limit, malformed
   // output), fall back to the mock so the user always gets a usable workspace.
   if (process.env.OPENROUTER_API_KEY) {
     try {
-      return await openRouterGenerate(prompt, model, preferences, plan);
+      return await openRouterGenerate(prompt, model, preferences, plan, locale);
     } catch (err) {
       console.error("[StudyOS] OpenRouter generation failed; using mock:", err);
       return mockGenerate(prompt, plan, preferences);
@@ -76,6 +96,7 @@ export async function planWorkspace(
   prompt: string,
   model: string = DEFAULT_MODEL,
   preferences = "",
+  locale: Locale = DEFAULT_LOCALE,
 ): Promise<WorkspaceGenerationPlan> {
   if (!process.env.OPENROUTER_API_KEY) {
     return mockWorkspacePlan(prompt, preferences);
@@ -84,7 +105,7 @@ export async function planWorkspace(
   try {
     const raw = await callOpenRouter(
       model,
-      buildWorkspacePlanSystemPrompt(),
+      buildWorkspacePlanSystemPrompt(locale),
       [
         `Student description:\n"""${prompt}"""`,
         preferences,
@@ -102,7 +123,7 @@ export async function planWorkspace(
   }
 }
 
-function buildWorkspacePlanSystemPrompt(): string {
+function buildWorkspacePlanSystemPrompt(locale: Locale): string {
   return [
     "You are the StudyOS workspace architect.",
     "Choose the smallest useful set of components for this specific student. Do not force every student into the same template.",
@@ -112,11 +133,14 @@ function buildWorkspacePlanSystemPrompt(): string {
     "- Always include dashboard and courses.",
     "- Include assignments and a planner when the student has scheduled coursework or deadlines.",
     "- Add exams, readings, notes, habits, grades, projects, or resources only when their description or answers make them useful.",
+    "- Personalize every component to the student's actual subject — labels, icons and descriptions should fit their field (e.g. 'Lab Notebook' 🧪 for chemistry, 'Case Briefs' ⚖️ for law, 'Problem Sets' ✏️ for math), never generic placeholders.",
+    "- Map their answers directly to components: whatever they say they want to track or struggle with should each surface as a relevant page or tracker.",
     "- Use 4–8 components total. Keep labels short and student-friendly.",
     "- Every component id must be a unique lowercase kebab-case string.",
     `- kind must be one of: ${GENERATION_COMPONENT_KINDS.join(", ")}.`,
     "- Output only JSON with this exact shape:",
     '{"workspaceName":"Biology Study HQ","summary":"A focused semester system for labs, exams, and readings.","components":[{"id":"dashboard","kind":"dashboard","label":"Dashboard","icon":"🏠","description":"The semester at a glance."}]}',
+    languageDirective(locale),
   ].join("\n");
 }
 
@@ -312,17 +336,19 @@ const genQuestionsSchema = z.object({
 export async function planQuestions(
   prompt: string,
   model: string = DEFAULT_MODEL,
+  locale: Locale = DEFAULT_LOCALE,
 ): Promise<GenQuestion[]> {
-  if (!process.env.OPENROUTER_API_KEY) return defaultQuestions();
+  const fallback = () => defaultQuestions(getDictionary(locale).onboarding);
+  if (!process.env.OPENROUTER_API_KEY) return fallback();
   try {
     const raw = await callOpenRouter(
       model,
-      buildQuestionsSystemPrompt(),
+      buildQuestionsSystemPrompt(locale),
       `Student description:\n\n"""${prompt}"""\n\nReturn ONLY the JSON object of questions.`,
     );
     const parsed = genQuestionsSchema.safeParse(extractJson(raw));
     if (!parsed.success || parsed.data.questions.length === 0) {
-      return defaultQuestions();
+      return fallback();
     }
     // Keep it digestible: at most 4 questions, 6 options each.
     return parsed.data.questions.slice(0, 4).map((q) => ({
@@ -331,14 +357,16 @@ export async function planQuestions(
     }));
   } catch (err) {
     console.error("[StudyOS] question planning failed; using defaults:", err);
-    return defaultQuestions();
+    return fallback();
   }
 }
 
-function buildQuestionsSystemPrompt(): string {
+function buildQuestionsSystemPrompt(locale: Locale): string {
   return [
     "You are StudyOS's onboarding assistant. Given a student's one-line description, write 3–4 short multiple-choice questions whose answers will help design their ideal study workspace.",
     "Ask about things you genuinely can't infer from the description — e.g. study level, course load, what they want to track, planning style, or exam timeline. Don't ask what they already told you.",
+    "Tailor every question to THIS student. Reference their actual field, courses, or year where it reads naturally (a pre-med student gets lab-vs-lecture questions; a law student gets case/reading questions) — questions must never feel generic or randomly chosen.",
+    "Only ask a question if its answer would CHANGE what gets built (e.g. group projects → a Projects board; weekly readings → a Reading List). Skip anything that wouldn't affect the workspace.",
     "",
     "RULES:",
     "- 3 to 4 questions. Each question has 2–5 options.",
@@ -347,6 +375,7 @@ function buildQuestionsSystemPrompt(): string {
     "- Invent short unique string ids for each question and option.",
     "- Output ONLY a JSON object, no prose and no markdown fences, of exactly this shape:",
     '{"questions":[{"id":"level","question":"What\'s your study level?","type":"single","options":[{"id":"ug","label":"Undergrad","emoji":"🎓"}]}]}',
+    languageDirective(locale),
   ].join("\n");
 }
 
@@ -376,9 +405,16 @@ async function callOpenRouter(
     },
     body: JSON.stringify({
       model,
-      // Keep this below the configured OpenRouter key's funded ceiling. A
-      // complete StudyOS workspace fits comfortably within this budget.
-      max_tokens: 7000,
+      // Output budget. GLM returns its reasoning in a separate field, so this
+      // is purely the visible answer (a full StudyOS workspace fits here).
+      max_tokens: 10000,
+      // Think hard before answering. This is the single biggest lever on
+      // quality — it's what turns generic, templated output into genuinely
+      // tailored questions, component choices, and content for THIS student.
+      reasoning: { effort: "high" },
+      // Lower temperature = focused and deliberate rather than scattershot
+      // (directly reduces "random"-feeling questions and filler content).
+      temperature: 0.5,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userContent },
@@ -392,6 +428,7 @@ async function callOpenRouter(
   }
 
   const data = await res.json();
+  recordUsage(data?.usage);
   const content: unknown = data?.choices?.[0]?.message?.content;
   if (typeof content !== "string") {
     throw new Error("OpenRouter returned no text content");
@@ -404,6 +441,7 @@ async function openRouterGenerate(
   model: string,
   preferences = "",
   plan?: WorkspaceGenerationPlan,
+  locale: Locale = DEFAULT_LOCALE,
 ): Promise<Workspace> {
   const prefBlock = preferences ? `${preferences}\n\n` : "";
   const planBlock = plan
@@ -416,7 +454,7 @@ async function openRouterGenerate(
     : "";
   const raw = await callOpenRouter(
     model,
-    buildSystemPrompt(),
+    buildSystemPrompt(locale),
     `Design a study workspace for this student:\n\n"""${prompt}"""\n\n${prefBlock}${planBlock}Honor the preferences and component plan above. Return ONLY the JSON workspace object — no prose, no markdown fences.`,
   );
 
@@ -427,7 +465,7 @@ async function openRouterGenerate(
   return parsed.data;
 }
 
-function buildSystemPrompt(): string {
+function buildSystemPrompt(locale: Locale): string {
   return [
     "You are StudyOS, an expert at designing beautiful, practical Notion-style study workspaces for students.",
     "Given a short description of a student, you output one complete workspace as a single JSON object.",
@@ -453,6 +491,7 @@ function buildSystemPrompt(): string {
     "Here is a complete, high-quality example for a CS student. Match this structure and quality, but adapt all content to the new student:",
     "",
     JSON.stringify(sampleWorkspace),
+    languageDirective(locale),
   ].join("\n");
 }
 
@@ -501,6 +540,7 @@ export async function editWorkspace(
   current: Workspace,
   instruction: string,
   model: string = DEFAULT_MODEL,
+  locale: Locale = DEFAULT_LOCALE,
 ): Promise<Workspace> {
   if (!process.env.OPENROUTER_API_KEY) {
     throw new Error(
@@ -510,7 +550,7 @@ export async function editWorkspace(
 
   const raw = await callOpenRouter(
     model,
-    buildEditSystemPrompt(),
+    buildEditSystemPrompt(locale),
     `Current workspace JSON:\n\n${JSON.stringify(current)}\n\nApply this change: "${instruction}"\n\nReturn the COMPLETE updated workspace as JSON only — no prose, no fences.`,
   );
 
@@ -521,7 +561,7 @@ export async function editWorkspace(
   return parsed.data;
 }
 
-function buildEditSystemPrompt(): string {
+function buildEditSystemPrompt(locale: Locale): string {
   return [
     "You edit an existing StudyOS study workspace. Given the current workspace as JSON and an instruction, you return the COMPLETE updated workspace as a single JSON object.",
     "",
@@ -538,6 +578,7 @@ function buildEditSystemPrompt(): string {
     "- If you add a database, also add a `database_view` block on a relevant page so it's visible. If you add a page, give it an emoji icon and useful blocks.",
     "- Valid `color` values: zinc, red, rose, orange, amber, yellow, lime, green, emerald, teal, cyan, sky, blue, indigo, violet, purple, fuchsia, pink.",
     "- Keep `homePageId` pointing to an existing page.",
+    languageDirective(locale),
   ].join("\n");
 }
 

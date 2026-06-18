@@ -9,6 +9,9 @@ export const nl = {
       "Beschrijf je vakken en deadlines, en StudyOS bouwt direct je dashboards, planners en opdrachttrackers. De AI-aangedreven studiewerkruimte voor studenten.",
     appTitle: "Je werkruimtes · StudyOS",
     generateTitle: "Genereer je werkruimte · StudyOS",
+    pricingTitle: "Prijzen · StudyOS",
+    pricingDescription:
+      "Vergelijk StudyOS Gratis en Pro. Begin gratis en upgrade wanneer je het krachtigste model, onbeperkte generaties en prioriteitssupport wilt.",
     workspaceTitle: "{name} · StudyOS",
     brandFallback: "StudyOS",
   },
@@ -17,6 +20,14 @@ export const nl = {
   language: {
     label: "Taal",
     choose: "Kies een taal",
+  },
+
+  // ---- Shared bits used on more than one surface ------------------------
+  common: {
+    openApp: "App openen",
+    signIn: "Inloggen",
+    getStarted: "Aan de slag",
+    cancel: "Annuleren",
   },
 
   // ---- Landing page ------------------------------------------------------
@@ -34,16 +45,16 @@ export const nl = {
       titleLine1: "Je hele semester,",
       titleLine2: "georganiseerd.",
       subtitle:
-        "Beschrijf je vakken in één zin en StudyOS zet de dashboards, planners en trackers klaar die je nodig hebt — al ingevuld. Geen sjablonen, geen lege pagina’s.",
+        "Beschrijf je vakken in één zin en StudyOS zet de dashboards, planners en trackers op die je nodig hebt — al ingevuld. Geen sjablonen, geen lege pagina’s.",
       ctaGenerate: "Genereer mijn werkruimte",
       ctaDemo: "Bekijk een demo",
-      finePrint: "Gratis te beginnen · Geen creditcard · Klaar in seconden",
+      finePrint: "Gratis om te beginnen · Geen creditcard · Klaar in seconden",
     },
     builtFor: {
-      label: "Gebouwd voor",
+      label: "Gemaakt voor",
       items: [
         "Informatica",
-        "Pre-med",
+        "Geneeskunde-voorbereiding",
         "Rechten",
         "MBA",
         "Middelbare school",
@@ -51,15 +62,15 @@ export const nl = {
       ],
     },
     how: {
-      title: "Van één zin naar een complete werkruimte.",
+      title: "Van één zin naar een volledige werkruimte.",
       subtitle: "Drie stappen, ongeveer tien seconden.",
       steps: [
         {
           title: "Beschrijf je vakken",
-          body: "Eén zin — “Ik ben pre-med en volg Anatomie, Biochemie en Fysiologie.”",
+          body: "Eén zin — “Ik bereid me voor op geneeskunde en volg Anatomie, Biochemie en Fysiologie.”",
         },
         {
-          title: "Krijg een complete werkruimte",
+          title: "Krijg een volledige werkruimte",
           body: "Vakken, een opdrachtenbord, een planner en een leeslijst — al opgezet en ingevuld.",
         },
         {
@@ -74,13 +85,13 @@ export const nl = {
       items: {
         generate: {
           k: "Genereren",
-          title: "Werkruimtes, voor jou gemaakt",
+          title: "Werkruimtes, op maat voor jou",
           body: "Eén prompt wordt een complete werkruimte, afgestemd op precies jouw vakken.",
         },
         databases: {
           k: "Databases",
           title: "Echte, gestructureerde data",
-          body: "Opdrachten, cijfers en literatuur als tabellen met eigen velden — geen losse notities.",
+          body: "Opdrachten, cijfers en leesstof als tabellen met eigen velden — geen losse notities.",
         },
         calendar: {
           k: "Agenda",
@@ -89,18 +100,18 @@ export const nl = {
         },
         dashboard: {
           k: "Dashboard",
-          title: "Een overzichtelijk thuisbasis",
+          title: "Een helder thuisbasis",
           body: "Een pagina die je hele week samenbrengt, zodat je altijd weet wat er aankomt.",
         },
         autosave: {
           k: "Automatisch opslaan",
           title: "Bewerk, direct opgeslagen",
-          body: "Hernoemen, afvinken, rijen toevoegen — elke wijziging slaat zichzelf op zodra je hem maakt.",
+          body: "Hernoem, vink af, voeg rijen toe — elke wijziging slaat zichzelf op zodra je hem maakt.",
         },
         assistant: {
           k: "Assistent",
-          title: "Vraag in gewoon Nederlands",
-          body: "“Voeg een tentamen toe aan Informatica.” Je werkruimte werkt zichzelf bij, recht voor je ogen.",
+          title: "Vraag het in gewoon Nederlands",
+          body: "“Voeg een tussentoets toe aan Informatica.” Je werkruimte werkt zichzelf bij, voor je ogen.",
         },
       },
     },
@@ -125,9 +136,9 @@ export const nl = {
         price: "$5",
         features: [
           "Alles uit Gratis",
-          "Onbeperkt genereren",
+          "Onbeperkte generaties",
           "Het slimste, meest gedetailleerde model",
-          "Voorrangsondersteuning",
+          "Prioriteitssupport",
         ],
         cta: "Begin gratis, upgrade wanneer je wilt",
       },
@@ -141,9 +152,8 @@ export const nl = {
     footer: {
       tagline: "De studiewerkruimte voor studenten · © 2026",
     },
-    // The little workspace mockup in the hero.
     preview: {
-      name: "Informatica Studie HQ",
+      name: "Informatica Studiebasis",
       thisWeek: "Deze week",
       columns: { todo: "Te doen", doing: "Bezig", done: "Klaar" },
       cards: ["Bewijzen-quiz", "Linked List-lab", "Labverslag 2"],
@@ -152,16 +162,107 @@ export const nl = {
     },
   },
 
+  // ---- Pricing page (/pricing) ------------------------------------------
+  pricing: {
+    nav: { openApp: "App openen", signIn: "Inloggen", getStarted: "Aan de slag" },
+    badge: "Eenvoudige, studentvriendelijke prijzen",
+    title: "Begin gratis. Upgrade wanneer je er klaar voor bent.",
+    subtitle:
+      "Alles wat je nodig hebt om je semester te organiseren is gratis. Pro voegt het krachtigste model, onbeperkte generaties en prioriteitssupport toe.",
+    free: {
+      name: "Gratis",
+      price: "$0",
+      tagline: "Alles om georganiseerd te raken.",
+      bullets: [
+        "AI-gegenereerde studiewerkruimtes",
+        "Volledige inline bewerking & automatisch opslaan",
+        "Databases — tabel, bord & agenda",
+        "AI-agentchat in je werkruimte",
+      ],
+      ctaSignedOut: "Begin gratis",
+      ctaSignedIn: "Open je werkruimtes",
+    },
+    pro: {
+      badge: "Meest gekozen",
+      name: "Pro",
+      price: "$5",
+      perMonth: "/mnd",
+      billed: "Maandelijks gefactureerd · altijd opzegbaar.",
+      bullets: [
+        "Alles uit Gratis",
+        "Onbeperkte werkruimtegeneraties",
+        "Het krachtigste, meest gedetailleerde model",
+        "Prioriteitssupport & vroege toegang",
+      ],
+      currentPlan: "✦ Je huidige abonnement",
+      manageBilling: "Facturatie beheren",
+      upgrade: "Upgraden naar Pro",
+      ctaSignedOut: "Aan de slag met Pro",
+    },
+    comparison: {
+      title: "Vergelijk abonnementen",
+      featuresHeader: "Functies",
+      freeHeader: "Gratis",
+      proHeader: "Pro",
+      included: "Inbegrepen",
+      notIncluded: "Niet inbegrepen",
+      features: {
+        aiWorkspaces: "AI-gegenereerde werkruimtes",
+        onboarding: "Begeleide instapvragen",
+        editing: "Volledige inline bewerking & automatisch opslaan",
+        databases: "Databases — tabel, bord & agenda",
+        dragDrop: "Bewerken met slepen en neerzetten",
+        agentChat: "AI-agentchat die je werkruimte bewerkt",
+        model: "Generatiemodel",
+        generations: "Werkruimtegeneraties",
+        support: "Support",
+        earlyAccess: "Vroege toegang tot nieuwe functies",
+      },
+      values: {
+        standard: "Standaard",
+        mostCapable: "Krachtigst",
+        generous: "Royaal",
+        unlimited: "Onbeperkt",
+        community: "Community",
+        priority: "Prioriteit",
+      },
+    },
+    faqTitle: "Vragen",
+    faq: [
+      {
+        q: "Is StudyOS echt gratis om te beginnen?",
+        a: "Ja. Maak een account aan en genereer, bewerk en gebruik je werkruimtes met het Gratis-abonnement — geen creditcard vereist.",
+      },
+      {
+        q: "Wat krijg ik met Pro?",
+        a: "Onbeperkte generaties, het krachtigste model voor rijkere en nauwkeurigere werkruimtes, prioriteitssupport en vroege toegang tot nieuwe functies.",
+      },
+      {
+        q: "Kan ik altijd opzeggen?",
+        a: "Altijd. Beheer of zeg je abonnement op via het facturatieportaal — je houdt Pro tot het einde van de periode.",
+      },
+      {
+        q: "Wat gebeurt er met mijn werkruimtes als ik downgrade?",
+        a: "Er wordt niets verwijderd. Je werkruimtes blijven precies zoals ze zijn en volledig bewerkbaar met Gratis.",
+      },
+    ],
+    ctaTitle: "Je eerste werkruimte is één zin verwijderd.",
+    ctaSubtitle: "Probeer StudyOS gratis — upgrade alleen als je meer wilt.",
+    ctaSignedIn: "Genereer een werkruimte",
+    ctaSignedOut: "Begin gratis",
+    footerTagline: "De studiewerkruimte voor studenten · © 2026",
+  },
+
   // ---- Workspaces list (/app) -------------------------------------------
   app: {
     pro: "Pro",
     manage: "Beheren",
     upgrade: "Upgraden naar Pro",
     generate: "Genereren",
-    upgradedBanner: "Je gebruikt Pro — je werkruimtes draaien nu op het slimmere model.",
+    upgradedBanner: "Je hebt Pro — je werkruimtes gebruiken nu het slimmere model.",
     title: "Je werkruimtes",
     subtitle: "Alles wat StudyOS voor je heeft gebouwd.",
-    total: "{count} totaal",
+    total: "{count} in totaal",
     emptyTitle: "Nog geen werkruimtes",
     emptySubtitle: "Genereer er een, of laad de demo om rond te kijken.",
     emptyGenerate: "Genereer een werkruimte",
@@ -174,15 +275,15 @@ export const nl = {
   generate: {
     backToWorkspaces: "Je werkruimtes →",
     examples: [
-      { emoji: "💻", text: "Ik ben een eerstejaars informaticastudent en volg 5 vakken" },
+      { emoji: "💻", text: "Ik ben eerstejaars informaticastudent en volg 5 vakken" },
       {
         emoji: "⚕️",
-        text: "Tweedejaars pre-med: Anatomie, Biochemie, Fysiologie, Organische chemie",
+        text: "Tweedejaars geneeskunde-voorbereiding: Anatomie, Biochemie, Fysiologie, Organische chemie",
       },
-      { emoji: "🎓", text: "Vijfdeklasser die voor de eindexamens 6 vakken studeert" },
+      { emoji: "🎓", text: "Vijfde klas middelbare school, 6 vakken voor de eindexamens" },
       {
         emoji: "📈",
-        text: "MBA-student die Micro-economie, Boekhouden en Marketing volgt",
+        text: "MBA-student met Micro-economie, Boekhouden en Marketing",
       },
     ],
     planSteps: [
@@ -190,26 +291,19 @@ export const nl = {
       "Goede vragen bedenken",
       "Je opzet op maat maken",
     ],
-    buildSteps: [
-      "Je vakken plannen",
-      "Je dashboard ontwerpen",
-      "Je planner indelen",
-      "De werkruimte samenstellen",
-    ],
     planningTitle: "Je leren kennen",
-    buildingTitle: "Je werkruimte bouwen",
     errorGeneric: "Er ging iets mis. Probeer het opnieuw.",
-    errorBuild: "Er ging iets mis bij het genereren van je werkruimte. Probeer opnieuw.",
+    errorBuild: "Er ging iets mis bij het genereren van je werkruimte. Probeer het opnieuw.",
     describe: {
       step: "Stap 1 van 2",
-      title: "Wat ben je aan het studeren?",
+      title: "Wat studeer je?",
       subtitle:
         "Beschrijf je vakken en doelen in gewoon Nederlands. StudyOS stelt een paar korte vragen en ontwerpt vervolgens de hele werkruimte rond je antwoorden.",
       placeholder:
-        "bijv. Ik ben een eerstejaars informaticastudent en volg dit semester Datastructuren, Discrete wiskunde, Calculus II en Academisch schrijven.",
+        "bijv. Ik ben eerstejaars informaticastudent en volg dit semester Datastructuren, Discrete wiskunde, Calculus II en Academisch schrijven.",
       shortcut: "⌘ / Ctrl + Enter",
       continue: "Doorgaan",
-      examplesLabel: "Weet je het niet zeker? Begin met een voorbeeld",
+      examplesLabel: "Niet zeker? Begin met een voorbeeld",
       finePrint: "Gratis · geen creditcard · klaar in seconden",
     },
     questions: {
@@ -217,55 +311,124 @@ export const nl = {
       step: "Stap 2 van 2",
       title: "Laten we het op maat maken",
       designingFor: "Ontworpen voor:",
-      pickAny: "kies een willekeurige",
+      pickAny: "kies er een paar",
       pickOne: "kies er één",
       build: "Bouw mijn werkruimte",
-      answeredNone: "Beantwoord er een paar, of bouw gewoon — aan jou de keuze",
+      answeredNone: "Beantwoord er een paar, of bouw gewoon — jij beslist",
       answeredCount: "{n} / {total} beantwoord",
     },
   },
 
-  // ---- AI activity overlay ----------------------------------------------
+  // ---- Generation activity (full-screen build progress) -----------------
+  genActivity: {
+    building: "Je werkruimte bouwen",
+    designing: "Je werkruimte ontwerpen",
+    componentsChosen: "Componenten voor je gekozen",
+    planningComponents: "Componenten plannen",
+    onlyRelevant: "Alleen de pagina’s en trackers die relevant zijn voor je antwoorden.",
+    componentsCount: "{count} componenten",
+    everythingEditable:
+      "Alles wat is gegenereerd blijft bewerkbaar — pagina’s, velden, weergaven, rijen en inhoud.",
+    statusReady: "Klaar",
+    statusGenerating: "Genereren…",
+    statusQueued: "In wachtrij",
+    finishingUp: "Laatste hand wordt gelegd",
+    yourWorkspace: "Je werkruimte",
+    pagesLabel: "Pagina’s",
+    sectionsBuilt: "{built} van {total} secties gebouwd",
+    choosingPieces: "De juiste onderdelen voor je kiezen…",
+    stillEditable: "Alles blijft bewerkbaar zodra het klaar is",
+    writingItIn: "Aan het invullen…",
+    board: { todo: "Te doen", doing: "Bezig", done: "Klaar" },
+    phase: {
+      analyzing: "Je antwoorden analyseren",
+      planning: "Componenten selecteren",
+      generating: "Werkruimte genereren",
+      validating: "Gegevens valideren",
+      saving: "Opslaan",
+    },
+  },
+
+  // ---- AiActivity overlay (calm spinner used during planning) -----------
   aiActivity: {
-    defaultTitle: "Hiermee bezig",
+    defaultTitle: "Ermee bezig",
     defaultSteps: [
       "Je werkruimte lezen",
       "De wijzigingen plannen",
-      "De indeling ontwerpen",
+      "De lay-out ontwerpen",
       "Het invoeren",
     ],
-    updatingTitle: "Je werkruimte bijwerken",
   },
 
-  // ---- Workspace editor --------------------------------------------------
+  // ---- Workspace editor chrome ------------------------------------------
   editor: {
+    workspaceIcon: "Werkruimte-icoon",
     newPage: "Nieuwe pagina",
     untitled: "Naamloos",
     allWorkspaces: "← Alle werkruimtes",
     deletePage: "Pagina verwijderen",
     askAi: "Vraag AI",
-    aiPlaceholder:
-      "Vraag AI om deze werkruimte aan te passen — “voeg een tentamen toe aan Informatica”, “maak een studieplan voor de eindexamens”, “voeg een gewoontetracker toe”…",
-    aiWorking: "Bezig…",
-    aiApply: "Toepassen",
-    aiClose: "Sluiten",
-    aiError: "Kon dat niet toepassen — probeer het anders te formuleren of vereenvoudig de vraag.",
+    closeAgent: "Agent sluiten",
     saving: "Opslaan…",
     saveFailed: "Opslaan mislukt",
     saved: "Opgeslagen",
   },
 
+  // ---- In-workspace AI agent chat ---------------------------------------
+  agentChat: {
+    title: "AI-agent",
+    subtitleIdle: "Begrijpt je hele werkruimte",
+    closeChat: "Chat sluiten",
+    suggestions: [
+      "Voeg een gewoontetracker toe",
+      "Maak een studieplan van 2 weken voor de eindexamens",
+      "Voeg een tussentoets toe aan elk vak",
+      "Waar moet ik me deze week op richten?",
+    ],
+    intro:
+      "Vraag me om één item te wijzigen of om updates over je hele werkruimte te coördineren. Als iets onduidelijk is, vraag ik het voordat ik bewerk.",
+    workspaceUpdated: "Werkruimte bijgewerkt",
+    buildingUpdate: "Je update bouwen",
+    steps: {
+      inspect: "Werkruimte inspecteren",
+      decide: "De veiligste actie bepalen",
+      prepare: "Gecoördineerde update voorbereiden",
+    },
+    phase: {
+      inspecting: "Je werkruimte bekijken",
+      planning: "De veiligste wijziging plannen",
+      updating: "Werkruimte-updates coördineren",
+      validating: "Elke verbinding controleren",
+      saving: "Je wijzigingen opslaan",
+    },
+    areaStatus: { queued: "In wachtrij", working: "Bijwerken", complete: "Klaar" },
+    initialMessage: "Je werkruimte openen",
+    placeholderBusy: "De agent is bezig…",
+    placeholderIdle: "Vraag de agent om iets te bouwen of te wijzigen…",
+    send: "Versturen",
+    inputHint: "Enter om te versturen · Shift+Enter voor een nieuwe regel",
+    errorRequestFailed: "Agentverzoek mislukt",
+    errorEndedUnexpectedly: "Agentantwoord eindigde onverwacht",
+    errorSnag: "De agent liep tegen een probleem aan. Probeer het opnieuw.",
+    errorCouldntComplete:
+      "Ik kon dat niet veilig voltooien. Probeer het opnieuw of maak het verzoek specifieker.",
+  },
+
   // ---- Page / block editor ----------------------------------------------
   page: {
+    pageIcon: "Pagina-icoon",
+    headingLevel: "Kopniveau",
+    calloutIcon: "Callout-icoon",
     addBlock: "+ Blok toevoegen",
-    cancel: "Annuleren",
     deleteBlock: "Blok verwijderen",
     blockTypes: {
       paragraph: "Tekst",
       heading: "Kop",
       todo: "Taak",
       bulleted_list_item: "Lijst",
-      callout: "Notitieblok",
+      numbered_list_item: "Genummerd",
+      quote: "Citaat",
+      callout: "Callout",
       divider: "Scheidingslijn",
       database: "Tabel",
     },
@@ -273,10 +436,9 @@ export const nl = {
       paragraph: "Typ iets…",
       todo: "Taak",
       listItem: "Lijstitem",
-      callout: "Notitieblok",
+      callout: "Callout",
     },
     headingDefault: "Kop",
-    // Defaults for a brand-new table inserted via "+ Add block → Table".
     newTable: {
       name: "Nieuwe tabel",
       propName: "Naam",
@@ -291,13 +453,12 @@ export const nl = {
 
   // ---- Database views (table / board / calendar) ------------------------
   db: {
+    databaseIcon: "Database-icoon",
     nameAria: "Databasenaam",
     newRow: "+ Nieuwe rij",
     newCard: "+ Nieuw",
     untitled: "Naamloos",
     empty: "—",
-    link: "Koppelen ↗",
-    linked: "{count} gekoppeld",
     deleteRow: "Rij verwijderen",
     deleteCard: "Kaart verwijderen",
     dragHint: "Sleep naar een andere kolom",
@@ -306,6 +467,57 @@ export const nl = {
     addOnDay: "Toevoegen op deze dag",
     clickToRename: "Klik om te hernoemen",
     delete: "Verwijderen",
+  },
+
+  // ---- Database settings panel ------------------------------------------
+  dbSettings: {
+    customize: "Velden & weergaven aanpassen",
+    description: "Beschrijving",
+    descriptionPlaceholder: "Waar deze tracker voor is",
+    fields: "Velden",
+    addField: "+ Veld toevoegen",
+    fieldName: "Veldnaam",
+    fieldType: "Veldtype",
+    deleteField: "Veld verwijderen",
+    newField: "Nieuw veld",
+    chooseRelatedDatabase: "Kies een gerelateerde database",
+    optionLabel: "Optielabel",
+    addOption: "+ optie",
+    newOption: "Nieuwe optie",
+    views: "Weergaven",
+    addView: "+ Weergave toevoegen",
+    viewName: "Weergavenaam",
+    newView: "Nieuwe weergave",
+    deleteView: "Weergave verwijderen",
+    groupBy: "Groeperen op…",
+    dateField: "Datumveld…",
+    deleteDatabase: "Deze database verwijderen",
+    deleteConfirm: "“{name}” verwijderen en van elke pagina weghalen?",
+    propertyTypes: {
+      text: "Tekst",
+      number: "Getal",
+      checkbox: "Selectievakje",
+      date: "Datum",
+      select: "Selectie",
+      multi_select: "Meervoudige selectie",
+      status: "Status",
+      url: "URL",
+      relation: "Relatie",
+    },
+    viewTypes: {
+      table: "Tabel",
+      board: "Bord",
+      calendar: "Agenda",
+      list: "Lijst",
+      gallery: "Galerij",
+    },
+    defaults: {
+      statusTodo: "Te doen",
+      statusInProgress: "Bezig",
+      statusDone: "Klaar",
+      option1: "Optie 1",
+      option2: "Optie 2",
+    },
   },
 
   // ---- Default onboarding questions (no-API-key fallback) ----------------
@@ -319,16 +531,13 @@ export const nl = {
         self: "Zelfstudie",
       },
     },
-    load: {
-      question: "Hoeveel vakken jongleer je?",
-      // 1–2, 3–4, 5–6, 7+ stay numeric across locales (see onboarding.ts).
-    },
+    load: { question: "Hoeveel vakken jongleer je tegelijk?" },
     track: {
       question: "Wat wil je het liefst bijhouden?",
       options: {
         assign: "Opdrachten",
         exams: "Tentamens",
-        read: "Literatuur",
+        read: "Leesstof",
         notes: "Notities",
         habits: "Studiegewoontes",
         grades: "Cijfers",
@@ -336,26 +545,64 @@ export const nl = {
     },
     style: {
       question: "Hoe plan je het liefst?",
-      options: {
-        cal: "Via een agenda",
-        board: "Via een bord",
-        list: "Eenvoudige lijsten",
+      options: { cal: "Per agenda", board: "Per bord", list: "Eenvoudige lijsten" },
+    },
+  },
+
+  // ---- Server-emitted AI progress + errors ------------------------------
+  ai: {
+    generate: {
+      phase: {
+        analyzing: "Je vakken, doelen en voorkeuren lezen",
+        planning: "De juiste werkruimtecomponenten kiezen",
+        generating: "Je complete werkruimte in één keer genereren",
+        validating: "Koppelingen, weergaven, velden en startgegevens controleren",
+        saving: "Je bewerkbare werkruimte opslaan",
       },
+      error:
+        "De werkruimte kon niet worden gegenereerd. Probeer het opnieuw met een kortere beschrijving.",
+      detail: {
+        dashboard: "{count} bewerkbare pagina’s gekoppeld",
+        courses: "{count} vakken toegevoegd",
+        trackedItems: "{count} bijgehouden items toegevoegd",
+        scheduled: "{count} items ingepland",
+        readings: "{count} leesitems toegevoegd",
+        habits: "{count} routines toegevoegd",
+        grades: "{count} cijferrijen toegevoegd",
+        notes: "Bewerkbare notitiestructuur aangemaakt",
+        generic: "Component aangemaakt en gekoppeld",
+      },
+    },
+    agent: {
+      inspecting: "{pages} pagina’s en {databases} databases bekijken",
+      inspectingArea: "{area} bekijken",
+      planning: "Het verzoek begrijpen en controleren op dubbelzinnigheid",
+      updating: "Gecoördineerde wijzigingen toepassen in je werkruimte",
+      validating: "Verwijzingen, weergaven, velden en gekoppelde gegevens controleren",
+      saving: "De bijgewerkte werkruimte opslaan",
+      workspaceNotFound: "Werkruimte niet gevonden.",
+      error:
+        "De agent kon dat verzoek niet veilig voltooien. Probeer het opnieuw of maak het verzoek specifieker.",
+      fallbackReply: "Je werkruimte bijgewerkt.",
+    },
+    errors: {
+      notAuthenticated: "Niet geverifieerd",
+      invalidAgentRequest: "Ongeldig agentverzoek",
+      describeBeforeGenerating:
+        "Beschrijf je studie voordat je een werkruimte genereert.",
     },
   },
 
   // ---- Mock generator scaffolding (no-API-key fallback) ------------------
-  // The fixed labels the rule-based generator emits so the offline experience
-  // is localized too. Course names derive from the user's own prompt.
   mock: {
-    workspaceName: "Studie HQ",
-    workspaceNameField: "{field} Studie HQ",
+    workspaceName: "Studiebasis",
+    workspaceNameField: "{field} Studiebasis",
     welcome:
       "Gegenereerd op basis van je beschrijving: “{summary}”. Alles hier is een startpunt dat je kunt bewerken.",
     tbd: "Nog te bepalen",
     status: { notStarted: "Niet begonnen", inProgress: "Bezig", done: "Klaar" },
     type: { homework: "Huiswerk", quiz: "Quiz", exam: "Tentamen", project: "Project" },
-    exam: { midterm: "Tussentijds tentamen", final: "Eindtentamen" },
+    exam: { midterm: "Tussentoets", final: "Eindtentamen" },
     courses: {
       name: "Vakken",
       description: "Elk vak dat je dit semester volgt.",
@@ -376,19 +623,19 @@ export const nl = {
       propDue: "Deadline",
       propWeight: "Weging %",
       viewAll: "Alle",
-      viewBoard: "Op status",
+      viewBoard: "Per status",
       viewCalendar: "Agenda",
       projectMilestone: "Projectmijlpaal {n} — {code}",
     },
     readings: {
       name: "Leeslijst",
-      description: "Wat je moet lezen, geordend per vak.",
+      description: "Wat te lezen, geordend per vak.",
       propTitle: "Titel",
       propCourse: "Vak",
       propRead: "Gelezen",
       propLink: "Link",
       viewAll: "Leeslijst",
-      coreReading: "{course}: kernliteratuur",
+      coreReading: "{course}: kernleesstof",
     },
     habits: {
       name: "Studiegewoontes",
@@ -400,7 +647,7 @@ export const nl = {
       viewAll: "Alle gewoontes",
       viewCalendar: "Agenda",
       reviewNotes: "Notities van vandaag doornemen",
-      practiceRecall: "Actief ophalen oefenen",
+      practiceRecall: "Actief herhalen",
     },
     grades: {
       name: "Cijfertracker",
@@ -425,29 +672,28 @@ export const nl = {
       grades: "Cijfertracker",
     },
     dashboard: {
-      assignmentsHeading: "📌 Opdrachten op status",
+      assignmentsHeading: "📌 Opdrachten per status",
       coursesHeading: "📚 Mijn vakken",
     },
     assignmentsPage: { intro: "Alles wat je nog moet doen, met deadlines en wegingen." },
-    plannerPage: { intro: "Je deadlines overzichtelijk op een agenda." },
+    plannerPage: { intro: "Je deadlines uitgezet op een agenda." },
     examsPage: {
       callout:
-        "Bevestig de data en verdeel daarna elk tentamen in herhalingsonderwerpen en oefensessies.",
+        "Bevestig de data en splits elk tentamen daarna op in herhalingsonderwerpen en oefensessies.",
     },
     notesPage: {
       heading: "Vaknotities",
       callout:
-        "Voeg voor elk college een kop toe en leg er de kernideeën en vragen onder vast.",
+        "Voeg een kop toe voor elk college en leg daaronder de belangrijkste ideeën en vragen vast.",
       fallbackCourse: "Vak",
       startWriting: "Begin hier met schrijven…",
     },
     gradesPage: {
       callout:
-        "Vervang de begintoetsen door de wegingen uit je studiegids en je daadwerkelijke resultaten.",
+        "Vervang de starttoetsen door de wegingen uit je studiehandleiding en je echte resultaten.",
     },
-    // Workspace component plan (labels + descriptions shown in the loader).
     plan: {
-      summaryWith: "Een werkruimte op maat, opgebouwd rond {focus}.",
+      summaryWith: "Een werkruimte op maat, gebouwd rond {focus}.",
       summaryGeneric:
         "Een werkruimte op maat voor vakken, deadlines en studieplanning.",
       components: {
@@ -457,11 +703,11 @@ export const nl = {
         },
         courses: {
           label: "Vakken",
-          description: "Vakdetails, roosters en docenten.",
+          description: "Vakgegevens, roosters en docenten.",
         },
         assignments: {
           label: "Opdrachten",
-          description: "Studietaken, deadlines, wegingen en status.",
+          description: "Studiewerk, deadlines, wegingen en status.",
         },
         planner: {
           label: "Planner",
@@ -477,7 +723,7 @@ export const nl = {
         },
         notes: {
           label: "Notities",
-          description: "Een gestructureerde plek voor vaknotities.",
+          description: "Een gestructureerd thuis voor vaknotities.",
         },
         habits: {
           label: "Studiegewoontes",
@@ -486,10 +732,6 @@ export const nl = {
         grades: {
           label: "Cijfertracker",
           description: "Scores, wegingen en cijferdoelen.",
-        },
-        projects: {
-          label: "Projecten",
-          description: "Mijlpalen en eerstvolgende acties voor groter werk.",
         },
       },
     },

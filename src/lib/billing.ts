@@ -5,6 +5,7 @@ import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/db";
 import { stripe } from "@/lib/stripe";
 import type { Plan } from "@/lib/ai/plans";
+import { CREDIT_PACK_SIZE, grantCredits, PRO_SIGNUP_CREDITS } from "@/lib/credits";
 
 /** The current user's plan — "pro" when they have an active subscription. */
 export async function getUserPlan(): Promise<Plan> {
@@ -45,14 +46,23 @@ export async function setSubscription(
   });
 }
 
-/** After Stripe Checkout returns, verify the session and grant Pro immediately. */
-export async function grantProFromSession(sessionId: string): Promise<void> {
+/**
+ * After Stripe Checkout returns, verify the session and apply its effect:
+ *   - a subscription → activate Pro and grant the Pro signup credits;
+ *   - a one-time credit-pack payment → grant the purchased credits.
+ * Best-effort and idempotent (the webhook reconciles if this misses).
+ */
+export async function reconcileCheckoutSession(sessionId: string): Promise<void> {
   const { userId } = await auth();
   if (!userId) return;
   try {
     const session = await stripe.checkout.sessions.retrieve(sessionId);
     if (session.client_reference_id !== userId) return;
-    if (session.status === "complete" || session.payment_status === "paid") {
+    const paid =
+      session.status === "complete" || session.payment_status === "paid";
+    if (!paid) return;
+
+    if (session.mode === "subscription") {
       await setSubscription(userId, {
         status: "active",
         stripeCustomerId:
@@ -60,8 +70,24 @@ export async function grantProFromSession(sessionId: string): Promise<void> {
         stripeSubscriptionId:
           typeof session.subscription === "string" ? session.subscription : null,
       });
+      const key =
+        typeof session.subscription === "string"
+          ? session.subscription
+          : sessionId;
+      await grantCredits(userId, PRO_SIGNUP_CREDITS, "pro_signup", `pro_grant:${key}`);
+    } else if (
+      session.mode === "payment" &&
+      session.metadata?.kind === "credits"
+    ) {
+      const amount = Number(session.metadata.credits) || CREDIT_PACK_SIZE;
+      await grantCredits(
+        userId,
+        amount,
+        "credit_purchase",
+        `credit_purchase:${sessionId}`,
+      );
     }
   } catch {
-    // The webhook will reconcile if this best-effort grant fails.
+    // The webhook will reconcile if this best-effort path fails.
   }
 }

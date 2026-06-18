@@ -8,8 +8,11 @@
  * API key and never blocks generation.
  *
  * This file is intentionally dependency-free (no server-only imports) so it can
- * be shared by both the client UI and the server actions.
+ * be shared by both the client UI and the server actions. Localized strings are
+ * passed IN (the onboarding dictionary slice) rather than imported, so this
+ * stays free of the full dictionary bundle.
  */
+import type { Dictionary } from "@/lib/i18n/dictionaries/en";
 
 export type QuestionType = "single" | "multi";
 
@@ -33,23 +36,26 @@ export interface QuestionAnswer {
   answers: string[];
 }
 
-/** Sensible, study-agnostic questions used when the AI can't write tailored ones. */
-export function defaultQuestions(): GenQuestion[] {
+/**
+ * Sensible, study-agnostic questions used when the AI can't write tailored ones.
+ * Localized via the onboarding dictionary slice passed in by the caller.
+ */
+export function defaultQuestions(o: Dictionary["onboarding"]): GenQuestion[] {
   return [
     {
       id: "level",
-      question: "What's your study level?",
+      question: o.level.question,
       type: "single",
       options: [
-        { id: "hs", label: "High school", emoji: "🎒" },
-        { id: "ug", label: "Undergrad", emoji: "🎓" },
-        { id: "grad", label: "Grad / Postgrad", emoji: "📚" },
-        { id: "self", label: "Self-study", emoji: "💡" },
+        { id: "hs", label: o.level.options.hs, emoji: "🎒" },
+        { id: "ug", label: o.level.options.ug, emoji: "🎓" },
+        { id: "grad", label: o.level.options.grad, emoji: "📚" },
+        { id: "self", label: o.level.options.self, emoji: "💡" },
       ],
     },
     {
       id: "load",
-      question: "How many courses are you juggling?",
+      question: o.load.question,
       type: "single",
       options: [
         { id: "1-2", label: "1–2", emoji: "🍃" },
@@ -60,25 +66,25 @@ export function defaultQuestions(): GenQuestion[] {
     },
     {
       id: "track",
-      question: "What do you most want to track?",
+      question: o.track.question,
       type: "multi",
       options: [
-        { id: "assign", label: "Assignments", emoji: "📝" },
-        { id: "exams", label: "Exams", emoji: "🧪" },
-        { id: "read", label: "Readings", emoji: "📖" },
-        { id: "notes", label: "Notes", emoji: "🗒️" },
-        { id: "habits", label: "Study habits", emoji: "🔥" },
-        { id: "grades", label: "Grades", emoji: "💯" },
+        { id: "assign", label: o.track.options.assign, emoji: "📝" },
+        { id: "exams", label: o.track.options.exams, emoji: "🧪" },
+        { id: "read", label: o.track.options.read, emoji: "📖" },
+        { id: "notes", label: o.track.options.notes, emoji: "🗒️" },
+        { id: "habits", label: o.track.options.habits, emoji: "🔥" },
+        { id: "grades", label: o.track.options.grades, emoji: "💯" },
       ],
     },
     {
       id: "style",
-      question: "How do you like to plan?",
+      question: o.style.question,
       type: "single",
       options: [
-        { id: "cal", label: "By calendar", emoji: "🗓️" },
-        { id: "board", label: "By board", emoji: "📋" },
-        { id: "list", label: "Simple lists", emoji: "✅" },
+        { id: "cal", label: o.style.options.cal, emoji: "🗓️" },
+        { id: "board", label: o.style.options.board, emoji: "📋" },
+        { id: "list", label: o.style.options.list, emoji: "✅" },
       ],
     },
   ];

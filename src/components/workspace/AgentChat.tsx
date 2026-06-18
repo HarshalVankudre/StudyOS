@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { MessageResponse } from "@/components/ai-elements/message";
+import { useI18n } from "@/lib/i18n/client";
 import type {
   AgentArea,
   AgentAreaStatus,
@@ -36,16 +37,9 @@ interface AgentActivityState {
   areaProgress: Record<string, AreaProgress>;
 }
 
-const SUGGESTIONS = [
-  "Add a habit tracker",
-  "Make a 2-week finals study plan",
-  "Add a midterm to each course",
-  "What should I focus on this week?",
-];
-
 const INITIAL_ACTIVITY: AgentActivityState = {
   phase: "inspecting",
-  message: "Opening your workspace",
+  message: "",
   progress: 4,
   areas: [],
   areaProgress: {},
@@ -60,12 +54,19 @@ export function AgentChat({
   onApplied: (ws: Workspace) => void;
   onClose: () => void;
 }) {
+  const { dict } = useI18n();
+  const initialActivity: AgentActivityState = {
+    ...INITIAL_ACTIVITY,
+    message: dict.agentChat.initialMessage,
+  };
   const [items, setItems] = useState<ChatItem[]>([]);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activity, setActivity] =
-    useState<AgentActivityState>(INITIAL_ACTIVITY);
+    useState<AgentActivityState>(initialActivity);
+  const [otherOpen, setOtherOpen] = useState<Record<string, boolean>>({});
+  const [otherReplies, setOtherReplies] = useState<Record<string, string>>({});
   const scrollRef = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<AbortController | null>(null);
 
@@ -83,7 +84,11 @@ export function AgentChat({
     [],
   );
 
-  const send = async (raw: string, displayText = raw) => {
+  const send = async (
+    raw: string,
+    displayText = raw,
+    resolveItemId?: string,
+  ) => {
     const message = raw.trim();
     if (!message || busy) return;
     setError(null);
@@ -94,7 +99,9 @@ export function AgentChat({
       content: item.modelContent ?? item.content,
     }));
     setItems((previous) => [
-      ...previous,
+      ...previous.map((item) =>
+        item.id === resolveItemId ? { ...item, choices: undefined } : item,
+      ),
       {
         id: crypto.randomUUID(),
         role: "user",
@@ -102,8 +109,12 @@ export function AgentChat({
         modelContent: message,
       },
     ]);
+    if (resolveItemId) {
+      setOtherOpen((previous) => ({ ...previous, [resolveItemId]: false }));
+      setOtherReplies((previous) => ({ ...previous, [resolveItemId]: "" }));
+    }
     setBusy(true);
-    setActivity(INITIAL_ACTIVITY);
+    setActivity(initialActivity);
 
     const controller = new AbortController();
     controllerRef.current = controller;
@@ -118,7 +129,7 @@ export function AgentChat({
       });
       if (!response.ok || !response.body) {
         const body = await response.json().catch(() => null);
-        throw new Error(body?.error ?? "Agent request failed");
+        throw new Error(body?.error ?? dict.agentChat.errorRequestFailed);
       }
 
       const reader = response.body.getReader();
@@ -203,21 +214,21 @@ export function AgentChat({
         if (done) break;
       }
 
-      if (!receivedResult) throw new Error("Agent response ended unexpectedly");
+      if (!receivedResult)
+        throw new Error(dict.agentChat.errorEndedUnexpectedly);
     } catch (cause) {
       if (!controller.signal.aborted) {
         const message =
           cause instanceof Error
             ? cause.message
-            : "The agent hit a snag. Please try again.";
+            : dict.agentChat.errorSnag;
         setError(message);
         setItems((previous) => [
           ...previous,
           {
             id: crypto.randomUUID(),
             role: "assistant",
-            content:
-              "I couldn’t complete that safely. Try again or make the request more specific.",
+            content: dict.agentChat.errorCouldntComplete,
           },
         ]);
       }
@@ -249,15 +260,17 @@ export function AgentChat({
             />
           </span>
           <div className="leading-tight">
-            <p className="font-display text-sm font-bold text-ink">AI agent</p>
+            <p className="font-display text-sm font-bold text-ink">{dict.agentChat.title}</p>
             <p className="text-[11px] text-ink-soft">
-              {busy ? phaseLabel(activity.phase) : "Understands your whole workspace"}
+              {busy
+                ? dict.agentChat.phase[activity.phase]
+                : dict.agentChat.subtitleIdle}
             </p>
           </div>
         </div>
         <button
           onClick={onClose}
-          aria-label="Close chat"
+          aria-label={dict.agentChat.closeChat}
           className="rounded p-1 text-ink-soft/60 transition hover:bg-ink/5 hover:text-ink"
         >
           ✕
@@ -268,11 +281,10 @@ export function AgentChat({
         {items.length === 0 && !busy && (
           <div className="mt-2">
             <p className="text-sm leading-relaxed text-ink-soft">
-              Ask me to change one item or coordinate updates across your full
-              workspace. If anything is unclear, I&rsquo;ll ask before editing.
+              {dict.agentChat.intro}
             </p>
             <div className="mt-4 flex flex-col gap-2">
-              {SUGGESTIONS.map((suggestion) => (
+              {dict.agentChat.suggestions.map((suggestion) => (
                 <button
                   key={suggestion}
                   onClick={() => send(suggestion)}
@@ -303,7 +315,9 @@ export function AgentChat({
                   {item.choices.map((choice) => (
                     <button
                       key={choice.id}
-                      onClick={() => send(choice.value, choice.label)}
+                      onClick={() =>
+                        send(choice.value, choice.label, item.id)
+                      }
                       disabled={busy}
                       className="group flex items-center justify-between rounded-lg border border-ink/15 bg-white px-3 py-2 text-left text-sm text-ink transition hover:border-ink hover:bg-lime/20 disabled:opacity-50"
                     >
@@ -313,13 +327,78 @@ export function AgentChat({
                       </span>
                     </button>
                   ))}
+                  <button
+                    onClick={() =>
+                      setOtherOpen((previous) => ({
+                        ...previous,
+                        [item.id]: !previous[item.id],
+                      }))
+                    }
+                    disabled={busy}
+                    aria-expanded={Boolean(otherOpen[item.id])}
+                    className={`group flex items-center justify-between rounded-lg border px-3 py-2 text-left text-sm transition disabled:opacity-50 ${
+                      otherOpen[item.id]
+                        ? "border-ink bg-ink text-paper"
+                        : "border-ink/15 bg-white text-ink hover:border-ink hover:bg-lime/20"
+                    }`}
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <span>✍️</span>
+                      Other
+                    </span>
+                    <span
+                      className={`transition ${
+                        otherOpen[item.id]
+                          ? "rotate-90 text-paper/60"
+                          : "text-ink-soft group-hover:translate-x-0.5 group-hover:text-ink"
+                      }`}
+                    >
+                      →
+                    </span>
+                  </button>
+                  {otherOpen[item.id] && (
+                    <div className="flex items-center gap-2 rounded-lg border border-ink/20 bg-white p-2 focus-within:border-ink/50">
+                      <input
+                        autoFocus
+                        value={otherReplies[item.id] ?? ""}
+                        onChange={(event) =>
+                          setOtherReplies((previous) => ({
+                            ...previous,
+                            [item.id]: event.target.value,
+                          }))
+                        }
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            const reply = otherReplies[item.id]?.trim();
+                            if (reply) send(reply, reply, item.id);
+                          }
+                        }}
+                        disabled={busy}
+                        maxLength={500}
+                        placeholder="Type your own answer…"
+                        aria-label="Type another answer"
+                        className="min-w-0 flex-1 bg-transparent px-1 text-sm text-ink outline-none placeholder:text-ink-soft/50"
+                      />
+                      <button
+                        onClick={() => {
+                          const reply = otherReplies[item.id]?.trim();
+                          if (reply) send(reply, reply, item.id);
+                        }}
+                        disabled={busy || !otherReplies[item.id]?.trim()}
+                        className="rounded-md bg-ink px-2.5 py-1.5 text-xs font-semibold text-paper transition enabled:hover:bg-ink/85 disabled:opacity-40"
+                      >
+                        {dict.agentChat.send}
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
 
               {item.changed && (
                 <div className="ml-1 flex flex-wrap items-center gap-1.5">
                   <span className="inline-flex items-center gap-1 rounded-full bg-lime/35 px-2 py-0.5 text-[10px] font-semibold text-ink ring-1 ring-inset ring-lime-deep/40">
-                    ✓ Workspace updated
+                    ✓ {dict.agentChat.workspaceUpdated}
                   </span>
                   {item.affectedAreas?.slice(0, 3).map((area) => (
                     <span
@@ -354,22 +433,22 @@ export function AgentChat({
             disabled={busy}
             placeholder={
               busy
-                ? "The agent is working…"
-                : "Ask the agent to build or change something…"
+                ? dict.agentChat.placeholderBusy
+                : dict.agentChat.placeholderIdle
             }
             className="max-h-32 min-h-[24px] flex-1 resize-none bg-transparent text-sm text-ink placeholder:text-ink-soft/50 outline-none disabled:opacity-60"
           />
           <button
             onClick={() => send(text)}
             disabled={busy || !text.trim()}
-            aria-label="Send"
+            aria-label={dict.agentChat.send}
             className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-ink text-paper transition enabled:hover:bg-ink/90 disabled:opacity-40"
           >
             ↑
           </button>
         </div>
         <p className="mt-1.5 px-1 text-[10px] text-ink-soft/70">
-          Enter to send · Shift+Enter for a new line
+          {dict.agentChat.inputHint}
         </p>
       </div>
     </aside>
@@ -383,6 +462,7 @@ function AgentProgressCard({
   activity: AgentActivityState;
   onCancel: () => void;
 }) {
+  const { dict } = useI18n();
   return (
     <div
       className="ai-pop overflow-hidden rounded-xl border border-ink/15 bg-white shadow-[0_16px_40px_-28px_rgba(26,23,18,0.55)]"
@@ -401,7 +481,7 @@ function AgentProgressCard({
                 ✦
               </span>
               <span className="font-display text-sm font-bold">
-                Building your update
+                {dict.agentChat.buildingUpdate}
               </span>
             </div>
             <p className="mt-1.5 text-xs text-paper/60">{activity.message}</p>
@@ -410,7 +490,7 @@ function AgentProgressCard({
             onClick={onCancel}
             className="font-mono text-[9px] uppercase tracking-wider text-paper/50 transition hover:text-paper"
           >
-            Cancel
+            {dict.common.cancel}
           </button>
         </div>
 
@@ -460,7 +540,7 @@ function AgentProgressCard({
                         {area.label}
                       </span>
                       <span className="font-mono text-[9px] uppercase tracking-wider text-ink-soft">
-                        {areaStatusLabel(state.status)}
+                        {dict.agentChat.areaStatus[state.status]}
                       </span>
                     </div>
                     <div className="mt-1 h-1 overflow-hidden rounded-full bg-ink/[0.07]">
@@ -481,9 +561,9 @@ function AgentProgressCard({
         ) : (
           <div className="space-y-2">
             {[
-              ["Inspect workspace", activity.progress >= 16],
-              ["Decide the safest action", activity.progress >= 25],
-              ["Prepare coordinated update", activity.progress >= 34],
+              [dict.agentChat.steps.inspect, activity.progress >= 16],
+              [dict.agentChat.steps.decide, activity.progress >= 25],
+              [dict.agentChat.steps.prepare, activity.progress >= 34],
             ].map(([label, done]) => (
               <div
                 key={String(label)}
@@ -504,30 +584,4 @@ function AgentProgressCard({
       </div>
     </div>
   );
-}
-
-function phaseLabel(phase: AgentPhase) {
-  switch (phase) {
-    case "inspecting":
-      return "Reviewing your workspace";
-    case "planning":
-      return "Planning the safest change";
-    case "updating":
-      return "Coordinating workspace updates";
-    case "validating":
-      return "Checking every connection";
-    case "saving":
-      return "Saving your changes";
-  }
-}
-
-function areaStatusLabel(status: AgentAreaStatus) {
-  switch (status) {
-    case "queued":
-      return "Queued";
-    case "working":
-      return "Updating";
-    case "complete":
-      return "Ready";
-  }
 }

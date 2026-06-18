@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useI18n } from "@/lib/i18n/client";
 
 /**
  * Calm activity indicator shown while the AI is working — during the initial
@@ -10,41 +11,38 @@ import { useEffect, useState } from "react";
  */
 export type AiStep = { icon?: string; label: string };
 
-const DEFAULT_STEPS: AiStep[] = [
-  { label: "Reading your workspace" },
-  { label: "Planning the changes" },
-  { label: "Designing the layout" },
-  { label: "Writing it in" },
-];
-
 export function AiActivity({
-  title = "Working on it",
-  steps = DEFAULT_STEPS,
+  title,
+  steps,
   fullscreen = false,
 }: {
   title?: string;
   steps?: AiStep[];
   fullscreen?: boolean;
 }) {
+  const { dict } = useI18n();
+  const resolvedTitle = title ?? dict.aiActivity.defaultTitle;
+  const resolvedSteps =
+    steps ?? dict.aiActivity.defaultSteps.map((label) => ({ label }));
   const [i, setI] = useState(0);
 
   // Advance through the phases, then hold on the last one until the call ends.
   useEffect(() => {
     const t = setInterval(
-      () => setI((v) => Math.min(v + 1, steps.length - 1)),
+      () => setI((v) => Math.min(v + 1, resolvedSteps.length - 1)),
       1500,
     );
     return () => clearInterval(t);
-  }, [steps.length]);
+  }, [resolvedSteps.length]);
 
-  const current = steps[i];
+  const current = resolvedSteps[i];
 
   return (
     <div
       className={`${fullscreen ? "fixed" : "absolute"} inset-0 z-20 flex items-center justify-center bg-paper/70 backdrop-blur-sm`}
       role="status"
       aria-live="polite"
-      aria-label={`${title}: ${current.label}`}
+      aria-label={`${resolvedTitle}: ${current.label}`}
     >
       <div className="w-[min(22rem,90vw)] rounded-xl border border-ink/10 bg-white p-7 shadow-[0_24px_60px_-28px_rgba(26,23,18,0.35)]">
         <div className="flex items-center gap-3">
@@ -52,7 +50,7 @@ export function AiActivity({
             className="h-5 w-5 shrink-0 animate-spin rounded-full border-2 border-ink/15 border-t-ink"
             aria-hidden
           />
-          <h3 className="font-display text-base font-bold text-ink">{title}</h3>
+          <h3 className="font-display text-base font-bold text-ink">{resolvedTitle}</h3>
         </div>
 
         <p key={i} className="ai-fade mt-3 text-sm text-ink-soft">
@@ -60,7 +58,7 @@ export function AiActivity({
         </p>
 
         <div className="mt-5 flex gap-1.5">
-          {steps.map((s, idx) => (
+          {resolvedSteps.map((s, idx) => (
             <span
               key={s.label}
               className={`h-1 flex-1 rounded-full transition-all duration-500 ${

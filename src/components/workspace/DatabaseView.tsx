@@ -11,12 +11,9 @@ import type {
 } from "@/lib/workspace/types";
 import { pillClasses } from "@/lib/workspace/colors";
 import { getOption, titleProperty } from "@/lib/workspace/helpers";
+import { useI18n } from "@/lib/i18n/client";
+import type { Dictionary } from "@/lib/i18n/dictionaries/en";
 import { useWorkspace } from "./WorkspaceContext";
-
-const MONTH_NAMES = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
-];
 
 const VIEW_ICON: Record<DBView["type"], string> = {
   table: "▦",
@@ -46,6 +43,7 @@ export function DatabaseView({
   viewId: string;
 }) {
   const { workspace, update } = useWorkspace();
+  const { dict } = useI18n();
   const [activeViewId, setActiveViewId] = useState(viewId);
 
   const database = workspace.databases.find((d) => d.id === databaseId);
@@ -65,7 +63,7 @@ export function DatabaseView({
                 if (target) target.icon = e.target.value;
               })
             }
-            aria-label="Database icon"
+            aria-label={dict.db.databaseIcon}
             maxLength={8}
             className="w-7 rounded bg-transparent text-center outline-none hover:bg-zinc-100 focus:bg-white focus:ring-1 focus:ring-zinc-300"
           />
@@ -77,7 +75,7 @@ export function DatabaseView({
                 if (t) t.name = e.target.value;
               })
             }
-            aria-label="Database name"
+            aria-label={dict.db.nameAria}
             className="w-40 rounded bg-transparent px-1 text-sm font-medium text-zinc-600 outline-none hover:bg-zinc-100 focus:bg-white focus:ring-1 focus:ring-zinc-300"
           />
         </div>
@@ -128,13 +126,14 @@ function DatabaseSettings({
   setActiveViewId: (id: string) => void;
 }) {
   const { workspace, update } = useWorkspace();
+  const { dict, t } = useI18n();
 
   const addProperty = () => {
     const id = crypto.randomUUID();
     update((draft) => {
       draft.databases
         .find((item) => item.id === database.id)
-        ?.properties.push({ id, name: "New field", type: "text" });
+        ?.properties.push({ id, name: dict.dbSettings.newField, type: "text" });
     });
   };
 
@@ -172,7 +171,7 @@ function DatabaseSettings({
       property.type = type;
       property.options =
         type === "select" || type === "multi_select" || type === "status"
-          ? defaultOptions(type)
+          ? defaultOptions(type, dict)
           : undefined;
       property.relationDatabaseId =
         type === "relation"
@@ -197,7 +196,7 @@ function DatabaseSettings({
         ?.properties.find((item) => item.id === propertyId);
       property?.options?.push({
         id: crypto.randomUUID(),
-        label: "New option",
+        label: dict.dbSettings.newOption,
         color: "zinc",
       });
     });
@@ -225,7 +224,7 @@ function DatabaseSettings({
     update((draft) => {
       draft.databases
         .find((item) => item.id === database.id)
-        ?.views.push({ id, name: "New view", type: "table" });
+        ?.views.push({ id, name: dict.dbSettings.newView, type: "table" });
     });
     setActiveViewId(id);
   };
@@ -256,7 +255,7 @@ function DatabaseSettings({
   const deleteDatabase = () => {
     if (
       !window.confirm(
-        `Delete “${database.name}” and remove it from every page?`,
+        t(dict.dbSettings.deleteConfirm, { name: database.name }),
       )
     ) {
       return;
@@ -278,11 +277,11 @@ function DatabaseSettings({
   return (
     <details className="mb-3 border border-zinc-200 bg-zinc-50/60">
       <summary className="cursor-pointer select-none px-3 py-2 font-mono text-[10px] uppercase tracking-wider text-zinc-500 hover:text-zinc-700">
-        Customize fields &amp; views
+        {dict.dbSettings.customize}
       </summary>
       <div className="border-t border-zinc-200 p-3">
         <label className="block text-xs font-medium text-zinc-500">
-          Description
+          {dict.dbSettings.description}
           <input
             value={database.description ?? ""}
             onChange={(e) =>
@@ -293,7 +292,7 @@ function DatabaseSettings({
                 if (target) target.description = e.target.value;
               })
             }
-            placeholder="What this tracker is for"
+            placeholder={dict.dbSettings.descriptionPlaceholder}
             className="mt-1 w-full rounded border border-zinc-200 bg-white px-2.5 py-1.5 text-sm font-normal text-zinc-700 outline-none focus:border-zinc-400"
           />
         </label>
@@ -301,13 +300,13 @@ function DatabaseSettings({
         <div className="mt-4">
           <div className="mb-2 flex items-center justify-between">
             <span className="font-mono text-[10px] uppercase tracking-wider text-zinc-500">
-              Fields
+              {dict.dbSettings.fields}
             </span>
             <button
               onClick={addProperty}
               className="text-xs font-medium text-zinc-500 hover:text-zinc-800"
             >
-              + Add field
+              {dict.dbSettings.addField}
             </button>
           </div>
           <div className="space-y-2">
@@ -327,7 +326,7 @@ function DatabaseSettings({
                         if (target) target.name = e.target.value;
                       })
                     }
-                    aria-label="Field name"
+                    aria-label={dict.dbSettings.fieldName}
                     className="min-w-32 flex-1 rounded border border-zinc-200 px-2 py-1 text-sm text-zinc-700 outline-none focus:border-zinc-400"
                   />
                   <select
@@ -338,19 +337,19 @@ function DatabaseSettings({
                         e.target.value as PropertyType,
                       )
                     }
-                    aria-label="Field type"
+                    aria-label={dict.dbSettings.fieldType}
                     className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-600 outline-none focus:border-zinc-400"
                   >
                     {PROPERTY_TYPES.map((type) => (
                       <option key={type.value} value={type.value}>
-                        {type.label}
+                        {dict.dbSettings.propertyTypes[type.value]}
                       </option>
                     ))}
                   </select>
                   <button
                     onClick={() => deleteProperty(property.id)}
                     disabled={database.properties.length <= 1}
-                    title="Delete field"
+                    title={dict.dbSettings.deleteField}
                     className="px-1 text-zinc-300 transition enabled:hover:text-rose-500 disabled:opacity-30"
                   >
                     ✕
@@ -373,7 +372,7 @@ function DatabaseSettings({
                     }
                     className="mt-2 w-full rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-600"
                   >
-                    <option value="">Choose related database</option>
+                    <option value="">{dict.dbSettings.chooseRelatedDatabase}</option>
                     {workspace.databases
                       .filter((item) => item.id !== database.id)
                       .map((item) => (
@@ -408,7 +407,7 @@ function DatabaseSettings({
                               if (target) target.label = e.target.value;
                             })
                           }
-                          aria-label="Option label"
+                          aria-label={dict.dbSettings.optionLabel}
                           className="w-24 bg-transparent text-xs text-zinc-600 outline-none"
                         />
                         <button
@@ -425,7 +424,7 @@ function DatabaseSettings({
                       onClick={() => addOption(property.id)}
                       className="rounded-full border border-dashed border-zinc-300 px-2 py-1 text-xs text-zinc-400 hover:text-zinc-700"
                     >
-                      + option
+                      {dict.dbSettings.addOption}
                     </button>
                   </div>
                 )}
@@ -437,13 +436,13 @@ function DatabaseSettings({
         <div className="mt-5">
           <div className="mb-2 flex items-center justify-between">
             <span className="font-mono text-[10px] uppercase tracking-wider text-zinc-500">
-              Views
+              {dict.dbSettings.views}
             </span>
             <button
               onClick={addView}
               className="text-xs font-medium text-zinc-500 hover:text-zinc-800"
             >
-              + Add view
+              {dict.dbSettings.addView}
             </button>
           </div>
           <div className="space-y-2">
@@ -463,7 +462,7 @@ function DatabaseSettings({
                       if (target) target.name = e.target.value;
                     })
                   }
-                  aria-label="View name"
+                  aria-label={dict.dbSettings.viewName}
                   className="min-w-28 flex-1 rounded border border-zinc-200 px-2 py-1 text-sm text-zinc-700 outline-none focus:border-zinc-400"
                 />
                 <select
@@ -495,7 +494,7 @@ function DatabaseSettings({
                 >
                   {Object.keys(VIEW_ICON).map((type) => (
                     <option key={type} value={type}>
-                      {type}
+                      {dict.dbSettings.viewTypes[type as DBView["type"]]}
                     </option>
                   ))}
                 </select>
@@ -515,7 +514,7 @@ function DatabaseSettings({
                     }
                     className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-600"
                   >
-                    <option value="">Group by…</option>
+                    <option value="">{dict.dbSettings.groupBy}</option>
                     {database.properties
                       .filter(
                         (property) =>
@@ -545,7 +544,7 @@ function DatabaseSettings({
                     }
                     className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-600"
                   >
-                    <option value="">Date field…</option>
+                    <option value="">{dict.dbSettings.dateField}</option>
                     {database.properties
                       .filter((property) => property.type === "date")
                       .map((property) => (
@@ -558,7 +557,7 @@ function DatabaseSettings({
                 <button
                   onClick={() => deleteView(view.id)}
                   disabled={database.views.length <= 1}
-                  title="Delete view"
+                  title={dict.dbSettings.deleteView}
                   className="px-1 text-zinc-300 transition enabled:hover:text-rose-500 disabled:opacity-30"
                 >
                   ✕
@@ -572,24 +571,24 @@ function DatabaseSettings({
           onClick={deleteDatabase}
           className="mt-5 text-xs font-medium text-rose-500 hover:text-rose-700"
         >
-          Delete this database
+          {dict.dbSettings.deleteDatabase}
         </button>
       </div>
     </details>
   );
 }
 
-function defaultOptions(type: PropertyType) {
+function defaultOptions(type: PropertyType, dict: Dictionary) {
   if (type === "status") {
     return [
-      { id: crypto.randomUUID(), label: "To do", color: "zinc" },
-      { id: crypto.randomUUID(), label: "In progress", color: "amber" },
-      { id: crypto.randomUUID(), label: "Done", color: "green" },
+      { id: crypto.randomUUID(), label: dict.dbSettings.defaults.statusTodo, color: "zinc" },
+      { id: crypto.randomUUID(), label: dict.dbSettings.defaults.statusInProgress, color: "amber" },
+      { id: crypto.randomUUID(), label: dict.dbSettings.defaults.statusDone, color: "green" },
     ];
   }
   return [
-    { id: crypto.randomUUID(), label: "Option 1", color: "zinc" },
-    { id: crypto.randomUUID(), label: "Option 2", color: "blue" },
+    { id: crypto.randomUUID(), label: dict.dbSettings.defaults.option1, color: "zinc" },
+    { id: crypto.randomUUID(), label: dict.dbSettings.defaults.option2, color: "blue" },
   ];
 }
 
@@ -644,6 +643,7 @@ function useDbActions(databaseId: string) {
 
 function TableView({ db, view }: { db: Database; view: DBView }) {
   const { addRow, deleteRow } = useDbActions(db.id);
+  const { dict } = useI18n();
   const props = visibleProps(db, view);
 
   return (
@@ -679,7 +679,7 @@ function TableView({ db, view }: { db: Database; view: DBView }) {
                 <td className="w-8 px-1 text-center align-middle">
                   <button
                     onClick={() => deleteRow(row.id)}
-                    title="Delete row"
+                    title={dict.db.deleteRow}
                     className="text-zinc-300 opacity-0 transition hover:text-rose-500 group-hover:opacity-100"
                   >
                     ✕
@@ -694,7 +694,7 @@ function TableView({ db, view }: { db: Database; view: DBView }) {
         onClick={() => addRow()}
         className="w-full border-t border-zinc-100 px-3 py-2 text-left text-sm text-zinc-400 transition hover:bg-zinc-50 hover:text-zinc-600"
       >
-        + New row
+        {dict.db.newRow}
       </button>
     </div>
   );
@@ -712,6 +712,7 @@ function EditableCell({
   value: CellValue;
 }) {
   const { workspace, update, rev } = useWorkspace();
+  const { dict } = useI18n();
 
   const setCell = (v: CellValue) =>
     update((d) => {
@@ -763,7 +764,7 @@ function EditableCell({
         <input
           key={k}
           type="url"
-          placeholder="—"
+          placeholder={dict.db.empty}
           defaultValue={typeof value === "string" ? value : ""}
           onBlur={(e) => setCell(e.target.value || null)}
           className={`${base} text-indigo-600`}
@@ -777,7 +778,7 @@ function EditableCell({
           onChange={(e) => setCell(e.target.value || null)}
           className={`${base} text-zinc-700`}
         >
-          <option value="">—</option>
+          <option value="">{dict.db.empty}</option>
           {prop.options?.map((o) => (
             <option key={o.id} value={o.id}>
               {o.label}
@@ -828,7 +829,7 @@ function EditableCell({
           {related?.rows.map((row) => (
             <option key={row.id} value={row.id}>
               {relatedTitle
-                ? String(row.cells[relatedTitle.id] ?? "Untitled")
+                ? String(row.cells[relatedTitle.id] ?? dict.db.untitled)
                 : row.id}
             </option>
           ))}
@@ -853,6 +854,7 @@ function EditableCell({
 
 function BoardView({ db, view }: { db: Database; view: DBView }) {
   const { rev } = useWorkspace();
+  const { dict } = useI18n();
   const { setCell, addRow, deleteRow } = useDbActions(db.id);
   const [overOpt, setOverOpt] = useState<string | null>(null);
   const dragId = useRef<string | null>(null);
@@ -918,7 +920,7 @@ function BoardView({ db, view }: { db: Database; view: DBView }) {
                         dragId.current = null;
                         setOverOpt(null);
                       }}
-                      title="Drag to another column"
+                      title={dict.db.dragHint}
                       className="mt-1 cursor-grab select-none leading-none text-zinc-300 transition hover:text-zinc-500 active:cursor-grabbing"
                     >
                       ⠿
@@ -927,12 +929,12 @@ function BoardView({ db, view }: { db: Database; view: DBView }) {
                       key={`${r.id}:${rev}`}
                       defaultValue={String(r.cells[title.id] ?? "")}
                       onBlur={(e) => setCell(r.id, title.id, e.target.value)}
-                      placeholder="Untitled"
+                      placeholder={dict.db.untitled}
                       className="min-w-0 flex-1 rounded bg-transparent text-sm font-medium text-zinc-800 outline-none focus:bg-zinc-50"
                     />
                     <button
                       onClick={() => deleteRow(r.id)}
-                      title="Delete card"
+                      title={dict.db.deleteCard}
                       className="text-zinc-300 opacity-0 transition hover:text-rose-500 group-hover:opacity-100"
                     >
                       ✕
@@ -966,7 +968,7 @@ function BoardView({ db, view }: { db: Database; view: DBView }) {
                 onClick={() => addRow({ [groupProp.id]: opt.id })}
                 className="w-full rounded-lg border border-dashed border-zinc-200 px-3 py-2 text-left text-xs text-zinc-400 transition hover:border-zinc-300 hover:text-zinc-600"
               >
-                + New
+                {dict.db.newCard}
               </button>
             </div>
           </div>
@@ -982,6 +984,7 @@ function BoardView({ db, view }: { db: Database; view: DBView }) {
 
 function CalendarView({ db, view }: { db: Database; view: DBView }) {
   const { rev } = useWorkspace();
+  const { dict, locale } = useI18n();
   const { setCell, addRow, deleteRow } = useDbActions(db.id);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [overKey, setOverKey] = useState<string | null>(null);
@@ -1031,26 +1034,32 @@ function CalendarView({ db, view }: { db: Database; view: DBView }) {
     });
   };
 
-  const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const weekdayFmt = new Intl.DateTimeFormat(locale, { weekday: "short" });
+  const weekdays = Array.from({ length: 7 }, (_, i) =>
+    weekdayFmt.format(new Date(Date.UTC(2024, 0, 7 + i))),
+  );
 
   return (
     <div className="rounded-lg border border-zinc-200">
       <div className="flex items-center justify-between border-b border-zinc-200 px-3 py-2">
         <span className="text-sm font-medium text-zinc-700">
-          {MONTH_NAMES[cursor.month]} {cursor.year}
+          {new Intl.DateTimeFormat(locale, { month: "long" }).format(
+            new Date(Date.UTC(cursor.year, cursor.month, 1)),
+          )}{" "}
+          {cursor.year}
         </span>
         <div className="flex gap-1">
           <button
             onClick={() => move(-1)}
             className="rounded px-2 py-1 text-sm text-zinc-500 hover:bg-zinc-100"
-            aria-label="Previous month"
+            aria-label={dict.db.prevMonth}
           >
             ‹
           </button>
           <button
             onClick={() => move(1)}
             className="rounded px-2 py-1 text-sm text-zinc-500 hover:bg-zinc-100"
-            aria-label="Next month"
+            aria-label={dict.db.nextMonth}
           >
             ›
           </button>
@@ -1104,7 +1113,7 @@ function CalendarView({ db, view }: { db: Database; view: DBView }) {
                     <span className="text-xs text-zinc-400">{day}</span>
                     <button
                       onClick={() => addOn(day)}
-                      title="Add on this day"
+                      title={dict.db.addOnDay}
                       className="text-sm leading-none text-zinc-300 opacity-0 transition hover:text-zinc-700 group-hover/cell:opacity-100"
                     >
                       +
@@ -1125,7 +1134,7 @@ function CalendarView({ db, view }: { db: Database; view: DBView }) {
                             if (e.key === "Enter") e.currentTarget.blur();
                             if (e.key === "Escape") setEditingId(null);
                           }}
-                          placeholder="Untitled"
+                          placeholder={dict.db.untitled}
                           className="w-full rounded px-1.5 py-0.5 text-[11px] font-medium text-zinc-700 outline-none ring-1 ring-zinc-300"
                         />
                       ) : (
@@ -1145,14 +1154,14 @@ function CalendarView({ db, view }: { db: Database; view: DBView }) {
                         >
                           <button
                             onClick={() => setEditingId(r.id)}
-                            title="Click to rename"
+                            title={dict.db.clickToRename}
                             className="min-w-0 flex-1 truncate text-left"
                           >
-                            {String(r.cells[title.id] ?? "") || "Untitled"}
+                            {String(r.cells[title.id] ?? "") || dict.db.untitled}
                           </button>
                           <button
                             onClick={() => deleteRow(r.id)}
-                            title="Delete"
+                            title={dict.db.delete}
                             className="shrink-0 opacity-0 transition hover:text-rose-600 group-hover/ev:opacity-100"
                           >
                             ✕

@@ -2,23 +2,26 @@
 
 import { useState } from "react";
 import type { Block, Database, Page } from "@/lib/workspace/types";
+import { useI18n } from "@/lib/i18n/client";
+import type { Dictionary } from "@/lib/i18n/dictionaries/en";
 import { DatabaseView } from "./DatabaseView";
 import { useWorkspace } from "./WorkspaceContext";
 
 const BLOCK_TYPES = [
-  { type: "paragraph", icon: "¶", label: "Text" },
-  { type: "heading", icon: "H", label: "Heading" },
-  { type: "todo", icon: "☑", label: "To-do" },
-  { type: "bulleted_list_item", icon: "•", label: "List" },
-  { type: "numbered_list_item", icon: "1.", label: "Numbered" },
-  { type: "quote", icon: "❝", label: "Quote" },
-  { type: "callout", icon: "★", label: "Callout" },
-  { type: "divider", icon: "—", label: "Divider" },
-  { type: "database", icon: "▦", label: "Table" },
+  { type: "paragraph", icon: "¶" },
+  { type: "heading", icon: "H" },
+  { type: "todo", icon: "☑" },
+  { type: "bulleted_list_item", icon: "•" },
+  { type: "numbered_list_item", icon: "1." },
+  { type: "quote", icon: "❝" },
+  { type: "callout", icon: "★" },
+  { type: "divider", icon: "—" },
+  { type: "database", icon: "▦" },
 ];
 
 export function PageView({ page }: { page: Page }) {
   const { update } = useWorkspace();
+  const { dict } = useI18n();
   const [addOpen, setAddOpen] = useState(false);
 
   const addBlock = (type: string) => {
@@ -28,7 +31,7 @@ export function PageView({ page }: { page: Page }) {
       if (type === "database") {
         const dbId = crypto.randomUUID();
         const viewId = crypto.randomUUID();
-        d.databases.push(newDatabase(dbId, viewId));
+        d.databases.push(newDatabase(dbId, viewId, dict));
         p.blocks.push({
           id: crypto.randomUUID(),
           type: "database_view",
@@ -36,7 +39,7 @@ export function PageView({ page }: { page: Page }) {
           viewId,
         });
       } else {
-        p.blocks.push(newBlock(type));
+        p.blocks.push(newBlock(type, dict));
       }
     });
     setAddOpen(false);
@@ -59,7 +62,7 @@ export function PageView({ page }: { page: Page }) {
               if (p) p.icon = e.target.value;
             })
           }
-          aria-label="Page icon"
+          aria-label={dict.page.pageIcon}
           maxLength={8}
           className="w-14 rounded bg-transparent px-1 text-center text-4xl outline-none hover:bg-paper focus:bg-paper"
         />
@@ -80,7 +83,7 @@ export function PageView({ page }: { page: Page }) {
           <div key={block.id} className="group relative">
             <button
               onClick={() => deleteBlock(block.id)}
-              title="Delete block"
+              title={dict.page.deleteBlock}
               className="absolute -left-7 top-1.5 text-ink-soft/30 opacity-0 transition hover:text-rose-500 group-hover:opacity-100"
             >
               ✕
@@ -101,14 +104,14 @@ export function PageView({ page }: { page: Page }) {
                 className="flex items-center gap-1.5 rounded border border-ink/10 bg-white px-2.5 py-1.5 text-sm text-ink transition hover:border-ink/40"
               >
                 <span className="font-mono text-xs text-ink-soft">{bt.icon}</span>
-                {bt.label}
+                {dict.page.blockTypes[bt.type as keyof typeof dict.page.blockTypes]}
               </button>
             ))}
             <button
               onClick={() => setAddOpen(false)}
               className="px-2 text-sm text-ink-soft transition hover:text-ink"
             >
-              Cancel
+              {dict.common.cancel}
             </button>
           </div>
         ) : (
@@ -116,7 +119,7 @@ export function PageView({ page }: { page: Page }) {
             onClick={() => setAddOpen(true)}
             className="rounded-md px-1 py-1 text-sm text-ink-soft transition hover:text-ink"
           >
-            + Add block
+            {dict.page.addBlock}
           </button>
         )}
       </div>
@@ -124,11 +127,11 @@ export function PageView({ page }: { page: Page }) {
   );
 }
 
-function newBlock(type: string): Block {
+function newBlock(type: string, dict: Dictionary): Block {
   const id = crypto.randomUUID();
   switch (type) {
     case "heading":
-      return { id, type: "heading", level: 2, text: "Heading" };
+      return { id, type: "heading", level: 2, text: dict.page.headingDefault };
     case "todo":
       return { id, type: "todo", text: "", checked: false };
     case "bulleted_list_item":
@@ -147,35 +150,36 @@ function newBlock(type: string): Block {
   }
 }
 
-function newDatabase(id: string, viewId: string): Database {
+function newDatabase(id: string, viewId: string, dict: Dictionary): Database {
   return {
     id,
-    name: "New table",
+    name: dict.page.newTable.name,
     icon: "▦",
     properties: [
-      { id: crypto.randomUUID(), name: "Name", type: "text" },
+      { id: crypto.randomUUID(), name: dict.page.newTable.propName, type: "text" },
       {
         id: crypto.randomUUID(),
-        name: "Status",
+        name: dict.page.newTable.propStatus,
         type: "status",
         options: [
-          { id: crypto.randomUUID(), label: "To do", color: "zinc" },
-          { id: crypto.randomUUID(), label: "In progress", color: "amber" },
-          { id: crypto.randomUUID(), label: "Done", color: "green" },
+          { id: crypto.randomUUID(), label: dict.page.newTable.statusTodo, color: "zinc" },
+          { id: crypto.randomUUID(), label: dict.page.newTable.statusInProgress, color: "amber" },
+          { id: crypto.randomUUID(), label: dict.page.newTable.statusDone, color: "green" },
         ],
       },
-      { id: crypto.randomUUID(), name: "Due", type: "date" },
+      { id: crypto.randomUUID(), name: dict.page.newTable.propDue, type: "date" },
     ],
     rows: [
       { id: crypto.randomUUID(), cells: {} },
       { id: crypto.randomUUID(), cells: {} },
     ],
-    views: [{ id: viewId, name: "Table", type: "table" }],
+    views: [{ id: viewId, name: dict.page.newTable.viewTable, type: "table" }],
   };
 }
 
 function BlockView({ pageId, block }: { pageId: string; block: Block }) {
   const { update, rev } = useWorkspace();
+  const { dict } = useI18n();
 
   const commitText = (text: string) =>
     update((d) => {
@@ -208,7 +212,7 @@ function BlockView({ pageId, block }: { pageId: string; block: Block }) {
                 }
               })
             }
-            aria-label="Heading level"
+            aria-label={dict.page.headingLevel}
             className="rounded border border-transparent bg-transparent px-1 py-0.5 font-mono text-[10px] text-ink-soft outline-none hover:border-ink/15 focus:border-ink/30"
           >
             <option value={1}>H1</option>
@@ -230,7 +234,7 @@ function BlockView({ pageId, block }: { pageId: string; block: Block }) {
           key={k}
           defaultValue={block.text}
           onBlur={(e) => commitText(e.target.value)}
-          placeholder="Type something…"
+          placeholder={dict.page.placeholders.paragraph}
           className={`py-1 text-[15px] leading-7 text-zinc-700 placeholder:text-ink-soft/40 ${textInputClass}`}
         />
       );
@@ -254,7 +258,7 @@ function BlockView({ pageId, block }: { pageId: string; block: Block }) {
             key={k}
             defaultValue={block.text}
             onBlur={(e) => commitText(e.target.value)}
-            placeholder="To-do"
+            placeholder={dict.page.placeholders.todo}
             className={`flex-1 rounded bg-transparent px-1 outline-none focus:bg-paper ${
               block.checked ? "text-zinc-400 line-through" : "text-zinc-700"
             }`}
@@ -269,7 +273,7 @@ function BlockView({ pageId, block }: { pageId: string; block: Block }) {
             key={k}
             defaultValue={block.text}
             onBlur={(e) => commitText(e.target.value)}
-            placeholder="List item"
+            placeholder={dict.page.placeholders.listItem}
             className={textInputClass}
           />
         </div>
@@ -310,7 +314,7 @@ function BlockView({ pageId, block }: { pageId: string; block: Block }) {
                 if (b?.type === "callout") b.emoji = e.target.value;
               })
             }
-            aria-label="Callout icon"
+            aria-label={dict.page.calloutIcon}
             maxLength={8}
             className="w-8 shrink-0 bg-transparent text-center text-xl outline-none"
           />
@@ -318,7 +322,7 @@ function BlockView({ pageId, block }: { pageId: string; block: Block }) {
             key={k}
             defaultValue={block.text}
             onBlur={(e) => commitText(e.target.value)}
-            placeholder="Callout"
+            placeholder={dict.page.placeholders.callout}
             className={textInputClass}
           />
         </div>

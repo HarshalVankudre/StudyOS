@@ -8,6 +8,7 @@ import {
   type QuestionAnswer,
 } from "@/lib/ai/onboarding";
 import { getUserPlan } from "@/lib/billing";
+import { getLocale } from "@/lib/i18n/server";
 import { saveNewWorkspace } from "@/lib/workspace/store";
 
 /**
@@ -21,8 +22,11 @@ export async function planQuestionsAction(
   if (!clean) {
     throw new Error("Please describe what you want to organize.");
   }
-  const model = modelForPlan(await getUserPlan());
-  return planQuestions(clean, model);
+  const [model, locale] = await Promise.all([
+    getUserPlan().then(modelForPlan),
+    getLocale(),
+  ]);
+  return planQuestions(clean, model, locale);
 }
 
 /**
@@ -38,8 +42,17 @@ export async function generateWorkspaceAction(
   if (!clean) {
     throw new Error("Please describe what you want to organize.");
   }
-  const model = modelForPlan(await getUserPlan());
+  const [model, locale] = await Promise.all([
+    getUserPlan().then(modelForPlan),
+    getLocale(),
+  ]);
   const preferences = formatPreferences(answers ?? []);
-  const workspace = await generateWorkspace(clean, model, preferences);
+  const workspace = await generateWorkspace(
+    clean,
+    model,
+    preferences,
+    undefined,
+    locale,
+  );
   return saveNewWorkspace(workspace);
 }

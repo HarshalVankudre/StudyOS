@@ -3,66 +3,77 @@ import Link from "next/link";
 import { auth } from "@clerk/nextjs/server";
 import { UserButton } from "@clerk/nextjs";
 import { isPro } from "@/lib/billing";
-import { manageBillingAction, startCheckoutAction } from "@/app/app/billing-actions";
+import {
+  CREDIT_PACK_PRICE_USD,
+  CREDIT_PACK_SIZE,
+  FREE_SIGNUP_CREDITS,
+  getCreditBalance,
+  PRO_SIGNUP_CREDITS,
+} from "@/lib/credits";
+import {
+  buyCreditsAction,
+  manageBillingAction,
+  startCheckoutAction,
+} from "@/app/app/billing-actions";
+import { getI18n } from "@/lib/i18n/server";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 
-export const metadata: Metadata = {
-  title: "Pricing · StudyOS",
-  description:
-    "Compare StudyOS Free and Pro. Start free and upgrade when you want the most capable model, unlimited generations, and priority support.",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const { dict } = await getI18n();
+  return { title: dict.meta.pricingTitle, description: dict.meta.pricingDescription };
+}
 
 type Cell = boolean | string;
 
-const FREE_BULLETS = [
-  "AI-generated study workspaces",
-  "Full inline editing & autosave",
-  "Databases — table, board & calendar",
-  "AI agent chat in your workspace",
-];
-
-const PRO_BULLETS = [
-  "Everything in Free",
-  "Unlimited workspace generations",
-  "The most capable, most detailed model",
-  "Priority support & early access",
-];
-
-const COMPARISON: { feature: string; free: Cell; pro: Cell }[] = [
-  { feature: "AI-generated workspaces", free: true, pro: true },
-  { feature: "Guided onboarding questions", free: true, pro: true },
-  { feature: "Full inline editing & autosave", free: true, pro: true },
-  { feature: "Databases — table, board & calendar", free: true, pro: true },
-  { feature: "Drag-and-drop editing", free: true, pro: true },
-  { feature: "AI agent chat that edits your workspace", free: true, pro: true },
-  { feature: "Generation model", free: "Standard", pro: "Most capable" },
-  { feature: "Workspace generations", free: "Generous", pro: "Unlimited" },
-  { feature: "Support", free: "Community", pro: "Priority" },
-  { feature: "Early access to new features", free: false, pro: true },
-];
-
-const FAQ = [
-  {
-    q: "Is StudyOS really free to start?",
-    a: "Yes. Create an account and generate, edit, and use your workspaces on the Free plan — no credit card required.",
-  },
-  {
-    q: "What do I get with Pro?",
-    a: "Unlimited generations, the most capable model for richer and more accurate workspaces, priority support, and early access to new features.",
-  },
-  {
-    q: "Can I cancel anytime?",
-    a: "Anytime. Manage or cancel your subscription from the billing portal — you keep Pro until the end of the period.",
-  },
-  {
-    q: "What happens to my workspaces if I downgrade?",
-    a: "Nothing is deleted. Your workspaces stay exactly as they are and remain fully editable on Free.",
-  },
-];
-
 export default async function PricingPage() {
+  const { dict } = await getI18n();
   const { userId } = await auth();
   const signedIn = Boolean(userId);
   const pro = signedIn ? await isPro() : false;
+  const credits = userId ? await getCreditBalance(userId) : 0;
+
+  const FREE_BULLETS = [
+    `${FREE_SIGNUP_CREDITS} starter AI credits`,
+    dict.pricing.free.bullets[0],
+    dict.pricing.free.bullets[1],
+    dict.pricing.free.bullets[2],
+    dict.pricing.free.bullets[3],
+  ];
+
+  const PRO_BULLETS = [
+    dict.pricing.pro.bullets[0],
+    `${PRO_SIGNUP_CREDITS.toLocaleString()} AI credits included`,
+    dict.pricing.pro.bullets[2],
+    dict.pricing.pro.bullets[3],
+  ];
+
+  const COMPARISON: { feature: string; free: Cell; pro: Cell }[] = [
+    { feature: dict.pricing.comparison.features.aiWorkspaces, free: true, pro: true },
+    { feature: dict.pricing.comparison.features.onboarding, free: true, pro: true },
+    { feature: dict.pricing.comparison.features.editing, free: true, pro: true },
+    { feature: dict.pricing.comparison.features.databases, free: true, pro: true },
+    { feature: dict.pricing.comparison.features.dragDrop, free: true, pro: true },
+    { feature: dict.pricing.comparison.features.agentChat, free: true, pro: true },
+    {
+      feature: dict.pricing.comparison.features.model,
+      free: dict.pricing.comparison.values.standard,
+      pro: dict.pricing.comparison.values.mostCapable,
+    },
+    {
+      feature: "Included AI credits",
+      free: String(FREE_SIGNUP_CREDITS),
+      pro: PRO_SIGNUP_CREDITS.toLocaleString(),
+    },
+    { feature: "Buy more credits anytime", free: true, pro: true },
+    {
+      feature: dict.pricing.comparison.features.support,
+      free: dict.pricing.comparison.values.community,
+      pro: dict.pricing.comparison.values.priority,
+    },
+    { feature: dict.pricing.comparison.features.earlyAccess, free: false, pro: true },
+  ];
+
+  const FAQ = dict.pricing.faq;
 
   return (
     <div className="min-h-screen bg-paper text-ink antialiased">
@@ -77,13 +88,14 @@ export default async function PricingPage() {
             <span className="mb-2 h-1.5 w-1.5 rounded-full bg-lime" aria-hidden />
           </Link>
           <div className="flex items-center gap-3">
+            <LanguageSwitcher compact />
             {signedIn ? (
               <>
                 <Link
                   href="/app"
                   className="text-sm text-ink-soft transition hover:text-ink"
                 >
-                  Open app
+                  {dict.common.openApp}
                 </Link>
                 <UserButton />
               </>
@@ -93,13 +105,13 @@ export default async function PricingPage() {
                   href="/sign-in"
                   className="text-sm text-ink-soft transition hover:text-ink"
                 >
-                  Sign in
+                  {dict.common.signIn}
                 </Link>
                 <Link
                   href="/sign-up"
                   className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-paper shadow-sm transition hover:bg-ink/90"
                 >
-                  Get started
+                  {dict.common.getStarted}
                 </Link>
               </>
             )}
@@ -112,14 +124,13 @@ export default async function PricingPage() {
         <div className="text-center">
           <p className="flex items-center justify-center gap-2 text-sm font-medium text-ink-soft">
             <span className="h-1.5 w-1.5 rounded-full bg-lime" aria-hidden />
-            Simple, student-friendly pricing
+            {dict.pricing.badge}
           </p>
           <h1 className="mt-5 font-display text-4xl font-extrabold tracking-tight sm:text-5xl">
-            Start free. Upgrade when you&rsquo;re ready.
+            {dict.pricing.title}
           </h1>
           <p className="mx-auto mt-4 max-w-xl text-lg leading-relaxed text-ink-soft">
-            Everything you need to organize your semester is free. Pro adds the
-            most capable model, unlimited generations, and priority support.
+            {dict.pricing.subtitle}
           </p>
         </div>
 
@@ -128,10 +139,10 @@ export default async function PricingPage() {
           {/* Free */}
           <div className="flex flex-col rounded-2xl border border-ink/10 bg-white/60 p-8">
             <span className="text-sm font-semibold uppercase tracking-wide text-ink-soft">
-              Free
+              {dict.pricing.free.name}
             </span>
-            <div className="mt-3 font-display text-5xl font-extrabold">$0</div>
-            <p className="mt-1 text-sm text-ink-soft">Everything to get organized.</p>
+            <div className="mt-3 font-display text-5xl font-extrabold">{dict.pricing.free.price}</div>
+            <p className="mt-1 text-sm text-ink-soft">{dict.pricing.free.tagline}</p>
             <ul className="mt-6 space-y-3 text-sm">
               {FREE_BULLETS.map((b) => (
                 <Feature key={b}>{b}</Feature>
@@ -143,14 +154,14 @@ export default async function PricingPage() {
                   href="/app"
                   className="block rounded-lg border border-ink/15 bg-white px-5 py-3 text-center text-sm font-semibold text-ink transition hover:border-ink/40"
                 >
-                  Open your workspaces
+                  {dict.pricing.free.ctaSignedIn}
                 </Link>
               ) : (
                 <Link
                   href="/sign-up"
                   className="block rounded-lg bg-ink px-5 py-3 text-center text-sm font-semibold text-paper transition hover:bg-ink/90"
                 >
-                  Get started free
+                  {dict.pricing.free.ctaSignedOut}
                 </Link>
               )}
             </div>
@@ -159,17 +170,17 @@ export default async function PricingPage() {
           {/* Pro */}
           <div className="relative flex flex-col rounded-2xl border-2 border-ink bg-white p-8 shadow-[0_24px_60px_-30px_rgba(26,23,18,0.45)]">
             <span className="absolute right-6 top-8 rounded-full bg-lime px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-ink">
-              Most popular
+              {dict.pricing.pro.badge}
             </span>
             <span className="text-sm font-semibold uppercase tracking-wide text-ink-soft">
-              Pro
+              {dict.pricing.pro.name}
             </span>
             <div className="mt-3 font-display text-5xl font-extrabold">
-              $5
-              <span className="text-lg font-bold text-ink-soft">/mo</span>
+              {dict.pricing.pro.price}
+              <span className="text-lg font-bold text-ink-soft">{dict.pricing.pro.perMonth}</span>
             </div>
             <p className="mt-1 text-sm text-ink-soft">
-              Billed monthly · cancel anytime.
+              {dict.pricing.pro.billed}
             </p>
             <ul className="mt-6 space-y-3 text-sm">
               {PRO_BULLETS.map((b) => (
@@ -182,14 +193,14 @@ export default async function PricingPage() {
               {pro ? (
                 <div className="space-y-3">
                   <div className="rounded-lg bg-lime/15 px-4 py-3 text-center text-sm font-semibold text-ink ring-1 ring-inset ring-lime-deep/30">
-                    ✦ Your current plan
+                    {dict.pricing.pro.currentPlan}
                   </div>
                   <form action={manageBillingAction}>
                     <button
                       type="submit"
                       className="w-full rounded-lg border border-ink/15 bg-white px-5 py-3 text-sm font-semibold text-ink transition hover:border-ink/40"
                     >
-                      Manage billing
+                      {dict.pricing.pro.manageBilling}
                     </button>
                   </form>
                 </div>
@@ -199,7 +210,7 @@ export default async function PricingPage() {
                     type="submit"
                     className="w-full rounded-lg bg-ink px-5 py-3 text-sm font-semibold text-paper transition hover:bg-ink/90"
                   >
-                    Upgrade to Pro
+                    {dict.pricing.pro.upgrade}
                   </button>
                 </form>
               ) : (
@@ -207,30 +218,102 @@ export default async function PricingPage() {
                   href="/sign-up"
                   className="block rounded-lg bg-ink px-5 py-3 text-center text-sm font-semibold text-paper transition hover:bg-ink/90"
                 >
-                  Get started with Pro
+                  {dict.pricing.pro.ctaSignedOut}
                 </Link>
               )}
             </div>
           </div>
         </div>
 
+        {/* Credits */}
+        <section id="credits" className="mt-20 scroll-mt-20">
+          <div className="rounded-2xl border border-ink/10 bg-white/60 p-8 sm:p-10">
+            <div className="grid gap-8 sm:grid-cols-[1.3fr_1fr] sm:items-center">
+              <div>
+                <h2 className="font-display text-2xl font-bold tracking-tight sm:text-3xl">
+                  AI runs on credits
+                </h2>
+                <p className="mt-3 text-ink-soft">
+                  Every AI request spends credits based on how much it does — a
+                  quick tweak costs a little, building a whole workspace costs
+                  more. Pro comes loaded with credits, and you can top up
+                  anytime.
+                </p>
+                <ul className="mt-4 space-y-2 text-sm">
+                  <Feature>
+                    Free includes {FREE_SIGNUP_CREDITS} starter credits
+                  </Feature>
+                  <Feature>
+                    Pro includes {PRO_SIGNUP_CREDITS.toLocaleString()} credits
+                  </Feature>
+                  <Feature>Top up anytime — credits never expire</Feature>
+                </ul>
+                {signedIn && (
+                  <p className="mt-5 inline-flex items-center gap-2 rounded-full bg-ink/5 px-3.5 py-1.5 text-sm font-semibold text-ink">
+                    <span className="text-lime-deep" aria-hidden>
+                      ●
+                    </span>
+                    Your balance: {credits.toLocaleString()} credits
+                  </p>
+                )}
+              </div>
+
+              {/* Buy a credit pack */}
+              <div className="rounded-xl border border-ink/15 bg-white p-6 text-center shadow-sm">
+                <p className="text-sm font-semibold uppercase tracking-wide text-ink-soft">
+                  Credit pack
+                </p>
+                <div className="mt-2 font-display text-4xl font-extrabold">
+                  {CREDIT_PACK_SIZE.toLocaleString()}
+                </div>
+                <p className="text-sm text-ink-soft">credits</p>
+                <div className="mt-3 font-display text-2xl font-bold">
+                  ${CREDIT_PACK_PRICE_USD}
+                </div>
+                <div className="mt-5">
+                  {signedIn ? (
+                    <form action={buyCreditsAction}>
+                      <button
+                        type="submit"
+                        className="w-full rounded-lg bg-ink px-5 py-3 text-sm font-semibold text-paper transition hover:bg-ink/90"
+                      >
+                        Buy {CREDIT_PACK_SIZE.toLocaleString()} credits
+                      </button>
+                    </form>
+                  ) : (
+                    <Link
+                      href="/sign-up"
+                      className="block rounded-lg bg-ink px-5 py-3 text-sm font-semibold text-paper transition hover:bg-ink/90"
+                    >
+                      Sign up to buy credits
+                    </Link>
+                  )}
+                </div>
+                <p className="mt-3 text-xs text-ink-soft/70">
+                  One-time purchase · secure checkout
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+
         {/* Comparison table */}
         <section className="mt-20">
           <h2 className="text-center font-display text-2xl font-bold tracking-tight sm:text-3xl">
-            Compare plans
+            {dict.pricing.comparison.title}
           </h2>
           <div className="mx-auto mt-8 max-w-3xl overflow-hidden rounded-2xl border border-ink/10 bg-white/60">
             <table className="w-full border-collapse text-sm">
               <thead>
                 <tr className="border-b border-ink/10 bg-white/60 text-left">
                   <th className="px-5 py-4 font-display text-base font-bold">
-                    Features
+                    {dict.pricing.comparison.featuresHeader}
                   </th>
                   <th className="w-28 px-3 py-4 text-center font-semibold text-ink-soft">
-                    Free
+                    {dict.pricing.comparison.freeHeader}
                   </th>
                   <th className="w-28 px-3 py-4 text-center font-semibold text-ink">
-                    Pro
+                    {dict.pricing.comparison.proHeader}
                   </th>
                 </tr>
               </thead>
@@ -242,10 +325,19 @@ export default async function PricingPage() {
                   >
                     <td className="px-5 py-3.5 text-ink">{row.feature}</td>
                     <td className="px-3 py-3.5 text-center">
-                      <Mark value={row.free} />
+                      <Mark
+                        value={row.free}
+                        includedLabel={dict.pricing.comparison.included}
+                        notIncludedLabel={dict.pricing.comparison.notIncluded}
+                      />
                     </td>
                     <td className="bg-lime/[0.06] px-3 py-3.5 text-center font-medium">
-                      <Mark value={row.pro} strong />
+                      <Mark
+                        value={row.pro}
+                        strong
+                        includedLabel={dict.pricing.comparison.included}
+                        notIncludedLabel={dict.pricing.comparison.notIncluded}
+                      />
                     </td>
                   </tr>
                 ))}
@@ -257,7 +349,7 @@ export default async function PricingPage() {
         {/* FAQ */}
         <section className="mt-20">
           <h2 className="text-center font-display text-2xl font-bold tracking-tight sm:text-3xl">
-            Questions
+            {dict.pricing.faqTitle}
           </h2>
           <div className="mx-auto mt-8 grid max-w-3xl gap-4 sm:grid-cols-2">
             {FAQ.map((item) => (
@@ -279,16 +371,16 @@ export default async function PricingPage() {
         {/* Bottom CTA */}
         <section className="mt-20 rounded-2xl bg-ink px-6 py-14 text-center text-paper">
           <h2 className="font-display text-3xl font-extrabold tracking-tight">
-            Your first workspace is one sentence away.
+            {dict.pricing.ctaTitle}
           </h2>
           <p className="mx-auto mt-3 max-w-md text-paper/60">
-            Try StudyOS free — upgrade only if you want more.
+            {dict.pricing.ctaSubtitle}
           </p>
           <Link
             href={signedIn ? "/generate" : "/sign-up"}
             className="mt-8 inline-flex items-center gap-2 rounded-lg bg-paper px-8 py-3.5 text-sm font-bold text-ink transition hover:bg-white"
           >
-            {signedIn ? "Generate a workspace" : "Get started free"}
+            {signedIn ? dict.pricing.ctaSignedIn : dict.pricing.ctaSignedOut}
             <span aria-hidden>→</span>
           </Link>
         </section>
@@ -304,7 +396,7 @@ export default async function PricingPage() {
             <span className="mb-2 h-1 w-1 rounded-full bg-lime" aria-hidden />
           </Link>
           <span className="text-sm text-ink-soft">
-            The study workspace for students · © 2026
+            {dict.pricing.footerTagline}
           </span>
         </div>
       </footer>
@@ -334,7 +426,17 @@ function Feature({
   );
 }
 
-function Mark({ value, strong }: { value: Cell; strong?: boolean }) {
+function Mark({
+  value,
+  strong,
+  includedLabel,
+  notIncludedLabel,
+}: {
+  value: Cell;
+  strong?: boolean;
+  includedLabel: string;
+  notIncludedLabel: string;
+}) {
   if (typeof value === "string") {
     return <span className={strong ? "text-ink" : "text-ink-soft"}>{value}</span>;
   }
@@ -344,14 +446,14 @@ function Mark({ value, strong }: { value: Cell; strong?: boolean }) {
         className={`inline-grid h-5 w-5 place-items-center rounded-full text-xs ${
           strong ? "bg-lime text-ink" : "bg-ink/10 text-ink"
         }`}
-        aria-label="Included"
+        aria-label={includedLabel}
       >
         ✓
       </span>
     );
   }
   return (
-    <span className="text-ink-soft/40" aria-label="Not included">
+    <span className="text-ink-soft/40" aria-label={notIncludedLabel}>
       —
     </span>
   );

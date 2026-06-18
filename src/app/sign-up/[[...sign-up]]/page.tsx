@@ -1,5 +1,6 @@
 import { SignUp } from "@clerk/nextjs";
 import Link from "next/link";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 
 export default function Page() {
   return (
@@ -12,6 +13,9 @@ export default function Page() {
         <span className="mb-3 h-2 w-2 rounded-full bg-lime" aria-hidden />
       </Link>
       <SignUp />
+      <div className="mt-8">
+        <LanguageSwitcher />
+      </div>
     </main>
   );
 }

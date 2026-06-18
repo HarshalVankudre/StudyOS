@@ -15,8 +15,10 @@ import {
   type AgentMessage,
   type AgentResponse,
 } from "./agent-shared";
-import { extractJson, WORKSPACE_SHAPE } from "./generate";
+import { extractJson, WORKSPACE_SHAPE, languageDirective } from "./generate";
 import { chatCompletion, type ChatMessage } from "./openrouter";
+import { DEFAULT_LOCALE, type Locale } from "@/lib/i18n/config";
+import { getDictionary } from "@/lib/i18n/dictionaries";
 
 const MAX_HISTORY = 8;
 
@@ -61,12 +63,13 @@ export async function planAgentTurn(
   history: AgentMessage[],
   message: string,
   model: string,
+  locale: Locale = DEFAULT_LOCALE,
 ): Promise<AgentDecision> {
   requireAgentKey();
 
   const areas = workspaceAreas(current);
   const messages: ChatMessage[] = [
-    { role: "system", content: buildPlannerSystemPrompt(areas) },
+    { role: "system", content: buildPlannerSystemPrompt(areas, locale) },
     ...history.slice(-MAX_HISTORY).map(
       (item): ChatMessage => ({
         role: item.role,
@@ -111,11 +114,12 @@ export async function executeAgentEdit(
   message: string,
   decision: Extract<AgentDecision, { action: "edit" }>,
   model: string,
+  locale: Locale = DEFAULT_LOCALE,
 ): Promise<AgentResponse> {
   requireAgentKey();
 
   const messages: ChatMessage[] = [
-    { role: "system", content: buildEditorSystemPrompt() },
+    { role: "system", content: buildEditorSystemPrompt(locale) },
     ...history.slice(-MAX_HISTORY).map(
       (item): ChatMessage => ({
         role: item.role,
@@ -141,7 +145,7 @@ export async function executeAgentEdit(
   ];
 
   const raw = await chatCompletion(model, messages, 7000);
-  const result = parseEditReply(raw);
+  const result = parseEditReply(raw, getDictionary(locale).ai.agent.fallbackReply);
   return {
     ...result,
     affectedAreas: decision.affectedAreas,
@@ -154,8 +158,9 @@ export async function runAgent(
   history: AgentMessage[],
   message: string,
   model: string,
+  locale: Locale = DEFAULT_LOCALE,
 ): Promise<AgentResponse> {
-  const decision = await planAgentTurn(current, history, message, model);
+  const decision = await planAgentTurn(current, history, message, model, locale);
   if (decision.action === "reply") {
     return { reply: decision.reply, changed: false };
   }
@@ -166,7 +171,7 @@ export async function runAgent(
       choices: decision.choices,
     };
   }
-  return executeAgentEdit(current, history, message, decision, model);
+  return executeAgentEdit(current, history, message, decision, model, locale);
 }
 
 export function workspaceAreas(workspace: Workspace): AgentArea[] {
@@ -194,12 +199,12 @@ function inferAllRelevantAreas(workspace: Workspace): AgentArea[] {
   return workspaceAreas(workspace).slice(0, 10);
 }
 
-function parseEditReply(raw: string): AgentResponse {
+function parseEditReply(raw: string, fallbackReply: string): AgentResponse {
   const data = extractJson(raw) as Record<string, unknown>;
   const reply =
     typeof data.reply === "string" && data.reply.trim()
       ? data.reply.trim()
-      : "Updated your workspace.";
+      : fallbackReply;
   const parsed = safeParseWorkspace(data.workspace);
   if (!parsed.success) {
     throw new Error(`Agent returned an invalid workspace: ${parsed.error.message}`);
@@ -215,7 +220,7 @@ function requireAgentKey() {
   }
 }
 
-function buildPlannerSystemPrompt(areas: AgentArea[]): string {
+function buildPlannerSystemPrompt(areas: AgentArea[], locale: Locale): string {
   return [
     "You are the planning and safety layer for the StudyOS workspace agent.",
     "You receive the complete saved workspace and the conversation. Decide what should happen BEFORE any data is changed.",
@@ -234,6 +239,7 @@ function buildPlannerSystemPrompt(areas: AgentArea[]): string {
     "CLARIFICATION RULES:",
     "- If a request is ambiguous, contradictory, references an unclear item, has multiple materially different interpretations, or lacks information needed to avoid a wrong change, you MUST clarify before editing.",
     "- Give 2–4 mutually exclusive, useful choices. Never make a destructive or broad assumption.",
+    "- Do not include an Other/custom choice; the interface always adds its own text field.",
     "- Do not clarify when the user gave enough detail for a safe reversible edit.",
     "",
     "WORKSPACE-AWARE EDITING RULES:",
@@ -244,10 +250,11 @@ function buildPlannerSystemPrompt(areas: AgentArea[]): string {
     "",
     "Valid workspace area ids:",
     JSON.stringify(areas),
+    languageDirective(locale),
   ].join("\n");
 }
 
-function buildEditorSystemPrompt(): string {
+function buildEditorSystemPrompt(locale: Locale): string {
   return [
     "You are the StudyOS workspace editor. The planning layer has already approved a clear edit.",
     "Return exactly one JSON object and nothing else:",
@@ -267,5 +274,6 @@ function buildEditorSystemPrompt(): string {
     "",
     "The workspace must match this shape:",
     WORKSPACE_SHAPE,
+    languageDirective(locale),
   ].join("\n");
 }

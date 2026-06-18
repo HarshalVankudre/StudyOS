@@ -1,6 +1,6 @@
 import type { Dictionary } from "./en";
 
-/** Portuguese (pt-BR) — translation of the canonical English dictionary. */
+// Português (pt-BR) — tradução do dicionário canônico em inglês.
 export const pt = {
   // ---- Document <title> / <meta> ----------------------------------------
   meta: {
@@ -9,6 +9,9 @@ export const pt = {
       "Descreva seus cursos e prazos, e o StudyOS monta na hora seus painéis, planejadores e controles de tarefas. O espaço de estudos com IA para estudantes.",
     appTitle: "Seus espaços de trabalho · StudyOS",
     generateTitle: "Crie seu espaço de trabalho · StudyOS",
+    pricingTitle: "Preços · StudyOS",
+    pricingDescription:
+      "Compare o StudyOS Grátis e Pro. Comece de graça e faça upgrade quando quiser o modelo mais avançado, gerações ilimitadas e suporte prioritário.",
     workspaceTitle: "{name} · StudyOS",
     brandFallback: "StudyOS",
   },
@@ -17,6 +20,14 @@ export const pt = {
   language: {
     label: "Idioma",
     choose: "Escolher idioma",
+  },
+
+  // ---- Shared bits used on more than one surface ------------------------
+  common: {
+    openApp: "Abrir app",
+    signIn: "Entrar",
+    getStarted: "Começar",
+    cancel: "Cancelar",
   },
 
   // ---- Landing page ------------------------------------------------------
@@ -34,7 +45,7 @@ export const pt = {
       titleLine1: "Seu semestre inteiro,",
       titleLine2: "organizado.",
       subtitle:
-        "Descreva suas aulas em uma frase e o StudyOS monta os painéis, planejadores e controles de que você precisa — já preenchidos. Sem modelos, sem páginas em branco.",
+        "Descreva suas aulas em uma frase e o StudyOS prepara os painéis, planejadores e controles que você precisa — já preenchidos. Sem modelos prontos, sem páginas em branco.",
       ctaGenerate: "Criar meu espaço de trabalho",
       ctaDemo: "Ver uma demonstração",
       finePrint: "Comece grátis · Sem cartão de crédito · Pronto em segundos",
@@ -56,25 +67,25 @@ export const pt = {
       steps: [
         {
           title: "Descreva suas aulas",
-          body: "Uma frase — “Sou de pré-medicina, cursando Anatomia, Bioquímica e Fisiologia.”",
+          body: "Uma frase — “Sou de pré-medicina e faço Anatomia, Bioquímica e Fisiologia.”",
         },
         {
           title: "Receba um espaço completo",
-          body: "Cursos, um quadro de tarefas, um planejador e uma lista de leituras — já configurados e preenchidos.",
+          body: "Cursos, um quadro de tarefas, um planejador e uma lista de leituras — já prontos e preenchidos.",
         },
         {
           title: "Estude e ajuste",
-          body: "Edite qualquer coisa, marque tarefas, peça mudanças em linguagem simples. Tudo salva automaticamente.",
+          body: "Edite o que quiser, marque tarefas, peça mudanças em linguagem simples. Tudo salva automaticamente.",
         },
       ],
     },
     features: {
       title: "Tudo o que um semestre precisa.",
-      subtitle: "Gerado para você em um passo — e depois é seu para moldar.",
+      subtitle: "Gerado para você em um passo — depois, é seu para moldar.",
       items: {
         generate: {
           k: "Gerar",
-          title: "Espaços de trabalho feitos para você",
+          title: "Espaços de trabalho, feitos para você",
           body: "Um comando vira um espaço de trabalho completo, sob medida para os seus cursos.",
         },
         databases: {
@@ -85,7 +96,7 @@ export const pt = {
         calendar: {
           k: "Calendário",
           title: "Planejador e calendário",
-          body: "Todos os prazos em um só lugar. Alterne entre tabela, quadro e calendário com um clique.",
+          body: "Todos os prazos em um só lugar. Alterne entre tabela, quadro e calendário em um clique.",
         },
         dashboard: {
           k: "Painel",
@@ -95,12 +106,12 @@ export const pt = {
         autosave: {
           k: "Salvamento automático",
           title: "Edite, salvo na hora",
-          body: "Renomeie, marque, adicione linhas — cada mudança se salva no momento em que você a faz.",
+          body: "Renomeie, marque, adicione linhas — cada mudança se salva no momento em que você faz.",
         },
         assistant: {
           k: "Assistente",
           title: "Peça em linguagem simples",
-          body: "“Adicione uma prova intermediária em CC.” Seu espaço de trabalho se atualiza diante dos seus olhos.",
+          body: "“Adicione uma prova intermediária em Computação.” Seu espaço de trabalho se atualiza, bem na sua frente.",
         },
       },
     },
@@ -112,10 +123,10 @@ export const pt = {
         name: "Grátis",
         price: "$0",
         features: [
-          "Gerar espaços de trabalho com IA",
-          "Editar e salvar tudo automaticamente",
+          "Gere espaços de trabalho com IA",
+          "Edite e salve tudo automaticamente",
           "Painéis, bancos de dados, calendário",
-          "Pedir edições em linguagem simples",
+          "Peça edições em linguagem simples",
         ],
         cta: "Começar",
       },
@@ -124,7 +135,7 @@ export const pt = {
         name: "Pro",
         price: "$5",
         features: [
-          "Tudo do plano Grátis",
+          "Tudo do Grátis",
           "Gerações ilimitadas",
           "O modelo mais inteligente e detalhado",
           "Suporte prioritário",
@@ -141,15 +152,105 @@ export const pt = {
     footer: {
       tagline: "O espaço de estudos para estudantes · © 2026",
     },
-    // The little workspace mockup in the hero.
     preview: {
-      name: "Central de Estudos de CC",
+      name: "Central de Estudos de Computação",
       thisWeek: "Esta semana",
       columns: { todo: "A fazer", doing: "Fazendo", done: "Concluído" },
       cards: ["Quiz de Provas", "Lab de Lista Encadeada", "Relatório de Lab 2"],
       coursesLabel: "Cursos",
       courses: ["Estruturas de Dados", "Matemática Discreta", "Física I"],
     },
+  },
+
+  // ---- Pricing page (/pricing) ------------------------------------------
+  pricing: {
+    nav: { openApp: "Abrir app", signIn: "Entrar", getStarted: "Começar" },
+    badge: "Preços simples e acessíveis para estudantes",
+    title: "Comece grátis. Faça upgrade quando estiver pronto.",
+    subtitle:
+      "Tudo o que você precisa para organizar seu semestre é grátis. O Pro adiciona o modelo mais avançado, gerações ilimitadas e suporte prioritário.",
+    free: {
+      name: "Grátis",
+      price: "$0",
+      tagline: "Tudo para se organizar.",
+      bullets: [
+        "Espaços de trabalho de estudos gerados por IA",
+        "Edição inline completa e salvamento automático",
+        "Bancos de dados — tabela, quadro e calendário",
+        "Chat com agente de IA no seu espaço de trabalho",
+      ],
+      ctaSignedOut: "Comece grátis",
+      ctaSignedIn: "Abrir seus espaços de trabalho",
+    },
+    pro: {
+      badge: "Mais popular",
+      name: "Pro",
+      price: "$5",
+      perMonth: "/mês",
+      billed: "Cobrado mensalmente · cancele quando quiser.",
+      bullets: [
+        "Tudo do Grátis",
+        "Gerações ilimitadas de espaços de trabalho",
+        "O modelo mais avançado e detalhado",
+        "Suporte prioritário e acesso antecipado",
+      ],
+      currentPlan: "✦ Seu plano atual",
+      manageBilling: "Gerenciar cobrança",
+      upgrade: "Fazer upgrade para o Pro",
+      ctaSignedOut: "Começar com o Pro",
+    },
+    comparison: {
+      title: "Comparar planos",
+      featuresHeader: "Recursos",
+      freeHeader: "Grátis",
+      proHeader: "Pro",
+      included: "Incluído",
+      notIncluded: "Não incluído",
+      features: {
+        aiWorkspaces: "Espaços de trabalho gerados por IA",
+        onboarding: "Perguntas de configuração guiada",
+        editing: "Edição inline completa e salvamento automático",
+        databases: "Bancos de dados — tabela, quadro e calendário",
+        dragDrop: "Edição com arrastar e soltar",
+        agentChat: "Chat com agente de IA que edita seu espaço de trabalho",
+        model: "Modelo de geração",
+        generations: "Gerações de espaços de trabalho",
+        support: "Suporte",
+        earlyAccess: "Acesso antecipado a novos recursos",
+      },
+      values: {
+        standard: "Padrão",
+        mostCapable: "Mais avançado",
+        generous: "Generoso",
+        unlimited: "Ilimitado",
+        community: "Comunidade",
+        priority: "Prioritário",
+      },
+    },
+    faqTitle: "Perguntas",
+    faq: [
+      {
+        q: "O StudyOS é realmente grátis para começar?",
+        a: "Sim. Crie uma conta e gere, edite e use seus espaços de trabalho no plano Grátis — sem precisar de cartão de crédito.",
+      },
+      {
+        q: "O que ganho com o Pro?",
+        a: "Gerações ilimitadas, o modelo mais avançado para espaços de trabalho mais ricos e precisos, suporte prioritário e acesso antecipado a novos recursos.",
+      },
+      {
+        q: "Posso cancelar quando quiser?",
+        a: "Quando quiser. Gerencie ou cancele sua assinatura pelo portal de cobrança — você mantém o Pro até o fim do período.",
+      },
+      {
+        q: "O que acontece com meus espaços de trabalho se eu fizer downgrade?",
+        a: "Nada é excluído. Seus espaços de trabalho permanecem exatamente como estão e continuam totalmente editáveis no Grátis.",
+      },
+    ],
+    ctaTitle: "Seu primeiro espaço de trabalho está a uma frase de distância.",
+    ctaSubtitle: "Experimente o StudyOS grátis — faça upgrade só se quiser mais.",
+    ctaSignedIn: "Gerar um espaço de trabalho",
+    ctaSignedOut: "Comece grátis",
+    footerTagline: "O espaço de estudos para estudantes · © 2026",
   },
 
   // ---- Workspaces list (/app) -------------------------------------------
@@ -163,8 +264,8 @@ export const pt = {
     subtitle: "Tudo o que o StudyOS criou para você.",
     total: "{count} no total",
     emptyTitle: "Nenhum espaço de trabalho ainda",
-    emptySubtitle: "Crie um ou carregue a demonstração para dar uma olhada.",
-    emptyGenerate: "Criar um espaço de trabalho",
+    emptySubtitle: "Gere um, ou carregue a demonstração para dar uma olhada.",
+    emptyGenerate: "Gerar um espaço de trabalho",
     loadDemo: "Carregar demonstração",
     updatedAt: "atualizado em {date}",
     fallbackIcon: "📄",
@@ -174,15 +275,15 @@ export const pt = {
   generate: {
     backToWorkspaces: "Seus espaços de trabalho →",
     examples: [
-      { emoji: "💻", text: "Sou estudante de CC do 1º ano, cursando 5 disciplinas" },
+      { emoji: "💻", text: "Sou estudante de Computação do 1º ano fazendo 5 cursos" },
       {
         emoji: "⚕️",
-        text: "Pré-medicina, 2º ano: Anatomia, Bioquímica, Fisiologia, Química Orgânica",
+        text: "2º ano de pré-medicina: Anatomia, Bioquímica, Fisiologia, Química Orgânica",
       },
-      { emoji: "🎓", text: "Estou no 2º ano do ensino médio, estudando 6 matérias para as provas finais" },
+      { emoji: "🎓", text: "2º ano do ensino médio estudando 6 matérias para as provas finais" },
       {
         emoji: "📈",
-        text: "Estudante de MBA cursando Microeconomia, Contabilidade e Marketing",
+        text: "Estudante de MBA fazendo Microeconomia, Contabilidade e Marketing",
       },
     ],
     planSteps: [
@@ -190,26 +291,19 @@ export const pt = {
       "Pensando em boas perguntas",
       "Personalizando sua configuração",
     ],
-    buildSteps: [
-      "Planejando seus cursos",
-      "Desenhando seu painel",
-      "Organizando seu planejador",
-      "Montando o espaço de trabalho",
-    ],
     planningTitle: "Conhecendo você",
-    buildingTitle: "Construindo seu espaço de trabalho",
     errorGeneric: "Algo deu errado. Tente novamente.",
     errorBuild: "Algo deu errado ao gerar seu espaço de trabalho. Tente novamente.",
     describe: {
       step: "Passo 1 de 2",
       title: "O que você está estudando?",
       subtitle:
-        "Descreva seus cursos e objetivos em linguagem simples. O StudyOS faz algumas perguntas rápidas e depois projeta todo o espaço de trabalho com base nas suas respostas.",
+        "Descreva seus cursos e objetivos em linguagem simples. O StudyOS faz algumas perguntas rápidas e então projeta todo o espaço de trabalho em torno das suas respostas.",
       placeholder:
-        "ex.: Sou estudante de CC do 1º ano, cursando Estruturas de Dados, Matemática Discreta, Cálculo II e Redação Acadêmica neste semestre.",
+        "ex.: Sou estudante de Computação do 1º ano fazendo Estruturas de Dados, Matemática Discreta, Cálculo II e Escrita Acadêmica neste semestre.",
       shortcut: "⌘ / Ctrl + Enter",
       continue: "Continuar",
-      examplesLabel: "Não tem certeza? Comece a partir de um exemplo",
+      examplesLabel: "Em dúvida? Comece a partir de um exemplo",
       finePrint: "Grátis · sem cartão de crédito · pronto em segundos",
     },
     questions: {
@@ -219,52 +313,121 @@ export const pt = {
       designingFor: "Projetando para:",
       pickAny: "escolha quantas quiser",
       pickOne: "escolha uma",
-      build: "Construir meu espaço de trabalho",
-      answeredNone: "Responda algumas, ou apenas construa — você decide",
+      build: "Criar meu espaço de trabalho",
+      answeredNone: "Responda algumas, ou apenas crie — você decide",
       answeredCount: "{n} / {total} respondidas",
     },
   },
 
-  // ---- AI activity overlay ----------------------------------------------
+  // ---- Generation activity (full-screen build progress) -----------------
+  genActivity: {
+    building: "Criando seu espaço de trabalho",
+    designing: "Projetando seu espaço de trabalho",
+    componentsChosen: "Componentes escolhidos para você",
+    planningComponents: "Planejando componentes",
+    onlyRelevant: "Apenas as páginas e controles relevantes para suas respostas.",
+    componentsCount: "{count} componentes",
+    everythingEditable:
+      "Tudo o que é gerado continua editável — páginas, campos, visualizações, linhas e conteúdo.",
+    statusReady: "Pronto",
+    statusGenerating: "Gerando…",
+    statusQueued: "Na fila",
+    finishingUp: "Finalizando",
+    yourWorkspace: "Seu espaço de trabalho",
+    pagesLabel: "Páginas",
+    sectionsBuilt: "{built} de {total} seções criadas",
+    choosingPieces: "Escolhendo as peças certas para você…",
+    stillEditable: "Tudo continua editável quando estiver pronto",
+    writingItIn: "Escrevendo…",
+    board: { todo: "A fazer", doing: "Fazendo", done: "Concluído" },
+    phase: {
+      analyzing: "Analisando suas respostas",
+      planning: "Selecionando componentes",
+      generating: "Gerando espaço de trabalho",
+      validating: "Validando dados",
+      saving: "Salvando",
+    },
+  },
+
+  // ---- AiActivity overlay (calm spinner used during planning) -----------
   aiActivity: {
     defaultTitle: "Trabalhando nisso",
     defaultSteps: [
       "Lendo seu espaço de trabalho",
       "Planejando as mudanças",
-      "Desenhando o layout",
-      "Aplicando as alterações",
+      "Projetando o layout",
+      "Escrevendo tudo",
     ],
-    updatingTitle: "Atualizando seu espaço de trabalho",
   },
 
-  // ---- Workspace editor --------------------------------------------------
+  // ---- Workspace editor chrome ------------------------------------------
   editor: {
+    workspaceIcon: "Ícone do espaço de trabalho",
     newPage: "Nova página",
     untitled: "Sem título",
     allWorkspaces: "← Todos os espaços de trabalho",
     deletePage: "Excluir página",
     askAi: "Perguntar à IA",
-    aiPlaceholder:
-      "Peça à IA para mudar este espaço de trabalho — “adicione uma prova intermediária em CC”, “monte um plano de estudos para as provas finais”, “adicione um controle de hábitos”…",
-    aiWorking: "Trabalhando…",
-    aiApply: "Aplicar",
-    aiClose: "Fechar",
-    aiError: "Não foi possível aplicar — tente reformular ou simplificar o pedido.",
+    closeAgent: "Fechar agente",
     saving: "Salvando…",
     saveFailed: "Falha ao salvar",
     saved: "Salvo",
   },
 
+  // ---- In-workspace AI agent chat ---------------------------------------
+  agentChat: {
+    title: "Agente de IA",
+    subtitleIdle: "Entende todo o seu espaço de trabalho",
+    closeChat: "Fechar chat",
+    suggestions: [
+      "Adicionar um controle de hábitos",
+      "Fazer um plano de estudos de 2 semanas para as provas finais",
+      "Adicionar uma prova intermediária a cada curso",
+      "No que devo focar esta semana?",
+    ],
+    intro:
+      "Peça para eu mudar um item ou coordenar atualizações em todo o seu espaço de trabalho. Se algo não estiver claro, eu pergunto antes de editar.",
+    workspaceUpdated: "Espaço de trabalho atualizado",
+    buildingUpdate: "Criando sua atualização",
+    steps: {
+      inspect: "Inspecionar espaço de trabalho",
+      decide: "Decidir a ação mais segura",
+      prepare: "Preparar atualização coordenada",
+    },
+    phase: {
+      inspecting: "Revisando seu espaço de trabalho",
+      planning: "Planejando a mudança mais segura",
+      updating: "Coordenando atualizações do espaço de trabalho",
+      validating: "Verificando cada conexão",
+      saving: "Salvando suas mudanças",
+    },
+    areaStatus: { queued: "Na fila", working: "Atualizando", complete: "Pronto" },
+    initialMessage: "Abrindo seu espaço de trabalho",
+    placeholderBusy: "O agente está trabalhando…",
+    placeholderIdle: "Peça ao agente para criar ou mudar algo…",
+    send: "Enviar",
+    inputHint: "Enter para enviar · Shift+Enter para nova linha",
+    errorRequestFailed: "Falha na solicitação ao agente",
+    errorEndedUnexpectedly: "A resposta do agente terminou inesperadamente",
+    errorSnag: "O agente encontrou um problema. Tente novamente.",
+    errorCouldntComplete:
+      "Não consegui concluir isso com segurança. Tente novamente ou torne a solicitação mais específica.",
+  },
+
   // ---- Page / block editor ----------------------------------------------
   page: {
+    pageIcon: "Ícone da página",
+    headingLevel: "Nível do título",
+    calloutIcon: "Ícone do destaque",
     addBlock: "+ Adicionar bloco",
-    cancel: "Cancelar",
     deleteBlock: "Excluir bloco",
     blockTypes: {
       paragraph: "Texto",
       heading: "Título",
       todo: "Tarefa",
       bulleted_list_item: "Lista",
+      numbered_list_item: "Numerada",
+      quote: "Citação",
       callout: "Destaque",
       divider: "Divisor",
       database: "Tabela",
@@ -276,7 +439,6 @@ export const pt = {
       callout: "Destaque",
     },
     headingDefault: "Título",
-    // Defaults for a brand-new table inserted via "+ Add block → Table".
     newTable: {
       name: "Nova tabela",
       propName: "Nome",
@@ -291,13 +453,12 @@ export const pt = {
 
   // ---- Database views (table / board / calendar) ------------------------
   db: {
+    databaseIcon: "Ícone do banco de dados",
     nameAria: "Nome do banco de dados",
     newRow: "+ Nova linha",
     newCard: "+ Novo",
     untitled: "Sem título",
     empty: "—",
-    link: "Link ↗",
-    linked: "{count} vinculado(s)",
     deleteRow: "Excluir linha",
     deleteCard: "Excluir cartão",
     dragHint: "Arraste para outra coluna",
@@ -306,6 +467,57 @@ export const pt = {
     addOnDay: "Adicionar neste dia",
     clickToRename: "Clique para renomear",
     delete: "Excluir",
+  },
+
+  // ---- Database settings panel ------------------------------------------
+  dbSettings: {
+    customize: "Personalizar campos e visualizações",
+    description: "Descrição",
+    descriptionPlaceholder: "Para que serve este controle",
+    fields: "Campos",
+    addField: "+ Adicionar campo",
+    fieldName: "Nome do campo",
+    fieldType: "Tipo do campo",
+    deleteField: "Excluir campo",
+    newField: "Novo campo",
+    chooseRelatedDatabase: "Escolher banco de dados relacionado",
+    optionLabel: "Rótulo da opção",
+    addOption: "+ opção",
+    newOption: "Nova opção",
+    views: "Visualizações",
+    addView: "+ Adicionar visualização",
+    viewName: "Nome da visualização",
+    newView: "Nova visualização",
+    deleteView: "Excluir visualização",
+    groupBy: "Agrupar por…",
+    dateField: "Campo de data…",
+    deleteDatabase: "Excluir este banco de dados",
+    deleteConfirm: "Excluir “{name}” e removê-lo de todas as páginas?",
+    propertyTypes: {
+      text: "Texto",
+      number: "Número",
+      checkbox: "Caixa de seleção",
+      date: "Data",
+      select: "Seleção",
+      multi_select: "Seleção múltipla",
+      status: "Status",
+      url: "URL",
+      relation: "Relação",
+    },
+    viewTypes: {
+      table: "Tabela",
+      board: "Quadro",
+      calendar: "Calendário",
+      list: "Lista",
+      gallery: "Galeria",
+    },
+    defaults: {
+      statusTodo: "A fazer",
+      statusInProgress: "Em andamento",
+      statusDone: "Concluído",
+      option1: "Opção 1",
+      option2: "Opção 2",
+    },
   },
 
   // ---- Default onboarding questions (no-API-key fallback) ----------------
@@ -319,10 +531,7 @@ export const pt = {
         self: "Autodidata",
       },
     },
-    load: {
-      question: "Com quantos cursos você está malabarismando?",
-      // 1–2, 3–4, 5–6, 7+ stay numeric across locales (see onboarding.ts).
-    },
+    load: { question: "Com quantos cursos você está lidando?" },
     track: {
       question: "O que você mais quer acompanhar?",
       options: {
@@ -336,17 +545,55 @@ export const pt = {
     },
     style: {
       question: "Como você gosta de planejar?",
-      options: {
-        cal: "Por calendário",
-        board: "Por quadro",
-        list: "Listas simples",
+      options: { cal: "Por calendário", board: "Por quadro", list: "Listas simples" },
+    },
+  },
+
+  // ---- Server-emitted AI progress + errors ------------------------------
+  ai: {
+    generate: {
+      phase: {
+        analyzing: "Lendo seus cursos, objetivos e preferências",
+        planning: "Escolhendo os componentes certos do espaço de trabalho",
+        generating: "Gerando seu espaço de trabalho completo de uma só vez",
+        validating: "Verificando links, visualizações, campos e dados iniciais",
+        saving: "Salvando seu espaço de trabalho editável",
       },
+      error:
+        "Não foi possível gerar o espaço de trabalho. Tente novamente com uma descrição mais curta.",
+      detail: {
+        dashboard: "{count} páginas editáveis conectadas",
+        courses: "{count} cursos adicionados",
+        trackedItems: "{count} itens acompanhados adicionados",
+        scheduled: "{count} itens agendados",
+        readings: "{count} leituras adicionadas",
+        habits: "{count} rotinas adicionadas",
+        grades: "{count} linhas de notas adicionadas",
+        notes: "Estrutura de anotações editável criada",
+        generic: "Componente criado e conectado",
+      },
+    },
+    agent: {
+      inspecting: "Revisando {pages} páginas e {databases} bancos de dados",
+      inspectingArea: "Revisando {area}",
+      planning: "Entendendo a solicitação e verificando ambiguidades",
+      updating: "Aplicando mudanças coordenadas em todo o seu espaço de trabalho",
+      validating: "Verificando referências, visualizações, campos e dados vinculados",
+      saving: "Salvando o espaço de trabalho atualizado",
+      workspaceNotFound: "Espaço de trabalho não encontrado.",
+      error:
+        "O agente não conseguiu concluir essa solicitação com segurança. Tente novamente ou torne a solicitação mais específica.",
+      fallbackReply: "Espaço de trabalho atualizado.",
+    },
+    errors: {
+      notAuthenticated: "Não autenticado",
+      invalidAgentRequest: "Solicitação ao agente inválida",
+      describeBeforeGenerating:
+        "Descreva seus estudos antes de gerar um espaço de trabalho.",
     },
   },
 
   // ---- Mock generator scaffolding (no-API-key fallback) ------------------
-  // The fixed labels the rule-based generator emits so the offline experience
-  // is localized too. Course names derive from the user's own prompt.
   mock: {
     workspaceName: "Central de Estudos",
     workspaceNameField: "Central de Estudos de {field}",
@@ -358,7 +605,7 @@ export const pt = {
     exam: { midterm: "Prova intermediária", final: "Prova final" },
     courses: {
       name: "Cursos",
-      description: "Todas as aulas que você está cursando neste período.",
+      description: "Todas as aulas que você faz neste período.",
       propCourse: "Curso",
       propCode: "Código",
       propInstructor: "Professor",
@@ -400,15 +647,15 @@ export const pt = {
       viewAll: "Todos os hábitos",
       viewCalendar: "Calendário",
       reviewNotes: "Revisar as anotações de hoje",
-      practiceRecall: "Praticar recordação",
+      practiceRecall: "Praticar recordação ativa",
     },
     grades: {
       name: "Controle de Notas",
-      description: "Notas e pesos editáveis para cada curso.",
+      description: "Pontuações e pesos editáveis para cada curso.",
       propItem: "Avaliação",
       propCourse: "Curso",
-      propScore: "Nota",
-      propOutOf: "De um total de",
+      propScore: "Pontuação",
+      propOutOf: "De",
       propWeight: "Peso %",
       viewAll: "Todas as notas",
       assessmentN: "Avaliação {n}",
@@ -429,25 +676,24 @@ export const pt = {
       coursesHeading: "📚 Meus cursos",
     },
     assignmentsPage: { intro: "Tudo o que você precisa entregar, com prazos e pesos." },
-    plannerPage: { intro: "Seus prazos dispostos em um calendário." },
+    plannerPage: { intro: "Seus prazos organizados em um calendário." },
     examsPage: {
       callout:
-        "Confirme as datas e depois divida cada prova em tópicos de revisão e sessões de prática.",
+        "Confirme as datas, depois divida cada prova em tópicos de revisão e sessões de prática.",
     },
     notesPage: {
-      heading: "Anotações do Curso",
+      heading: "Anotações dos Cursos",
       callout:
-        "Adicione um título para cada aula e depois registre as ideias principais e dúvidas abaixo.",
+        "Adicione um título para cada aula e capture as ideias e dúvidas principais abaixo.",
       fallbackCourse: "Curso",
       startWriting: "Comece a escrever aqui…",
     },
     gradesPage: {
       callout:
-        "Substitua as avaliações iniciais pelos pesos do seu programa e pelos resultados reais.",
+        "Substitua as avaliações iniciais pelos pesos do seu plano de ensino e pelos resultados reais.",
     },
-    // Workspace component plan (labels + descriptions shown in the loader).
     plan: {
-      summaryWith: "Um espaço de trabalho sob medida construído em torno de {focus}.",
+      summaryWith: "Um espaço de trabalho sob medida, criado em torno de {focus}.",
       summaryGeneric:
         "Um espaço de trabalho sob medida para cursos, prazos e planejamento de estudos.",
       components: {
@@ -465,7 +711,7 @@ export const pt = {
         },
         planner: {
           label: "Planejador",
-          description: "Uma visão de calendário do trabalho que vem pela frente.",
+          description: "Uma visualização em calendário do trabalho pela frente.",
         },
         readings: {
           label: "Lista de Leituras",
@@ -473,11 +719,11 @@ export const pt = {
         },
         exams: {
           label: "Preparação para Provas",
-          description: "Datas das provas, tópicos e tarefas de revisão.",
+          description: "Datas de provas, tópicos e tarefas de revisão.",
         },
         notes: {
           label: "Anotações",
-          description: "Um lar estruturado para as anotações do curso.",
+          description: "Um lar estruturado para as anotações dos cursos.",
         },
         habits: {
           label: "Hábitos de Estudo",
@@ -485,11 +731,7 @@ export const pt = {
         },
         grades: {
           label: "Controle de Notas",
-          description: "Notas, pesos e metas de desempenho.",
-        },
-        projects: {
-          label: "Projetos",
-          description: "Marcos e próximas ações para trabalhos maiores.",
+          description: "Pontuações, pesos e metas de notas.",
         },
       },
     },

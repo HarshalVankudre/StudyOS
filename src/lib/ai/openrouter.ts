@@ -3,6 +3,8 @@
  * Sends an OpenAI-style messages array and returns the assistant's text.
  * All StudyOS AI runs through here on the model chosen by `modelForPlan`.
  */
+import { recordUsage } from "./usage-meter";
+
 export const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 export interface ChatMessage {
@@ -33,6 +35,7 @@ export async function chatCompletion(
   }
 
   const data = await res.json();
+  recordUsage(data?.usage);
   const content: unknown = data?.choices?.[0]?.message?.content;
   if (typeof content !== "string") {
     throw new Error("OpenRouter returned no text content");

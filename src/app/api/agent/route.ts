@@ -10,7 +10,12 @@ import type {
   AgentStreamEvent,
 } from "@/lib/ai/agent-shared";
 import { modelForPlan } from "@/lib/ai/plans";
+import { addUsage, withUsageMeter, type TokenUsage } from "@/lib/ai/usage-meter";
 import { getUserPlan } from "@/lib/billing";
+import { chargeCredits, hasCredits, usageToCredits } from "@/lib/credits";
+import { getLocale } from "@/lib/i18n/server";
+import { getDictionary, type Dictionary } from "@/lib/i18n/dictionaries";
+import { fmt } from "@/lib/i18n/interpolate";
 import {
   getWorkspace,
   updateWorkspace,
@@ -36,14 +41,17 @@ const requestSchema = z.object({
 const encoder = new TextEncoder();
 
 export async function POST(request: Request) {
+  const locale = await getLocale();
+  const T = getDictionary(locale);
+
   const { userId } = await auth();
   if (!userId) {
-    return Response.json({ error: "Not authenticated" }, { status: 401 });
+    return Response.json({ error: T.ai.errors.notAuthenticated }, { status: 401 });
   }
 
   const parsed = requestSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
-    return Response.json({ error: "Invalid agent request" }, { status: 400 });
+    return Response.json({ error: T.ai.errors.invalidAgentRequest }, { status: 400 });
   }
 
   const stream = new ReadableStream<Uint8Array>({
@@ -76,36 +84,50 @@ export async function POST(request: Request) {
         const { workspaceId, history, message } = parsed.data;
         const workspace = await getWorkspace(workspaceId);
         if (!workspace) {
-          send({ type: "error", message: "Workspace not found." });
+          send({ type: "error", message: T.ai.agent.workspaceNotFound });
+          finish();
+          return;
+        }
+
+        if (!(await hasCredits(userId))) {
+          send({
+            type: "error",
+            message:
+              "You're out of AI credits. Add more from the Pricing page to keep using the agent.",
+          });
           finish();
           return;
         }
 
         const model = modelForPlan(await getUserPlan());
         const allAreas = workspaceAreas(workspace);
+        let usage: TokenUsage = { promptTokens: 0, completionTokens: 0 };
 
         send({
           type: "phase",
           phase: "inspecting",
-          message: `Reviewing ${workspace.pages.length} pages and ${workspace.databases.length} databases`,
+          message: fmt(T.ai.agent.inspecting, {
+            pages: workspace.pages.length,
+            databases: workspace.databases.length,
+          }),
           progress: 8,
         });
-        await streamInspection(send, allAreas.slice(0, 8));
+        await streamInspection(send, allAreas.slice(0, 8), T);
 
         send({
           type: "phase",
           phase: "planning",
-          message: "Understanding the request and checking for ambiguity",
+          message: T.ai.agent.planning,
           progress: 22,
         });
-        const decision = await planAgentTurn(
-          workspace,
-          history,
-          message,
-          model,
+        const planned = await withUsageMeter(() =>
+          planAgentTurn(workspace, history, message, model, locale),
         );
+        const decision = planned.result;
+        usage = addUsage(usage, planned.usage);
 
         if (decision.action === "reply") {
+          await chargeCredits(userId, usageToCredits(usage), "agent");
           send({
             type: "result",
             response: { reply: decision.reply, changed: false },
@@ -115,6 +137,7 @@ export async function POST(request: Request) {
         }
 
         if (decision.action === "clarify") {
+          await chargeCredits(userId, usageToCredits(usage), "agent");
           send({
             type: "result",
             response: {
@@ -144,7 +167,7 @@ export async function POST(request: Request) {
         send({
           type: "phase",
           phase: "updating",
-          message: "Applying coordinated changes across your workspace",
+          message: T.ai.agent.updating,
           progress: 34,
         });
 
@@ -172,20 +195,18 @@ export async function POST(request: Request) {
           tick += 1;
         }, 500);
 
-        const result = await executeAgentEdit(
-          workspace,
-          history,
-          message,
-          decision,
-          model,
+        const edited = await withUsageMeter(() =>
+          executeAgentEdit(workspace, history, message, decision, model, locale),
         );
+        const result = edited.result;
+        usage = addUsage(usage, edited.usage);
         if (ticker) clearInterval(ticker);
         ticker = null;
 
         send({
           type: "phase",
           phase: "validating",
-          message: "Checking references, views, fields, and linked data",
+          message: T.ai.agent.validating,
           progress: 88,
         });
         for (const area of decision.affectedAreas) {
@@ -204,18 +225,18 @@ export async function POST(request: Request) {
         send({
           type: "phase",
           phase: "saving",
-          message: "Saving the updated workspace",
+          message: T.ai.agent.saving,
           progress: 97,
         });
         await updateWorkspace(workspaceId, result.workspace);
+        await chargeCredits(userId, usageToCredits(usage), "agent");
         send({ type: "result", response: result });
         finish();
       } catch (error) {
         console.error("[StudyOS] streamed agent failed:", error);
         send({
           type: "error",
-          message:
-            "The agent could not finish that request safely. Please try again or make the request more specific.",
+          message: T.ai.agent.error,
         });
         finish();
       }
@@ -234,12 +255,13 @@ export async function POST(request: Request) {
 async function streamInspection(
   send: (event: AgentStreamEvent) => void,
   areas: AgentArea[],
+  T: Dictionary,
 ) {
   for (const [index, area] of areas.entries()) {
     send({
       type: "phase",
       phase: "inspecting",
-      message: `Reviewing ${area.label}`,
+      message: fmt(T.ai.agent.inspectingArea, { area: area.label }),
       progress: Math.min(18, 9 + index * 1.4),
     });
     await sleep(45);

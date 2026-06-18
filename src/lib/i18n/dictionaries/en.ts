@@ -6,9 +6,12 @@
  * `satisfies Dictionary`, so TypeScript fails the build if a translation is
  * missing or has the wrong shape. Keep keys in sync across all locales.
  *
- * Placeholders look like `{name}` and are filled with `fmt()` (see
- * ../interpolate.ts). Calendar month/weekday names are NOT here — they come from
- * `Intl.DateTimeFormat(locale)` at render time.
+ * `en` is declared WITHOUT `as const`, so leaf types widen to `string` (and
+ * arrays to `string[]`): other locales supply different strings, but the object
+ * SHAPE (every key, nesting, array element shape) is enforced.
+ *
+ * Placeholders look like `{name}` and are filled with `fmt()` (../interpolate).
+ * Calendar month/weekday names come from `Intl.DateTimeFormat(locale)`, not here.
  */
 export const en = {
   // ---- Document <title> / <meta> ----------------------------------------
@@ -18,6 +21,9 @@ export const en = {
       "Describe your courses and deadlines, and StudyOS instantly builds your dashboards, planners, and assignment trackers. The AI-powered study workspace for students.",
     appTitle: "Your workspaces · StudyOS",
     generateTitle: "Generate your workspace · StudyOS",
+    pricingTitle: "Pricing · StudyOS",
+    pricingDescription:
+      "Compare StudyOS Free and Pro. Start free and upgrade when you want the most capable model, unlimited generations, and priority support.",
     workspaceTitle: "{name} · StudyOS",
     brandFallback: "StudyOS",
   },
@@ -26,6 +32,14 @@ export const en = {
   language: {
     label: "Language",
     choose: "Choose language",
+  },
+
+  // ---- Shared bits used on more than one surface ------------------------
+  common: {
+    openApp: "Open app",
+    signIn: "Sign in",
+    getStarted: "Get started",
+    cancel: "Cancel",
   },
 
   // ---- Landing page ------------------------------------------------------
@@ -150,7 +164,6 @@ export const en = {
     footer: {
       tagline: "The study workspace for students · © 2026",
     },
-    // The little workspace mockup in the hero.
     preview: {
       name: "CS Study HQ",
       thisWeek: "This week",
@@ -159,6 +172,97 @@ export const en = {
       coursesLabel: "Courses",
       courses: ["Data Structures", "Discrete Math", "Physics I"],
     },
+  },
+
+  // ---- Pricing page (/pricing) ------------------------------------------
+  pricing: {
+    nav: { openApp: "Open app", signIn: "Sign in", getStarted: "Get started" },
+    badge: "Simple, student-friendly pricing",
+    title: "Start free. Upgrade when you’re ready.",
+    subtitle:
+      "Everything you need to organize your semester is free. Pro adds the most capable model, unlimited generations, and priority support.",
+    free: {
+      name: "Free",
+      price: "$0",
+      tagline: "Everything to get organized.",
+      bullets: [
+        "AI-generated study workspaces",
+        "Full inline editing & autosave",
+        "Databases — table, board & calendar",
+        "AI agent chat in your workspace",
+      ],
+      ctaSignedOut: "Get started free",
+      ctaSignedIn: "Open your workspaces",
+    },
+    pro: {
+      badge: "Most popular",
+      name: "Pro",
+      price: "$5",
+      perMonth: "/mo",
+      billed: "Billed monthly · cancel anytime.",
+      bullets: [
+        "Everything in Free",
+        "Unlimited workspace generations",
+        "The most capable, most detailed model",
+        "Priority support & early access",
+      ],
+      currentPlan: "✦ Your current plan",
+      manageBilling: "Manage billing",
+      upgrade: "Upgrade to Pro",
+      ctaSignedOut: "Get started with Pro",
+    },
+    comparison: {
+      title: "Compare plans",
+      featuresHeader: "Features",
+      freeHeader: "Free",
+      proHeader: "Pro",
+      included: "Included",
+      notIncluded: "Not included",
+      features: {
+        aiWorkspaces: "AI-generated workspaces",
+        onboarding: "Guided onboarding questions",
+        editing: "Full inline editing & autosave",
+        databases: "Databases — table, board & calendar",
+        dragDrop: "Drag-and-drop editing",
+        agentChat: "AI agent chat that edits your workspace",
+        model: "Generation model",
+        generations: "Workspace generations",
+        support: "Support",
+        earlyAccess: "Early access to new features",
+      },
+      values: {
+        standard: "Standard",
+        mostCapable: "Most capable",
+        generous: "Generous",
+        unlimited: "Unlimited",
+        community: "Community",
+        priority: "Priority",
+      },
+    },
+    faqTitle: "Questions",
+    faq: [
+      {
+        q: "Is StudyOS really free to start?",
+        a: "Yes. Create an account and generate, edit, and use your workspaces on the Free plan — no credit card required.",
+      },
+      {
+        q: "What do I get with Pro?",
+        a: "Unlimited generations, the most capable model for richer and more accurate workspaces, priority support, and early access to new features.",
+      },
+      {
+        q: "Can I cancel anytime?",
+        a: "Anytime. Manage or cancel your subscription from the billing portal — you keep Pro until the end of the period.",
+      },
+      {
+        q: "What happens to my workspaces if I downgrade?",
+        a: "Nothing is deleted. Your workspaces stay exactly as they are and remain fully editable on Free.",
+      },
+    ],
+    ctaTitle: "Your first workspace is one sentence away.",
+    ctaSubtitle: "Try StudyOS free — upgrade only if you want more.",
+    ctaSignedIn: "Generate a workspace",
+    ctaSignedOut: "Get started free",
+    footerTagline: "The study workspace for students · © 2026",
   },
 
   // ---- Workspaces list (/app) -------------------------------------------
@@ -199,14 +303,7 @@ export const en = {
       "Thinking of good questions",
       "Tailoring your setup",
     ],
-    buildSteps: [
-      "Planning your courses",
-      "Designing your dashboard",
-      "Laying out your planner",
-      "Assembling the workspace",
-    ],
     planningTitle: "Getting to know you",
-    buildingTitle: "Building your workspace",
     errorGeneric: "Something went wrong. Please try again.",
     errorBuild: "Something went wrong generating your workspace. Try again.",
     describe: {
@@ -234,7 +331,37 @@ export const en = {
     },
   },
 
-  // ---- AI activity overlay ----------------------------------------------
+  // ---- Generation activity (full-screen build progress) -----------------
+  genActivity: {
+    building: "Building your workspace",
+    designing: "Designing your workspace",
+    componentsChosen: "Components chosen for you",
+    planningComponents: "Planning components",
+    onlyRelevant: "Only the pages and trackers relevant to your answers.",
+    componentsCount: "{count} components",
+    everythingEditable:
+      "Everything generated stays editable — pages, fields, views, rows, and content.",
+    statusReady: "Ready",
+    statusGenerating: "Generating…",
+    statusQueued: "Queued",
+    finishingUp: "Finishing up",
+    yourWorkspace: "Your workspace",
+    pagesLabel: "Pages",
+    sectionsBuilt: "{built} of {total} sections built",
+    choosingPieces: "Choosing the right pieces for you…",
+    stillEditable: "Everything stays editable once it’s ready",
+    writingItIn: "Writing it in…",
+    board: { todo: "To do", doing: "Doing", done: "Done" },
+    phase: {
+      analyzing: "Analyzing your answers",
+      planning: "Selecting components",
+      generating: "Generating workspace",
+      validating: "Validating data",
+      saving: "Saving",
+    },
+  },
+
+  // ---- AiActivity overlay (calm spinner used during planning) -----------
   aiActivity: {
     defaultTitle: "Working on it",
     defaultSteps: [
@@ -243,37 +370,76 @@ export const en = {
       "Designing the layout",
       "Writing it in",
     ],
-    updatingTitle: "Updating your workspace",
   },
 
-  // ---- Workspace editor --------------------------------------------------
+  // ---- Workspace editor chrome ------------------------------------------
   editor: {
+    workspaceIcon: "Workspace icon",
     newPage: "New page",
     untitled: "Untitled",
     allWorkspaces: "← All workspaces",
     deletePage: "Delete page",
     askAi: "Ask AI",
-    aiPlaceholder:
-      "Ask AI to change this workspace — “add a midterm to CS”, “make a finals study plan”, “add a habit tracker”…",
-    aiWorking: "Working…",
-    aiApply: "Apply",
-    aiClose: "Close",
-    aiError: "Couldn’t apply that — try rephrasing or simplifying the request.",
+    closeAgent: "Close agent",
     saving: "Saving…",
     saveFailed: "Save failed",
     saved: "Saved",
   },
 
+  // ---- In-workspace AI agent chat ---------------------------------------
+  agentChat: {
+    title: "AI agent",
+    subtitleIdle: "Understands your whole workspace",
+    closeChat: "Close chat",
+    suggestions: [
+      "Add a habit tracker",
+      "Make a 2-week finals study plan",
+      "Add a midterm to each course",
+      "What should I focus on this week?",
+    ],
+    intro:
+      "Ask me to change one item or coordinate updates across your full workspace. If anything is unclear, I’ll ask before editing.",
+    workspaceUpdated: "Workspace updated",
+    buildingUpdate: "Building your update",
+    steps: {
+      inspect: "Inspect workspace",
+      decide: "Decide the safest action",
+      prepare: "Prepare coordinated update",
+    },
+    phase: {
+      inspecting: "Reviewing your workspace",
+      planning: "Planning the safest change",
+      updating: "Coordinating workspace updates",
+      validating: "Checking every connection",
+      saving: "Saving your changes",
+    },
+    areaStatus: { queued: "Queued", working: "Updating", complete: "Ready" },
+    initialMessage: "Opening your workspace",
+    placeholderBusy: "The agent is working…",
+    placeholderIdle: "Ask the agent to build or change something…",
+    send: "Send",
+    inputHint: "Enter to send · Shift+Enter for a new line",
+    errorRequestFailed: "Agent request failed",
+    errorEndedUnexpectedly: "Agent response ended unexpectedly",
+    errorSnag: "The agent hit a snag. Please try again.",
+    errorCouldntComplete:
+      "I couldn’t complete that safely. Try again or make the request more specific.",
+  },
+
   // ---- Page / block editor ----------------------------------------------
   page: {
+    pageIcon: "Page icon",
+    headingLevel: "Heading level",
+    calloutIcon: "Callout icon",
     addBlock: "+ Add block",
-    cancel: "Cancel",
     deleteBlock: "Delete block",
     blockTypes: {
       paragraph: "Text",
       heading: "Heading",
       todo: "To-do",
       bulleted_list_item: "List",
+      numbered_list_item: "Numbered",
+      quote: "Quote",
       callout: "Callout",
       divider: "Divider",
       database: "Table",
@@ -285,7 +451,6 @@ export const en = {
       callout: "Callout",
     },
     headingDefault: "Heading",
-    // Defaults for a brand-new table inserted via "+ Add block → Table".
     newTable: {
       name: "New table",
       propName: "Name",
@@ -300,13 +465,12 @@ export const en = {
 
   // ---- Database views (table / board / calendar) ------------------------
   db: {
+    databaseIcon: "Database icon",
     nameAria: "Database name",
     newRow: "+ New row",
     newCard: "+ New",
     untitled: "Untitled",
     empty: "—",
-    link: "Link ↗",
-    linked: "{count} linked",
     deleteRow: "Delete row",
     deleteCard: "Delete card",
     dragHint: "Drag to another column",
@@ -315,6 +479,57 @@ export const en = {
     addOnDay: "Add on this day",
     clickToRename: "Click to rename",
     delete: "Delete",
+  },
+
+  // ---- Database settings panel ------------------------------------------
+  dbSettings: {
+    customize: "Customize fields & views",
+    description: "Description",
+    descriptionPlaceholder: "What this tracker is for",
+    fields: "Fields",
+    addField: "+ Add field",
+    fieldName: "Field name",
+    fieldType: "Field type",
+    deleteField: "Delete field",
+    newField: "New field",
+    chooseRelatedDatabase: "Choose related database",
+    optionLabel: "Option label",
+    addOption: "+ option",
+    newOption: "New option",
+    views: "Views",
+    addView: "+ Add view",
+    viewName: "View name",
+    newView: "New view",
+    deleteView: "Delete view",
+    groupBy: "Group by…",
+    dateField: "Date field…",
+    deleteDatabase: "Delete this database",
+    deleteConfirm: "Delete “{name}” and remove it from every page?",
+    propertyTypes: {
+      text: "Text",
+      number: "Number",
+      checkbox: "Checkbox",
+      date: "Date",
+      select: "Select",
+      multi_select: "Multi-select",
+      status: "Status",
+      url: "URL",
+      relation: "Relation",
+    },
+    viewTypes: {
+      table: "Table",
+      board: "Board",
+      calendar: "Calendar",
+      list: "List",
+      gallery: "Gallery",
+    },
+    defaults: {
+      statusTodo: "To do",
+      statusInProgress: "In progress",
+      statusDone: "Done",
+      option1: "Option 1",
+      option2: "Option 2",
+    },
   },
 
   // ---- Default onboarding questions (no-API-key fallback) ----------------
@@ -328,10 +543,7 @@ export const en = {
         self: "Self-study",
       },
     },
-    load: {
-      question: "How many courses are you juggling?",
-      // 1–2, 3–4, 5–6, 7+ stay numeric across locales (see onboarding.ts).
-    },
+    load: { question: "How many courses are you juggling?" },
     track: {
       question: "What do you most want to track?",
       options: {
@@ -345,17 +557,55 @@ export const en = {
     },
     style: {
       question: "How do you like to plan?",
-      options: {
-        cal: "By calendar",
-        board: "By board",
-        list: "Simple lists",
+      options: { cal: "By calendar", board: "By board", list: "Simple lists" },
+    },
+  },
+
+  // ---- Server-emitted AI progress + errors ------------------------------
+  ai: {
+    generate: {
+      phase: {
+        analyzing: "Reading your courses, goals, and preferences",
+        planning: "Choosing the right workspace components",
+        generating: "Generating your complete workspace in one pass",
+        validating: "Checking links, views, fields, and starter data",
+        saving: "Saving your editable workspace",
       },
+      error:
+        "The workspace could not be generated. Please try again with a shorter description.",
+      detail: {
+        dashboard: "{count} editable pages connected",
+        courses: "{count} courses added",
+        trackedItems: "{count} tracked items added",
+        scheduled: "{count} items scheduled",
+        readings: "{count} reading items added",
+        habits: "{count} routines added",
+        grades: "{count} grade rows added",
+        notes: "Editable note structure created",
+        generic: "Component created and connected",
+      },
+    },
+    agent: {
+      inspecting: "Reviewing {pages} pages and {databases} databases",
+      inspectingArea: "Reviewing {area}",
+      planning: "Understanding the request and checking for ambiguity",
+      updating: "Applying coordinated changes across your workspace",
+      validating: "Checking references, views, fields, and linked data",
+      saving: "Saving the updated workspace",
+      workspaceNotFound: "Workspace not found.",
+      error:
+        "The agent could not finish that request safely. Please try again or make the request more specific.",
+      fallbackReply: "Updated your workspace.",
+    },
+    errors: {
+      notAuthenticated: "Not authenticated",
+      invalidAgentRequest: "Invalid agent request",
+      describeBeforeGenerating:
+        "Describe your studies before generating a workspace.",
     },
   },
 
   // ---- Mock generator scaffolding (no-API-key fallback) ------------------
-  // The fixed labels the rule-based generator emits so the offline experience
-  // is localized too. Course names derive from the user's own prompt.
   mock: {
     workspaceName: "Study HQ",
     workspaceNameField: "{field} Study HQ",
@@ -454,7 +704,6 @@ export const en = {
       callout:
         "Replace the starter assessments with your syllabus weights and actual results.",
     },
-    // Workspace component plan (labels + descriptions shown in the loader).
     plan: {
       summaryWith: "A tailored workspace built around {focus}.",
       summaryGeneric:
@@ -496,10 +745,6 @@ export const en = {
           label: "Grade Tracker",
           description: "Scores, weights, and grade targets.",
         },
-        projects: {
-          label: "Projects",
-          description: "Milestones and next actions for larger work.",
-        },
       },
     },
   },
@@ -509,8 +754,7 @@ export const en = {
  * The translation contract every locale must satisfy.
  *
  * `en` is declared WITHOUT `as const`, so its leaf types widen to `string`
- * (and arrays to `string[]`). That's deliberate: other locales provide
- * different string values, but the object *shape* (every key, nested structure)
- * is enforced by `satisfies Dictionary` in each locale file.
+ * (and arrays to `string[]`). Other locale files supply different string values
+ * but must match this object's SHAPE, enforced by `satisfies Dictionary`.
  */
 export type Dictionary = typeof en;

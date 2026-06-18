@@ -5,6 +5,10 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { stripe } from "@/lib/stripe";
+import {
+  CREDIT_PACK_PRICE_USD,
+  CREDIT_PACK_SIZE,
+} from "@/lib/credits";
 
 async function originUrl(): Promise<string> {
   const h = await headers();
@@ -34,6 +38,43 @@ export async function startCheckoutAction(): Promise<void> {
     allow_promotion_codes: true,
     success_url: `${origin}/app?upgraded=1&session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${origin}/pricing`,
+  });
+
+  if (session.url) redirect(session.url);
+  throw new Error("Could not start checkout");
+}
+
+/**
+ * Start a one-time Stripe Checkout to buy a credit pack and redirect to it.
+ * Uses inline price_data so no pre-created Stripe price is required.
+ */
+export async function buyCreditsAction(): Promise<void> {
+  const { userId } = await auth();
+  if (!userId) throw new Error("Not authenticated");
+
+  const user = await currentUser();
+  const email = user?.emailAddresses?.[0]?.emailAddress;
+  const origin = await originUrl();
+
+  const session = await stripe.checkout.sessions.create({
+    mode: "payment",
+    line_items: [
+      {
+        price_data: {
+          currency: "usd",
+          product_data: {
+            name: `${CREDIT_PACK_SIZE.toLocaleString()} StudyOS credits`,
+          },
+          unit_amount: CREDIT_PACK_PRICE_USD * 100,
+        },
+        quantity: 1,
+      },
+    ],
+    customer_email: email,
+    client_reference_id: userId,
+    metadata: { userId, kind: "credits", credits: String(CREDIT_PACK_SIZE) },
+    success_url: `${origin}/app?credits=${CREDIT_PACK_SIZE}&session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${origin}/app/credits`,
   });
 
   if (session.url) redirect(session.url);

@@ -35,3 +35,25 @@ model Subscription {
   currentPeriodEnd     DateTime?
   updatedAt            DateTime  @updatedAt
 }
+
+// A user's AI credit balance. Credits are spent per AI request based on the
+// GLM 5.2 tokens it actually used (see lib/credits.ts).
+model CreditAccount {
+  userId    String   @id
+  balance   Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Append-only audit trail of every credit change (grant, purchase, usage).
+// `idempotencyKey` makes grants safe to retry (Stripe webhook + success redirect).
+model CreditLedger {
+  id             String   @id @default(cuid())
+  userId         String
+  delta          Int
+  reason         String
+  idempotencyKey String?  @unique
+  createdAt      DateTime @default(now())
+
+  @@index([userId])
+}
