@@ -1,5 +1,7 @@
 // StudyOS database schema.
-// Local SQLite for development; swap `provider`/`url` for Postgres (Neon) at deploy.
+// Postgres (Neon) for development and production. `DATABASE_URL` is the pooled
+// connection used at runtime; `DATABASE_URL_UNPOOLED` is the direct connection
+// used for migrations / `prisma db push`.
 
 generator client {
   provider = "prisma-client-js"
@@ -7,8 +9,9 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DATABASE_URL_UNPOOLED")
 }
 
 // A saved workspace. The full workspace tree is stored as JSON in `data`;

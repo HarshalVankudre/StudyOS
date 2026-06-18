@@ -46,3 +46,9 @@ next-env.d.ts
 /src/generated
 *.db
 *.db-journal
+
+.vercel
+.env*
+
+# clerk configuration (can include secrets)
+/.clerk/
