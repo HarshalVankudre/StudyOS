@@ -7,6 +7,7 @@ import type {
   AgentArea,
   AgentChoice,
   AgentMessage,
+  AgentResponse,
   AgentStreamEvent,
 } from "@/lib/ai/agent-shared";
 import {
@@ -51,6 +52,45 @@ export function AgentChat({
   const [otherReplies, setOtherReplies] = useState<Record<string, string>>({});
   const scrollRef = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<AbortController | null>(null);
+  const taskIdRef = useRef<string | null>(null);
+
+  // Render a completed agent result: append the assistant turn and reflect the
+  // applied workspace live. Used by both the live stream and a reconnect.
+  const applyResult = (response: AgentResponse) => {
+    setItems((previous) => [
+      ...previous,
+      {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: response.reply,
+        changed: response.changed,
+        changeId: response.changeId,
+        choices: response.choices,
+        affectedAreas: response.affectedAreas,
+      },
+    ]);
+    if (response.changed && response.workspace) onApplied(response.workspace);
+  };
+
+  // After a dropped stream, the task may have finished server-side. Poll the
+  // durable record briefly and, if it completed, render its result.
+  const recoverTask = async (taskId: string): Promise<boolean> => {
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      try {
+        const res = await fetch(`/api/agent/task/${taskId}`);
+        const body = res.ok ? await res.json().catch(() => null) : null;
+        if (body?.status === "done" && body.response) {
+          applyResult(body.response as AgentResponse);
+          return true;
+        }
+        if (body?.status && body.status !== "running") return false;
+      } catch {
+        // ignore and retry
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+    }
+    return false;
+  };
 
   useEffect(() => {
     scrollRef.current?.scrollTo({
@@ -100,6 +140,7 @@ export function AgentChat({
 
     const controller = new AbortController();
     controllerRef.current = controller;
+    taskIdRef.current = null;
     let receivedResult = false;
 
     try {
@@ -128,26 +169,14 @@ export function AgentChat({
           if (!line.trim()) continue;
           const event = JSON.parse(line) as AgentStreamEvent;
 
-          if (event.type === "phase" || event.type === "discovery") {
+          if (event.type === "task") {
+            taskIdRef.current = event.taskId;
+          } else if (event.type === "phase" || event.type === "discovery") {
             setActivity((current) => reduceAgentActivity(current, event));
           } else if (event.type === "result") {
             receivedResult = true;
             setActivity((current) => reduceAgentActivity(current, event));
-            setItems((previous) => [
-              ...previous,
-              {
-                id: crypto.randomUUID(),
-                role: "assistant",
-                content: event.response.reply,
-                changed: event.response.changed,
-                changeId: event.response.changeId,
-                choices: event.response.choices,
-                affectedAreas: event.response.affectedAreas,
-              },
-            ]);
-            if (event.response.changed && event.response.workspace) {
-              onApplied(event.response.workspace);
-            }
+            applyResult(event.response);
           } else if (event.type === "error") {
             throw new Error(event.message);
           }
@@ -160,19 +189,25 @@ export function AgentChat({
         throw new Error(dict.agentChat.errorEndedUnexpectedly);
     } catch (cause) {
       if (!controller.signal.aborted) {
-        const message =
-          cause instanceof Error
-            ? cause.message
-            : dict.agentChat.errorSnag;
-        setError(message);
-        setItems((previous) => [
-          ...previous,
-          {
-            id: crypto.randomUUID(),
-            role: "assistant",
-            content: dict.agentChat.errorCouldntComplete,
-          },
-        ]);
+        const recovered =
+          taskIdRef.current && !receivedResult
+            ? await recoverTask(taskIdRef.current)
+            : false;
+        if (!recovered) {
+          const message =
+            cause instanceof Error
+              ? cause.message
+              : dict.agentChat.errorSnag;
+          setError(message);
+          setItems((previous) => [
+            ...previous,
+            {
+              id: crypto.randomUUID(),
+              role: "assistant",
+              content: dict.agentChat.errorCouldntComplete,
+            },
+          ]);
+        }
       }
     } finally {
       controllerRef.current = null;
@@ -181,6 +216,14 @@ export function AgentChat({
   };
 
   const cancel = () => {
+    // Cancel server-side too, so a task already past the stream still won't be
+    // applied; then abort the local stream.
+    const id = taskIdRef.current;
+    if (id) {
+      void fetch(`/api/agent/task/${id}/cancel`, { method: "POST" }).catch(
+        () => {},
+      );
+    }
     controllerRef.current?.abort();
     controllerRef.current = null;
     setBusy(false);
