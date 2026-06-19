@@ -5,13 +5,17 @@ import { MessageResponse } from "@/components/ai-elements/message";
 import { useI18n } from "@/lib/i18n/client";
 import type {
   AgentArea,
-  AgentAreaStatus,
   AgentChoice,
   AgentMessage,
-  AgentPhase,
   AgentStreamEvent,
 } from "@/lib/ai/agent-shared";
+import {
+  createInitialAgentActivity,
+  reduceAgentActivity,
+} from "@/lib/ai/progress";
 import type { Workspace } from "@/lib/workspace/types";
+import { AgentProgressCard } from "./AgentProgressCard";
+import { AgentUndoButton } from "./AgentUndoButton";
 
 interface ChatItem {
   id: string;
@@ -21,29 +25,9 @@ interface ChatItem {
   changed?: boolean;
   choices?: AgentChoice[];
   affectedAreas?: AgentArea[];
+  changeId?: string;
+  undone?: boolean;
 }
-
-interface AreaProgress {
-  status: AgentAreaStatus;
-  progress: number;
-}
-
-interface AgentActivityState {
-  phase: AgentPhase;
-  message: string;
-  progress: number;
-  summary?: string;
-  areas: AgentArea[];
-  areaProgress: Record<string, AreaProgress>;
-}
-
-const INITIAL_ACTIVITY: AgentActivityState = {
-  phase: "inspecting",
-  message: "",
-  progress: 4,
-  areas: [],
-  areaProgress: {},
-};
 
 export function AgentChat({
   workspaceId,
@@ -55,16 +39,14 @@ export function AgentChat({
   onClose: () => void;
 }) {
   const { dict } = useI18n();
-  const initialActivity: AgentActivityState = {
-    ...INITIAL_ACTIVITY,
-    message: dict.agentChat.initialMessage,
-  };
+  const initialActivity = createInitialAgentActivity(
+    dict.agentChat.initialMessage,
+  );
   const [items, setItems] = useState<ChatItem[]>([]);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activity, setActivity] =
-    useState<AgentActivityState>(initialActivity);
+  const [activity, setActivity] = useState(initialActivity);
   const [otherOpen, setOtherOpen] = useState<Record<string, boolean>>({});
   const [otherReplies, setOtherReplies] = useState<Record<string, string>>({});
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -146,52 +128,11 @@ export function AgentChat({
           if (!line.trim()) continue;
           const event = JSON.parse(line) as AgentStreamEvent;
 
-          if (event.type === "phase") {
-            setActivity((current) => ({
-              ...current,
-              phase: event.phase,
-              message: event.message,
-              progress: Math.max(current.progress, event.progress),
-            }));
-          } else if (event.type === "plan") {
-            setActivity((current) => ({
-              ...current,
-              summary: event.summary,
-              areas: event.areas,
-              areaProgress: Object.fromEntries(
-                event.areas.map((area) => [
-                  area.id,
-                  { status: "queued", progress: 6 },
-                ]),
-              ),
-            }));
-          } else if (event.type === "area") {
-            setActivity((current) => {
-              const areaProgress = {
-                ...current.areaProgress,
-                [event.areaId]: {
-                  status: event.status,
-                  progress: event.progress,
-                },
-              };
-              const values = Object.values(areaProgress);
-              const average =
-                values.length > 0
-                  ? values.reduce((sum, item) => sum + item.progress, 0) /
-                    values.length
-                  : 0;
-              return {
-                ...current,
-                areaProgress,
-                progress: Math.max(
-                  current.progress,
-                  Math.min(87, 30 + average * 0.57),
-                ),
-              };
-            });
+          if (event.type === "phase" || event.type === "discovery") {
+            setActivity((current) => reduceAgentActivity(current, event));
           } else if (event.type === "result") {
             receivedResult = true;
-            setActivity((current) => ({ ...current, progress: 100 }));
+            setActivity((current) => reduceAgentActivity(current, event));
             setItems((previous) => [
               ...previous,
               {
@@ -199,6 +140,7 @@ export function AgentChat({
                 role: "assistant",
                 content: event.response.reply,
                 changed: event.response.changed,
+                changeId: event.response.changeId,
                 choices: event.response.choices,
                 affectedAreas: event.response.affectedAreas,
               },
@@ -408,6 +350,26 @@ export function AgentChat({
                       {area.icon} {area.label}
                     </span>
                   ))}
+                  {item.changeId && !item.undone && (
+                    <AgentUndoButton
+                      changeId={item.changeId}
+                      onUndone={(restored) => {
+                        onApplied(restored);
+                        setItems((previous) =>
+                          previous.map((candidate) =>
+                            candidate.id === item.id
+                              ? { ...candidate, undone: true }
+                              : candidate,
+                          ),
+                        );
+                      }}
+                    />
+                  )}
+                  {item.undone && (
+                    <span className="rounded-full bg-hover px-2 py-0.5 text-[10px] text-ink-soft">
+                      <span aria-hidden>↶</span> {dict.agentChat.undone}
+                    </span>
+                  )}
                 </div>
               )}
             </div>
@@ -452,136 +414,5 @@ export function AgentChat({
         </p>
       </div>
     </aside>
-  );
-}
-
-function AgentProgressCard({
-  activity,
-  onCancel,
-}: {
-  activity: AgentActivityState;
-  onCancel: () => void;
-}) {
-  const { dict } = useI18n();
-  return (
-    <div
-      className="ai-pop overflow-hidden rounded-md border border-line-strong bg-card shadow-[0_16px_40px_-28px_rgba(26,23,18,0.55)]"
-      role="status"
-      aria-live="polite"
-    >
-      <div className="relative overflow-hidden border-b border-line bg-ink px-4 py-3 text-paper">
-        <div
-          className="paper-grid pointer-events-none absolute inset-0 opacity-[0.07]"
-          aria-hidden
-        />
-        <div className="relative flex items-start justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="ai-orb grid h-6 w-6 place-items-center rounded-full bg-lime text-xs text-ink">
-                ✦
-              </span>
-              <span className="font-display text-sm font-bold">
-                {dict.agentChat.buildingUpdate}
-              </span>
-            </div>
-            <p className="mt-1.5 text-xs text-paper/60">{activity.message}</p>
-          </div>
-          <button
-            onClick={onCancel}
-            className="font-mono text-[9px] uppercase tracking-wider text-paper/50 transition hover:text-paper"
-          >
-            {dict.common.cancel}
-          </button>
-        </div>
-
-        <div className="relative mt-3 flex items-center gap-3">
-          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-paper/15">
-            <div
-              className="h-full rounded-full bg-lime transition-[width] duration-500 ease-out"
-              style={{ width: `${Math.max(4, activity.progress)}%` }}
-            />
-          </div>
-          <span className="font-mono text-[10px] font-semibold text-lime">
-            {Math.round(activity.progress)}%
-          </span>
-        </div>
-      </div>
-
-      <div className="p-3">
-        {activity.summary && (
-          <p className="mb-3 text-xs leading-relaxed text-ink-soft">
-            {activity.summary}
-          </p>
-        )}
-
-        {activity.areas.length > 0 ? (
-          <div className="space-y-2">
-            {activity.areas.map((area) => {
-              const state = activity.areaProgress[area.id] ?? {
-                status: "queued" as const,
-                progress: 6,
-              };
-              return (
-                <div key={area.id} className="flex items-center gap-2.5">
-                  <span
-                    className={`grid h-7 w-7 shrink-0 place-items-center rounded-md border text-xs ${
-                      state.status === "complete"
-                        ? "border-lime-deep bg-lime/40"
-                        : state.status === "working"
-                          ? "border-line-strong bg-paper"
-                          : "border-line bg-card"
-                    }`}
-                  >
-                    {state.status === "complete" ? "✓" : (area.icon ?? "•")}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="truncate text-xs font-medium text-ink">
-                        {area.label}
-                      </span>
-                      <span className="font-mono text-[9px] uppercase tracking-wider text-ink-soft">
-                        {dict.agentChat.areaStatus[state.status]}
-                      </span>
-                    </div>
-                    <div className="mt-1 h-1 overflow-hidden rounded-full bg-ink/[0.07]">
-                      <div
-                        className={`h-full rounded-full transition-[width] duration-500 ${
-                          state.status === "complete"
-                            ? "bg-ink"
-                            : "bg-lime-deep"
-                        }`}
-                        style={{ width: `${Math.max(4, state.progress)}%` }}
-                      />
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {[
-              [dict.agentChat.steps.inspect, activity.progress >= 16],
-              [dict.agentChat.steps.decide, activity.progress >= 25],
-              [dict.agentChat.steps.prepare, activity.progress >= 34],
-            ].map(([label, done]) => (
-              <div
-                key={String(label)}
-                className="flex items-center gap-2 text-xs text-ink-soft"
-              >
-                <span
-                  className={`grid h-5 w-5 place-items-center rounded-full text-[10px] ${
-                    done ? "bg-lime text-ink" : "bg-hover"
-                  }`}
-                >
-                  {done ? "✓" : "·"}
-                </span>
-                {label}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
   );
 }

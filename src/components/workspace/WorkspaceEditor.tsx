@@ -59,7 +59,7 @@ export function WorkspaceEditor({
 
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
 
-  // The agent already persisted the new workspace server-side; reflect it live.
+  // Agent apply and Undo are already persisted server-side; reflect them live.
   const applyAgentWorkspace = useCallback((updated: Workspace) => {
     if (timer.current) clearTimeout(timer.current);
     latest.current = updated;
