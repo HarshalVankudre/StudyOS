@@ -17,6 +17,11 @@ export interface WorkspaceCtx {
    * never disturbed mid-edit.
    */
   rev: number;
+  /** True while the agent is actively processing — suppresses autosave to avoid
+   *  a version conflict when the agent tries to commit its result. */
+  agentBusy: boolean;
+  /** Set by AgentChat to pause/resume autosave. */
+  setAgentBusy: (busy: boolean) => void;
 }
 
 const Ctx = createContext<WorkspaceCtx | null>(null);

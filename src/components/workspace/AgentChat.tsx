@@ -34,10 +34,12 @@ export function AgentChat({
   workspaceId,
   onApplied,
   onClose,
+  onBusyChange,
 }: {
   workspaceId: string;
   onApplied: (ws: Workspace) => void;
   onClose: () => void;
+  onBusyChange?: (busy: boolean) => void;
 }) {
   const { dict } = useI18n();
   const initialActivity = createInitialAgentActivity(
@@ -53,6 +55,12 @@ export function AgentChat({
   const scrollRef = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<AbortController | null>(null);
   const taskIdRef = useRef<string | null>(null);
+
+  // Propagate busy state to the editor so it can suppress autosave while the
+  // agent is processing (avoids a workspace version conflict on commit).
+  useEffect(() => {
+    onBusyChange?.(busy);
+  }, [busy, onBusyChange]);
 
   // Render a completed agent result: append the assistant turn and reflect the
   // applied workspace live. Used by both the live stream and a reconnect.

@@ -31,9 +31,12 @@ export function WorkspaceEditor({
 
   // AI agent chat panel
   const [aiOpen, setAiOpen] = useState(false);
+  const [agentBusy, setAgentBusy] = useState(false);
 
   const latest = useRef(workspace);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const agentBusyRef = useRef(false);
+  const pendingSaveRef = useRef(false);
 
   const update = useCallback(
     (mutator: (draft: Workspace) => void) => {
@@ -45,6 +48,12 @@ export function WorkspaceEditor({
       });
       setStatus("saving");
       if (timer.current) clearTimeout(timer.current);
+      // Suppress autosave while the agent is processing to avoid a version
+      // conflict when it tries to commit its result.
+      if (agentBusyRef.current) {
+        pendingSaveRef.current = true;
+        return;
+      }
       timer.current = setTimeout(async () => {
         try {
           await updateWorkspaceAction(id, latest.current);
@@ -56,6 +65,24 @@ export function WorkspaceEditor({
     },
     [id],
   );
+
+  // When the agent finishes, flush any save that was deferred while it was busy.
+  const handleAgentBusyChange = useCallback((busy: boolean) => {
+    agentBusyRef.current = busy;
+    setAgentBusy(busy);
+    if (!busy && pendingSaveRef.current) {
+      pendingSaveRef.current = false;
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = setTimeout(async () => {
+        try {
+          await updateWorkspaceAction(id, latest.current);
+          setStatus("saved");
+        } catch {
+          setStatus("error");
+        }
+      }, 300);
+    }
+  }, [id]);
 
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
 
@@ -102,7 +129,7 @@ export function WorkspaceEditor({
     workspace.pages.find((p) => p.id === activePageId) ?? workspace.pages[0];
 
   return (
-    <WorkspaceProvider value={{ workspace, update, status, rev }}>
+    <WorkspaceProvider value={{ workspace, update, status, rev, agentBusy, setAgentBusy: handleAgentBusyChange }}>
       <div className="flex h-screen w-full overflow-hidden bg-paper text-ink">
         {/* Sidebar */}
         <aside className="flex w-60 shrink-0 flex-col border-r border-line bg-surface">
@@ -199,7 +226,22 @@ export function WorkspaceEditor({
               <ThemeToggle />
               <LanguageSwitcher compact />
               <button
-                onClick={() => setAiOpen((v) => !v)}
+                onClick={() => {
+                  setAiOpen((v) => {
+                    if (!v && timer.current) {
+                      // Opening the agent panel — flush any pending save
+                      // immediately so the DB version matches before the
+                      // agent reads it.
+                      clearTimeout(timer.current);
+                      timer.current = null;
+                      void updateWorkspaceAction(id, latest.current).then(
+                        () => setStatus("saved"),
+                        () => setStatus("error"),
+                      );
+                    }
+                    return !v;
+                  });
+                }}
                 aria-pressed={aiOpen}
                 className={`flex items-center gap-2 rounded-md border px-3.5 py-1.5 text-xs font-semibold transition ${
                   aiOpen
@@ -224,6 +266,7 @@ export function WorkspaceEditor({
             workspaceId={id}
             onApplied={applyAgentWorkspace}
             onClose={() => setAiOpen(false)}
+            onBusyChange={handleAgentBusyChange}
           />
         )}
       </div>
