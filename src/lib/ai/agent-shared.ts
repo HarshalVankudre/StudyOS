@@ -38,6 +38,8 @@ export interface AgentResponse {
   choices?: AgentChoice[];
   /** Workspace areas inspected or changed during this turn. */
   affectedAreas?: AgentArea[];
+  /** Server-generated id for the agent change that may be undone. */
+  changeId?: string;
 }
 
 export type AgentPhase =
@@ -48,6 +50,13 @@ export type AgentPhase =
   | "saving";
 
 export type AgentAreaStatus = "queued" | "working" | "complete";
+
+/** A completed, user-facing milestone in the Living Story (no technical detail). */
+export interface AgentDiscovery {
+  id: string;
+  title: string;
+  detail?: string;
+}
 
 export type AgentStreamEvent =
   | {
@@ -65,6 +74,11 @@ export type AgentStreamEvent =
       type: "area";
       areaId: string;
       status: AgentAreaStatus;
+      progress: number;
+    }
+  | {
+      type: "discovery";
+      discovery: AgentDiscovery;
       progress: number;
     }
   | {
