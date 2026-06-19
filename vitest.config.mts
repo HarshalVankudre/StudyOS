@@ -19,5 +19,8 @@ export default defineConfig({
     setupFiles: ["./src/test/setup.ts"],
     clearMocks: true,
     restoreMocks: true,
+    // Never descend into git worktrees (e.g. .worktrees/*): they carry their own
+    // copies of these test files, which would run as duplicates.
+    exclude: ["**/node_modules/**", "**/.worktrees/**", "**/dist/**"],
   },
 });

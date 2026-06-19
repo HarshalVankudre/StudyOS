@@ -16,7 +16,8 @@ import {
   type AgentResponse,
 } from "./agent-shared";
 import { extractJson, WORKSPACE_SHAPE, languageDirective } from "./generate";
-import { applyAgentOps, agentOpSchema, type AgentOp } from "./agent-ops";
+import { applyAgentOps, agentOpsSchema, type AgentOp } from "./agent-ops";
+import { assertResultWithinLimits } from "./limits";
 import { chatCompletion, type ChatMessage } from "./openrouter";
 import { DEFAULT_LOCALE, type Locale } from "@/lib/i18n/config";
 import { getDictionary } from "@/lib/i18n/dictionaries";
@@ -221,13 +222,15 @@ function inferAllRelevantAreas(workspace: Workspace): AgentArea[] {
 
 const editReplySchema = z.object({
   reply: z.string().optional(),
-  ops: z.array(agentOpSchema).min(1),
+  ops: agentOpsSchema,
 });
 
 function parseEditReply(
   raw: string,
   fallbackReply: string,
 ): { reply: string; ops: AgentOp[] } {
+  // Reject an oversized result before parsing/cloning/persisting it.
+  assertResultWithinLimits(raw);
   const parsed = editReplySchema.safeParse(extractJson(raw));
   if (!parsed.success) {
     // Pin the failure to the exact field so the server log says e.g.

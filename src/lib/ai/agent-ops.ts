@@ -18,64 +18,81 @@ import {
   databaseViewSchema,
   pageSchema,
 } from "@/lib/workspace/schema";
+import { AGENT_LIMITS } from "./limits";
+
+// Untrusted op fields are length-bounded so a malicious/runaway result cannot
+// smuggle a huge string or array through to the trusted apply path. Ids stay
+// far under this; the cap only trips on pathological input.
+const limitedString = z.string().max(AGENT_LIMITS.maxOpString);
 
 export const agentOpSchema = z.discriminatedUnion("op", [
   // ---- rows (the common case) ----
   z.object({
     op: z.literal("update_row"),
-    databaseId: z.string(),
-    rowId: z.string(),
-    cells: z.record(z.string(), cellValueSchema),
+    databaseId: limitedString,
+    rowId: limitedString,
+    cells: z.record(limitedString, cellValueSchema),
   }),
-  z.object({ op: z.literal("add_row"), databaseId: z.string(), row: databaseRowSchema }),
-  z.object({ op: z.literal("delete_row"), databaseId: z.string(), rowId: z.string() }),
+  z.object({ op: z.literal("add_row"), databaseId: limitedString, row: databaseRowSchema }),
+  z.object({ op: z.literal("delete_row"), databaseId: limitedString, rowId: limitedString }),
 
   // ---- database meta ----
   z.object({
     op: z.literal("update_database"),
-    databaseId: z.string(),
-    name: z.string().optional(),
-    icon: z.string().optional(),
-    description: z.string().optional(),
+    databaseId: limitedString,
+    name: limitedString.optional(),
+    icon: limitedString.optional(),
+    description: limitedString.optional(),
   }),
   z.object({ op: z.literal("add_database"), database: databaseSchema }),
-  z.object({ op: z.literal("delete_database"), databaseId: z.string() }),
+  z.object({ op: z.literal("delete_database"), databaseId: limitedString }),
   // Escape hatch for large single-database restructuring (still one database,
   // not the whole workspace).
   z.object({ op: z.literal("replace_database"), database: databaseSchema }),
 
   // ---- properties ----
-  z.object({ op: z.literal("add_property"), databaseId: z.string(), property: databasePropertySchema }),
-  z.object({ op: z.literal("update_property"), databaseId: z.string(), property: databasePropertySchema }),
-  z.object({ op: z.literal("delete_property"), databaseId: z.string(), propertyId: z.string() }),
+  z.object({ op: z.literal("add_property"), databaseId: limitedString, property: databasePropertySchema }),
+  z.object({ op: z.literal("update_property"), databaseId: limitedString, property: databasePropertySchema }),
+  z.object({ op: z.literal("delete_property"), databaseId: limitedString, propertyId: limitedString }),
 
   // ---- views ----
-  z.object({ op: z.literal("add_view"), databaseId: z.string(), view: databaseViewSchema }),
-  z.object({ op: z.literal("update_view"), databaseId: z.string(), view: databaseViewSchema }),
-  z.object({ op: z.literal("delete_view"), databaseId: z.string(), viewId: z.string() }),
+  z.object({ op: z.literal("add_view"), databaseId: limitedString, view: databaseViewSchema }),
+  z.object({ op: z.literal("update_view"), databaseId: limitedString, view: databaseViewSchema }),
+  z.object({ op: z.literal("delete_view"), databaseId: limitedString, viewId: limitedString }),
 
   // ---- pages ----
   z.object({ op: z.literal("add_page"), page: pageSchema }),
   z.object({
     op: z.literal("update_page"),
-    pageId: z.string(),
-    title: z.string().optional(),
-    icon: z.string().optional(),
+    pageId: limitedString,
+    title: limitedString.optional(),
+    icon: limitedString.optional(),
   }),
-  z.object({ op: z.literal("delete_page"), pageId: z.string() }),
-  z.object({ op: z.literal("set_page_blocks"), pageId: z.string(), blocks: z.array(blockSchema) }),
+  z.object({ op: z.literal("delete_page"), pageId: limitedString }),
+  z.object({
+    op: z.literal("set_page_blocks"),
+    pageId: limitedString,
+    blocks: z.array(blockSchema).max(AGENT_LIMITS.maxArray),
+  }),
   z.object({ op: z.literal("replace_page"), page: pageSchema }),
 
   // ---- workspace root ----
   z.object({
     op: z.literal("update_workspace"),
-    name: z.string().optional(),
-    icon: z.string().optional(),
-    homePageId: z.string().optional(),
+    name: limitedString.optional(),
+    icon: limitedString.optional(),
+    homePageId: limitedString.optional(),
   }),
 ]);
 
 export type AgentOp = z.infer<typeof agentOpSchema>;
+
+/**
+ * An op list bounded by `maxOps`, used at every boundary that accepts an
+ * untrusted result so the trusted apply path can never be handed an unbounded
+ * array of operations.
+ */
+export const agentOpsSchema = z.array(agentOpSchema).min(1).max(AGENT_LIMITS.maxOps);
 
 /**
  * Apply patch operations to a copy of the workspace and return the result.
