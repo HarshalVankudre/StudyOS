@@ -409,6 +409,10 @@ export const pt = {
     intro:
       "Peça para eu mudar um item ou coordenar atualizações em todo o seu espaço de trabalho. Se algo não estiver claro, eu pergunto antes de editar.",
     workspaceUpdated: "Espaço de trabalho atualizado",
+    undo: "Desfazer",
+    undoing: "Desfazendo…",
+    undone: "Alteração desfeita",
+    undoFailed: "Esta alteração não pode ser desfeita porque o espaço de trabalho mudou.",
     buildingUpdate: "Criando sua atualização",
     steps: {
       inspect: "Inspecionar espaço de trabalho",
@@ -602,6 +606,8 @@ export const pt = {
       validating: "Verificando referências, visualizações, campos e dados vinculados",
       saving: "Salvando o espaço de trabalho atualizado",
       workspaceNotFound: "Espaço de trabalho não encontrado.",
+      workspaceChanged: "O espaço de trabalho mudou enquanto eu trabalhava. Tente novamente.",
+      undoUnavailable: "Esta alteração não pode ser desfeita porque o espaço de trabalho tem edições mais recentes.",
       error:
         "O agente não conseguiu concluir essa solicitação com segurança. Tente novamente ou torne a solicitação mais específica.",
       fallbackReply: "Espaço de trabalho atualizado.",

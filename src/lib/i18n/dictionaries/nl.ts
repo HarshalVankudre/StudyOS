@@ -409,6 +409,10 @@ export const nl = {
     intro:
       "Vraag me om één item te wijzigen of om updates over je hele werkruimte te coördineren. Als iets onduidelijk is, vraag ik het voordat ik bewerk.",
     workspaceUpdated: "Werkruimte bijgewerkt",
+    undo: "Ongedaan maken",
+    undoing: "Ongedaan maken…",
+    undone: "Wijziging ongedaan gemaakt",
+    undoFailed: "Deze wijziging kan niet ongedaan worden gemaakt omdat de werkruimte is veranderd.",
     buildingUpdate: "Je update bouwen",
     steps: {
       inspect: "Werkruimte inspecteren",
@@ -602,6 +606,8 @@ export const nl = {
       validating: "Verwijzingen, weergaven, velden en gekoppelde gegevens controleren",
       saving: "De bijgewerkte werkruimte opslaan",
       workspaceNotFound: "Werkruimte niet gevonden.",
+      workspaceChanged: "Je werkruimte is gewijzigd terwijl ik bezig was. Probeer het opnieuw.",
+      undoUnavailable: "Deze wijziging kan niet ongedaan worden gemaakt omdat de werkruimte nieuwere bewerkingen bevat.",
       error:
         "De agent kon dat verzoek niet veilig voltooien. Probeer het opnieuw of maak het verzoek specifieker.",
       fallbackReply: "Je werkruimte bijgewerkt.",

@@ -409,6 +409,10 @@ export const zh = {
     intro:
       "你可以让我修改某一项，也可以协调整个工作空间的更新。若有任何不清楚之处，我会在编辑前先询问你。",
     workspaceUpdated: "工作空间已更新",
+    undo: "撤销",
+    undoing: "正在撤销…",
+    undone: "已撤销更改",
+    undoFailed: "工作区已发生变化，因此无法撤销此更改。",
     buildingUpdate: "正在生成你的更新",
     steps: {
       inspect: "检查工作空间",
@@ -602,6 +606,8 @@ export const zh = {
       validating: "正在检查引用、视图、字段和关联数据",
       saving: "正在保存更新后的工作空间",
       workspaceNotFound: "未找到工作空间。",
+      workspaceChanged: "我处理期间工作区发生了变化。请重试。",
+      undoUnavailable: "工作区中已有更新的编辑，因此无法撤销此更改。",
       error:
         "智能体无法稳妥地完成该请求。请重试，或让请求更具体一些。",
       fallbackReply: "已更新你的工作空间。",

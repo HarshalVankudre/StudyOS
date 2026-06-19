@@ -421,6 +421,11 @@ export const en = {
     intro:
       "Ask me to change one item or coordinate updates across your full workspace. If anything is unclear, I’ll ask before editing.",
     workspaceUpdated: "Workspace updated",
+    undo: "Undo",
+    undoing: "Undoing…",
+    undone: "Change undone",
+    undoFailed:
+      "This change can’t be undone because the workspace changed.",
     buildingUpdate: "Building your update",
     steps: {
       inspect: "Inspect workspace",
@@ -614,6 +619,10 @@ export const en = {
       validating: "Checking references, views, fields, and linked data",
       saving: "Saving the updated workspace",
       workspaceNotFound: "Workspace not found.",
+      workspaceChanged:
+        "Your workspace changed while I was working. Please try again.",
+      undoUnavailable:
+        "This change can’t be undone because the workspace has newer edits.",
       error:
         "The agent could not finish that request safely. Please try again or make the request more specific.",
       fallbackReply: "Updated your workspace.",

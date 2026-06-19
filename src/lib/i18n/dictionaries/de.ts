@@ -409,6 +409,10 @@ export const de = {
     intro:
       "Bitte mich, ein einzelnes Element zu ändern oder Aktualisierungen über deinen gesamten Workspace zu koordinieren. Wenn etwas unklar ist, frage ich nach, bevor ich etwas bearbeite.",
     workspaceUpdated: "Workspace aktualisiert",
+    undo: "Rückgängig",
+    undoing: "Wird rückgängig gemacht…",
+    undone: "Änderung rückgängig gemacht",
+    undoFailed: "Diese Änderung kann nicht rückgängig gemacht werden, weil sich der Arbeitsbereich geändert hat.",
     buildingUpdate: "Deine Aktualisierung wird erstellt",
     steps: {
       inspect: "Workspace prüfen",
@@ -602,6 +606,8 @@ export const de = {
       validating: "Verweise, Ansichten, Felder und verknüpfte Daten werden geprüft",
       saving: "Der aktualisierte Workspace wird gespeichert",
       workspaceNotFound: "Workspace nicht gefunden.",
+      workspaceChanged: "Dein Arbeitsbereich wurde während meiner Arbeit geändert. Bitte versuche es erneut.",
+      undoUnavailable: "Diese Änderung kann nicht rückgängig gemacht werden, weil der Arbeitsbereich neuere Änderungen enthält.",
       error:
         "Der Agent konnte diese Anfrage nicht sicher abschließen. Bitte versuch es erneut oder formuliere die Anfrage konkreter.",
       fallbackReply: "Dein Workspace wurde aktualisiert.",

@@ -409,6 +409,10 @@ export const it = {
     intro:
       "Chiedimi di modificare un singolo elemento o di coordinare aggiornamenti in tutto il tuo spazio. Se qualcosa non è chiaro, te lo chiederò prima di apportare modifiche.",
     workspaceUpdated: "Spazio aggiornato",
+    undo: "Annulla",
+    undoing: "Annullamento…",
+    undone: "Modifica annullata",
+    undoFailed: "Questa modifica non può essere annullata perché l’area di lavoro è cambiata.",
     buildingUpdate: "Sto preparando il tuo aggiornamento",
     steps: {
       inspect: "Esamina lo spazio",
@@ -602,6 +606,8 @@ export const it = {
       validating: "Sto controllando riferimenti, viste, campi e dati collegati",
       saving: "Sto salvando lo spazio aggiornato",
       workspaceNotFound: "Spazio non trovato.",
+      workspaceChanged: "L’area di lavoro è cambiata mentre lavoravo. Riprova.",
+      undoUnavailable: "Questa modifica non può essere annullata perché l’area di lavoro contiene modifiche più recenti.",
       error:
         "L’agente non è riuscito a completare la richiesta in modo sicuro. Riprova oppure rendi la richiesta più specifica.",
       fallbackReply: "Ho aggiornato il tuo spazio.",

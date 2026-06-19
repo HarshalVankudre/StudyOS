@@ -17,9 +17,10 @@ import { getLocale } from "@/lib/i18n/server";
 import { getDictionary, type Dictionary } from "@/lib/i18n/dictionaries";
 import { fmt } from "@/lib/i18n/interpolate";
 import {
-  getWorkspace,
-  updateWorkspace,
-} from "@/lib/workspace/store";
+  WorkspaceVersionConflictError,
+  applyAgentWorkspaceChange,
+  getWorkspaceSnapshot,
+} from "@/lib/workspace/version-service";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -57,7 +58,6 @@ export async function POST(request: Request) {
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       let closed = false;
-      let ticker: ReturnType<typeof setInterval> | null = null;
 
       const send = (event: AgentStreamEvent) => {
         if (closed || request.signal.aborted) return;
@@ -69,8 +69,6 @@ export async function POST(request: Request) {
       };
 
       const finish = () => {
-        if (ticker) clearInterval(ticker);
-        ticker = null;
         if (closed) return;
         closed = true;
         try {
@@ -82,12 +80,15 @@ export async function POST(request: Request) {
 
       try {
         const { workspaceId, history, message } = parsed.data;
-        const workspace = await getWorkspace(workspaceId);
-        if (!workspace) {
+        const snapshot = await getWorkspaceSnapshot(workspaceId);
+        if (!snapshot) {
           send({ type: "error", message: T.ai.agent.workspaceNotFound });
           finish();
           return;
         }
+        // baseVersion pins the workspace this task started from; the atomic apply
+        // refuses to commit if a concurrent save advanced it in the meantime.
+        const { workspace, version: baseVersion } = snapshot;
 
         if (!(await hasCredits(userId))) {
           send({
@@ -102,6 +103,7 @@ export async function POST(request: Request) {
         const allAreas = workspaceAreas(workspace);
         let usage: TokenUsage = { promptTokens: 0, completionTokens: 0 };
 
+        // ---- Understanding (0–15%) -----------------------------------------
         send({
           type: "phase",
           phase: "inspecting",
@@ -112,7 +114,19 @@ export async function POST(request: Request) {
           progress: 8,
         });
         await streamInspection(send, allAreas.slice(0, 8), T);
+        send({
+          type: "discovery",
+          discovery: {
+            id: "workspace-understood",
+            title: fmt(T.ai.agent.inspecting, {
+              pages: workspace.pages.length,
+              databases: workspace.databases.length,
+            }),
+          },
+          progress: 15,
+        });
 
+        // ---- Shaping (15–35%) ----------------------------------------------
         send({
           type: "phase",
           phase: "planning",
@@ -150,92 +164,82 @@ export async function POST(request: Request) {
         }
 
         send({
-          type: "plan",
-          summary: decision.plan,
-          areas: decision.affectedAreas,
+          type: "discovery",
+          discovery: {
+            id: "change-shaped",
+            title: T.ai.agent.planning,
+            detail: decision.plan,
+          },
+          progress: 34,
         });
-        for (const area of decision.affectedAreas) {
-          send({
-            type: "area",
-            areaId: area.id,
-            status: "queued",
-            progress: 6,
-          });
-        }
 
+        // ---- Improving (35–75%) --------------------------------------------
         send({
           type: "phase",
           phase: "updating",
           message: T.ai.agent.updating,
-          progress: 34,
+          progress: 35,
         });
-
-        const areaProgress = new Map(
-          decision.affectedAreas.map((area) => [area.id, 6]),
-        );
-        let tick = 0;
-        ticker = setInterval(() => {
-          const activeCount = Math.min(
-            decision.affectedAreas.length,
-            1 + Math.floor(tick / 2),
-          );
-          for (let index = 0; index < activeCount; index += 1) {
-            const area = decision.affectedAreas[index];
-            const current = areaProgress.get(area.id) ?? 6;
-            const next = Math.min(84, current + 6 + ((tick + index) % 4));
-            areaProgress.set(area.id, next);
-            send({
-              type: "area",
-              areaId: area.id,
-              status: "working",
-              progress: next,
-            });
-          }
-          tick += 1;
-        }, 500);
-
         const edited = await withUsageMeter(() =>
           executeAgentEdit(workspace, history, message, decision, model, locale),
         );
         const result = edited.result;
         usage = addUsage(usage, edited.usage);
-        if (ticker) clearInterval(ticker);
-        ticker = null;
-
-        send({
-          type: "phase",
-          phase: "validating",
-          message: T.ai.agent.validating,
-          progress: 88,
-        });
-        for (const area of decision.affectedAreas) {
-          send({
-            type: "area",
-            areaId: area.id,
-            status: "complete",
-            progress: 100,
-          });
-          await sleep(45);
-        }
 
         if (!result.workspace) {
           throw new Error("Agent edit completed without a workspace");
         }
         send({
+          type: "discovery",
+          discovery: {
+            id: "workspace-improved",
+            title: T.ai.agent.updating,
+            detail: decision.affectedAreas
+              .slice(0, 3)
+              .map((area) => `${area.icon ?? "•"} ${area.label}`)
+              .join(" · "),
+          },
+          progress: 74,
+        });
+
+        // ---- Checking (75–92%) ---------------------------------------------
+        send({
+          type: "phase",
+          phase: "validating",
+          message: T.ai.agent.validating,
+          progress: 75,
+        });
+
+        // ---- Finishing (92–100%) -------------------------------------------
+        send({
           type: "phase",
           phase: "saving",
           message: T.ai.agent.saving,
-          progress: 97,
+          progress: 92,
         });
-        await updateWorkspace(workspaceId, result.workspace);
+        const applied = await applyAgentWorkspaceChange(
+          workspaceId,
+          baseVersion,
+          result.workspace,
+        );
         await chargeCredits(userId, usageToCredits(usage), "agent");
-        send({ type: "result", response: result });
+        send({
+          type: "result",
+          response: {
+            ...result,
+            workspace: applied.workspace,
+            changeId: applied.changeId,
+          },
+        });
         finish();
       } catch (error) {
         console.error("[StudyOS] streamed agent failed:", error);
         send({
           type: "error",
-          message: T.ai.agent.error,
+          message:
+            error instanceof WorkspaceVersionConflictError
+              ? T.ai.agent.workspaceChanged
+              : T.ai.agent.error,
         });
         finish();
       }
@@ -261,12 +265,7 @@ async function streamInspection(
       type: "phase",
       phase: "inspecting",
       message: fmt(T.ai.agent.inspectingArea, { area: area.label }),
-      progress: Math.min(18, 9 + index * 1.4),
+      progress: Math.min(14, 5 + index * 1.2),
     });
-    await sleep(45);
   }
-}
-
-function sleep(milliseconds: number) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }

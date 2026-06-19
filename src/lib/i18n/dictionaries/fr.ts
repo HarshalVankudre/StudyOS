@@ -408,6 +408,10 @@ export const fr = {
     intro:
       "Demandez-moi de modifier un seul élément ou de coordonner des mises à jour dans tout votre espace de travail. Si quelque chose n’est pas clair, je poserai une question avant de modifier.",
     workspaceUpdated: "Espace de travail mis à jour",
+    undo: "Annuler",
+    undoing: "Annulation…",
+    undone: "Modification annulée",
+    undoFailed: "Cette modification ne peut pas être annulée, car l’espace de travail a changé.",
     buildingUpdate: "Création de votre mise à jour",
     steps: {
       inspect: "Examiner l’espace de travail",
@@ -601,6 +605,8 @@ export const fr = {
       validating: "Vérification des références, vues, champs et données liées",
       saving: "Enregistrement de l’espace de travail mis à jour",
       workspaceNotFound: "Espace de travail introuvable.",
+      workspaceChanged: "Votre espace de travail a changé pendant mon intervention. Veuillez réessayer.",
+      undoUnavailable: "Cette modification ne peut pas être annulée, car l’espace de travail contient des changements plus récents.",
       error:
         "L’agent n’a pas pu terminer cette demande en toute sécurité. Veuillez réessayer ou préciser davantage votre demande.",
       fallbackReply: "Votre espace de travail a été mis à jour.",
