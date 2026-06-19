@@ -203,7 +203,7 @@ export function WorkspaceEditor({
                 aria-pressed={aiOpen}
                 className={`flex items-center gap-2 rounded-md border px-3.5 py-1.5 text-xs font-semibold transition ${
                   aiOpen
-                    ? "border-line bg-hover text-ink"
+                    ? "border-lime bg-lime-faint text-ink"
                     : "border-line-strong bg-card text-ink hover:bg-hover"
                 }`}
               >

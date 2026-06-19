@@ -64,7 +64,7 @@ export function PageView({ page }: { page: Page }) {
           }
           aria-label={dict.page.pageIcon}
           maxLength={8}
-          className="w-14 rounded bg-transparent px-1 text-center text-4xl outline-none hover:bg-paper focus:bg-paper"
+          className="w-14 rounded bg-transparent px-1 text-center text-4xl outline-none hover:bg-white/[0.04] focus:bg-white/[0.04]"
         />
         <input
           value={page.title}
@@ -74,7 +74,7 @@ export function PageView({ page }: { page: Page }) {
               if (p) p.title = e.target.value;
             })
           }
-          className="w-full rounded px-1 font-display text-4xl font-bold tracking-tight text-ink outline-none hover:bg-paper focus:bg-paper"
+          className="w-full rounded px-1 font-display text-4xl font-bold tracking-tight text-ink outline-none hover:bg-white/[0.04] focus:bg-white/[0.04]"
         />
       </header>
 
@@ -188,7 +188,7 @@ function BlockView({ pageId, block }: { pageId: string; block: Block }) {
     });
 
   const textInputClass =
-    "w-full rounded bg-transparent px-1 outline-none focus:bg-paper";
+    "w-full rounded bg-transparent px-1 outline-none focus:bg-white/[0.04]";
 
   // Fold the AI revision into each uncontrolled input's key so an AI edit
   // remounts it onto the new text (manual typing leaves `rev` untouched).
@@ -259,7 +259,7 @@ function BlockView({ pageId, block }: { pageId: string; block: Block }) {
             defaultValue={block.text}
             onBlur={(e) => commitText(e.target.value)}
             placeholder={dict.page.placeholders.todo}
-            className={`flex-1 rounded bg-transparent px-1 outline-none focus:bg-paper ${
+            className={`flex-1 rounded bg-transparent px-1 outline-none focus:bg-white/[0.04] ${
               block.checked ? "text-ink-faint line-through" : "text-ink"
             }`}
           />
