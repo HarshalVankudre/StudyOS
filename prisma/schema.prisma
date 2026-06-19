@@ -26,10 +26,32 @@ model Workspace {
   name      String
   icon      String?
   data      String
+  version   Int      @default(1)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  changes   WorkspaceChange[]
 
   @@index([ownerId])
+}
+
+// Append-only history of agent (and undo) edits to a workspace. Each row keeps
+// the exact before/after snapshots and the version each one moved between, so an
+// agent change can be atomically reverted without trusting client-supplied JSON.
+model WorkspaceChange {
+  id            String    @id @default(cuid())
+  workspaceId   String
+  ownerId       String
+  kind          String    @default("agent")
+  beforeData    String
+  afterData     String
+  beforeVersion Int
+  afterVersion  Int
+  undoneAt      DateTime?
+  createdAt     DateTime  @default(now())
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, afterVersion])
+  @@index([workspaceId, ownerId, createdAt])
 }
 
 // One row per user (Clerk user id) tracking their Stripe subscription.
