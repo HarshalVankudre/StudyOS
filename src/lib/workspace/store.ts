@@ -56,7 +56,13 @@ export async function listWorkspaces() {
   });
 }
 
-/** Overwrite a workspace the current user owns (autosave). */
+/**
+ * Overwrite a workspace the current user owns (autosave).
+ *
+ * Each save advances `version` so a concurrent agent task working off an older
+ * snapshot can detect the conflict and refuse to overwrite the newer state
+ * (see version-service.ts).
+ */
 export async function updateWorkspace(id: string, ws: Workspace): Promise<void> {
   const ownerId = await requireUserId();
   await prisma.workspace.updateMany({
@@ -65,6 +71,7 @@ export async function updateWorkspace(id: string, ws: Workspace): Promise<void> 
       name: ws.name,
       icon: ws.icon ?? null,
       data: JSON.stringify({ ...ws, id }),
+      version: { increment: 1 },
     },
   });
 }
