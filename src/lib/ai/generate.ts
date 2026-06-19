@@ -39,13 +39,20 @@ const DEFAULT_MODEL = modelForPlan("free");
  * and the `type`/`kind`/`color` enum values) must stay unchanged.
  */
 export function languageDirective(locale: Locale): string {
-  if (locale === DEFAULT_LOCALE) return "";
-  const language = englishName(locale);
-  return [
+  const language = locale === DEFAULT_LOCALE ? "" : [
     "",
     "LANGUAGE:",
-    `- Write ALL user-facing text in ${language}: workspace name, page titles, database names and descriptions, property names, select/status option labels, row text content, headings, callouts, replies, questions, and choice labels.`,
+    `- Write ALL user-facing text in ${englishName(locale)}: workspace name, page titles, database names and descriptions, property names, select/status option labels, row text content, headings, callouts, replies, questions, and choice labels.`,
     "- Do NOT translate or change JSON keys, ids, or the literal enum values for `type`, `kind`, and `color`. Keep all dates in ISO format (YYYY-MM-DD).",
+  ].join("\n");
+  return [
+    language,
+    "",
+    "REPLY FORMATTING (your reply text is rendered as Markdown):",
+    "- For code, SQL, commands, or identifiers: use backticks, e.g. `SELECT col FROM table` — never use LaTeX commands like \\texttt{}.",
+    "- For math: wrap inline math in single dollar signs, e.g. $E = mc^2$; display math in double dollar signs, e.g. $$\\sum_{i=1}^n x_i$$.",
+    "- Never output raw LaTeX commands (\\texttt, \\textbf, \\item, etc.) outside of math delimiters — they will not render.",
+    "- Use standard Markdown: **bold**, *italic*, lists, tables, and fenced code blocks with language tags.",
   ].join("\n");
 }
 

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
 import { Hanken_Grotesk, JetBrains_Mono, Newsreader } from "next/font/google";
+import "katex/dist/katex.min.css";
 import "./globals.css";
 import { getI18n } from "@/lib/i18n/server";
 import { I18nProvider } from "@/lib/i18n/client";
