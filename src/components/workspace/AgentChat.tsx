@@ -233,12 +233,12 @@ export function AgentChat({
     <aside className="flex w-[390px] shrink-0 flex-col border-l border-line bg-paper">
       <div className="flex items-center justify-between border-b border-line px-4 py-3">
         <div className="flex items-center gap-2">
-          <span className="relative grid h-8 w-8 shrink-0 place-items-center rounded-full bg-ink">
+          <span className="relative grid h-8 w-8 shrink-0 place-items-center rounded-full bg-lime">
             {busy && (
               <span className="ai-ring absolute inset-0 rounded-full bg-lime/30" />
             )}
             <span
-              className={`relative h-2 w-2 rounded-full bg-lime ${
+              className={`relative h-2 w-2 rounded-full bg-lime-on ${
                 busy ? "ai-orb" : ""
               }`}
               aria-hidden
@@ -285,7 +285,7 @@ export function AgentChat({
         {items.map((item) =>
           item.role === "user" ? (
             <div key={item.id} className="flex justify-end">
-              <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-ink px-3.5 py-2 text-sm text-paper">
+              <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-lime px-3.5 py-2 text-sm text-lime-on">
                 {item.content}
               </div>
             </div>
@@ -304,7 +304,7 @@ export function AgentChat({
                         send(choice.value, choice.label, item.id)
                       }
                       disabled={busy}
-                      className="group flex items-center justify-between rounded-md border border-line-strong bg-card px-3 py-2 text-left text-sm text-ink transition hover:border-ink hover:bg-lime/20 disabled:opacity-50"
+                      className="group flex items-center justify-between rounded-md border border-line-strong bg-card px-3 py-2 text-left text-sm text-ink transition hover:border-lime hover:bg-lime/10 disabled:opacity-50"
                     >
                       <span>{choice.label}</span>
                       <span className="text-ink-soft transition group-hover:translate-x-0.5 group-hover:text-ink">
@@ -323,8 +323,8 @@ export function AgentChat({
                     aria-expanded={Boolean(otherOpen[item.id])}
                     className={`group flex items-center justify-between rounded-md border px-3 py-2 text-left text-sm transition disabled:opacity-50 ${
                       otherOpen[item.id]
-                        ? "border-ink bg-ink text-paper"
-                        : "border-line-strong bg-card text-ink hover:border-ink hover:bg-lime/20"
+                        ? "border-lime bg-lime text-lime-on"
+                        : "border-line-strong bg-card text-ink hover:border-lime hover:bg-lime/10"
                     }`}
                   >
                     <span className="flex items-center gap-1.5">
@@ -371,7 +371,7 @@ export function AgentChat({
                           if (reply) send(reply, reply, item.id);
                         }}
                         disabled={busy || !otherReplies[item.id]?.trim()}
-                        className="rounded-md bg-ink px-2.5 py-1.5 text-xs font-semibold text-paper transition enabled:hover:bg-ink/85 disabled:opacity-40"
+                        className="rounded-md bg-lime px-2.5 py-1.5 text-xs font-semibold text-lime-on transition enabled:hover:bg-lime-deep disabled:opacity-40"
                       >
                         {dict.agentChat.send}
                       </button>
@@ -382,7 +382,7 @@ export function AgentChat({
 
               {item.changed && (
                 <div className="ml-1 flex flex-wrap items-center gap-1.5">
-                  <span className="inline-flex items-center gap-1 rounded-full bg-lime/35 px-2 py-0.5 text-[10px] font-semibold text-ink ring-1 ring-inset ring-lime-deep/40">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-lime/35 px-2 py-0.5 text-[10px] font-semibold text-lime ring-1 ring-inset ring-lime/40">
                     ✓ {dict.agentChat.workspaceUpdated}
                   </span>
                   {item.affectedAreas?.slice(0, 3).map((area) => (
@@ -447,7 +447,7 @@ export function AgentChat({
             onClick={() => send(text)}
             disabled={busy || !text.trim()}
             aria-label={dict.agentChat.send}
-            className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-ink text-paper transition enabled:hover:bg-ink/90 disabled:opacity-40"
+            className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-lime text-lime-on transition enabled:hover:bg-lime-deep disabled:opacity-40"
           >
             ↑
           </button>
