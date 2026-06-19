@@ -54,6 +54,25 @@ model WorkspaceChange {
   @@index([workspaceId, ownerId, createdAt])
 }
 
+// A durable, owner-scoped record of one agent task. Survives a disconnect so the
+// user can reconnect and receive the result, and carries a cancel flag the apply
+// step consults before committing. `result` holds the final stream payload;
+// rows expire ~10 minutes after creation.
+model AgentTask {
+  id          String   @id @default(cuid())
+  userId      String
+  workspaceId String
+  baseVersion Int
+  status      String   @default("running")
+  result      String?
+  error       String?
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId, workspaceId])
+}
+
 // One row per user (Clerk user id) tracking their Stripe subscription.
 model Subscription {
   userId               String    @id
