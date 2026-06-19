@@ -180,7 +180,7 @@ export default async function PricingPage() {
           </div>
 
           {/* Pro */}
-          <div className="relative flex flex-col rounded-md border-[1.5px] border-ink bg-card p-8 shadow-pop">
+          <div className="relative flex flex-col rounded-md border-[1.5px] border-lime bg-card p-8 shadow-pop">
             <span className="absolute right-6 top-7 inline-flex items-center gap-1.5 rounded-full bg-lime px-2.5 py-1 font-mono text-[10.5px] font-semibold text-lime-on">
               ★ {dict.pricing.pro.badge}
             </span>
