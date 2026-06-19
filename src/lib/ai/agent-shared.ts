@@ -60,6 +60,11 @@ export interface AgentDiscovery {
 
 export type AgentStreamEvent =
   | {
+      // Sent once at the start so the client can reconnect to / cancel this task.
+      type: "task";
+      taskId: string;
+    }
+  | {
       type: "phase";
       phase: AgentPhase;
       message: string;

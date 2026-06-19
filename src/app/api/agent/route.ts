@@ -7,6 +7,7 @@ import {
 } from "@/lib/ai/agent";
 import type {
   AgentArea,
+  AgentResponse,
   AgentStreamEvent,
 } from "@/lib/ai/agent-shared";
 import { modelForPlan } from "@/lib/ai/plans";
@@ -21,6 +22,12 @@ import {
   applyAgentWorkspaceChange,
   getWorkspaceSnapshot,
 } from "@/lib/workspace/version-service";
+import {
+  createTask,
+  isTaskCancelled,
+  markTaskDone,
+  markTaskError,
+} from "@/lib/ai/tasks/store";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -58,6 +65,7 @@ export async function POST(request: Request) {
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       let closed = false;
+      let taskId: string | null = null;
 
       const send = (event: AgentStreamEvent) => {
         if (closed || request.signal.aborted) return;
@@ -98,6 +106,12 @@ export async function POST(request: Request) {
           finish();
           return;
         }
+
+        // Durable record: survives a disconnect (reconnect by id) and carries a
+        // cancel flag consulted before the workspace is changed.
+        const task = await createTask({ workspaceId, baseVersion });
+        taskId = task.id;
+        send({ type: "task", taskId: task.id });
 
         const model = modelForPlan(await getUserPlan());
         const allAreas = workspaceAreas(workspace);
@@ -141,24 +155,22 @@ export async function POST(request: Request) {
 
         if (decision.action === "reply") {
           await chargeCredits(userId, usageToCredits(usage), "agent");
-          send({
-            type: "result",
-            response: { reply: decision.reply, changed: false },
-          });
+          const response: AgentResponse = { reply: decision.reply, changed: false };
+          await markTaskDone(task.id, JSON.stringify(response));
+          send({ type: "result", response });
           finish();
           return;
         }
 
         if (decision.action === "clarify") {
           await chargeCredits(userId, usageToCredits(usage), "agent");
-          send({
-            type: "result",
-            response: {
-              reply: decision.reply,
-              changed: false,
-              choices: decision.choices,
-            },
-          });
+          const response: AgentResponse = {
+            reply: decision.reply,
+            changed: false,
+            choices: decision.choices,
+          };
+          await markTaskDone(task.id, JSON.stringify(response));
+          send({ type: "result", response });
           finish();
           return;
         }
@@ -213,6 +225,13 @@ export async function POST(request: Request) {
           progress: 75,
         });
 
+        // The user may have cancelled while the edit was being produced; never
+        // apply a cancelled task's result.
+        if (await isTaskCancelled(task.id)) {
+          finish();
+          return;
+        }
+
         // ---- Finishing (92–100%) -------------------------------------------
         send({
           type: "phase",
@@ -226,17 +245,17 @@ export async function POST(request: Request) {
           result.workspace,
         );
         await chargeCredits(userId, usageToCredits(usage), "agent");
-        send({
-          type: "result",
-          response: {
-            ...result,
-            workspace: applied.workspace,
-            changeId: applied.changeId,
-          },
-        });
+        const response: AgentResponse = {
+          ...result,
+          workspace: applied.workspace,
+          changeId: applied.changeId,
+        };
+        await markTaskDone(task.id, JSON.stringify(response));
+        send({ type: "result", response });
         finish();
       } catch (error) {
         console.error("[StudyOS] streamed agent failed:", error);
+        if (taskId) await markTaskError(taskId, "error").catch(() => {});
         send({
           type: "error",
           message:
