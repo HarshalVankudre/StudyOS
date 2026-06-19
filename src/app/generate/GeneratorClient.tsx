@@ -344,7 +344,7 @@ function DescribeStage({
         {dict.generate.describe.subtitle}
       </p>
 
-      <div className="mt-8 rounded-xl border border-ink/15 bg-card shadow-sm transition focus-within:border-ink/40">
+      <div className="mt-8 rounded-xl border border-line bg-card shadow-card transition focus-within:border-lime/50">
         <textarea
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
@@ -376,7 +376,7 @@ function DescribeStage({
               key={ex.text}
               onClick={() => onExample(ex.text)}
               disabled={busy}
-              className="group flex items-center gap-2 rounded-lg border border-ink/15 bg-card px-3.5 py-2 text-left text-sm transition hover:border-ink/40 disabled:opacity-50"
+              className="group flex items-center gap-2 rounded-lg border border-line bg-card px-3.5 py-2 text-left text-sm transition hover:border-lime/40 hover:text-ink disabled:opacity-50"
             >
               <span>{ex.emoji}</span>
               <span className="text-ink-soft transition group-hover:text-ink">
@@ -452,7 +452,7 @@ function QuestionsStage({
           return (
             <div
               key={q.id}
-              className="reveal rounded-xl border border-ink/10 bg-card p-5 shadow-sm"
+              className="reveal rounded-xl border border-line bg-card p-5 shadow-card"
               style={{ animationDelay: `${qi * 70}ms` }}
             >
               <div className="mb-3 flex items-baseline justify-between gap-3">
@@ -476,8 +476,8 @@ function QuestionsStage({
                       aria-pressed={on}
                       className={`flex items-center gap-1.5 rounded-lg border px-3.5 py-1.5 text-sm transition disabled:opacity-60 ${
                         on
-                          ? "border-ink bg-ink font-medium text-paper"
-                          : "border-ink/15 bg-card text-ink-soft hover:border-ink/40 hover:text-ink"
+                          ? "border-lime bg-lime font-medium text-lime-on"
+                          : "border-line bg-card text-ink-soft hover:border-lime/40 hover:text-ink"
                       }`}
                     >
                       {o.emoji && <span>{o.emoji}</span>}
@@ -491,8 +491,8 @@ function QuestionsStage({
                   aria-pressed={customOpen}
                   className={`flex items-center gap-1.5 rounded-lg border px-3.5 py-1.5 text-sm transition disabled:opacity-60 ${
                     customOpen
-                      ? "border-ink bg-ink font-medium text-paper"
-                      : "border-ink/15 bg-card text-ink-soft hover:border-ink/40 hover:text-ink"
+                      ? "border-lime bg-lime font-medium text-lime-on"
+                      : "border-line bg-card text-ink-soft hover:border-lime/40 hover:text-ink"
                   }`}
                 >
                   <span>✍️</span>
@@ -500,7 +500,7 @@ function QuestionsStage({
                 </button>
               </div>
               {customOpen && (
-                <div className="mt-3 flex items-center gap-2 rounded-lg border border-ink/20 bg-paper/50 px-3 py-2 focus-within:border-ink/50">
+                <div className="mt-3 flex items-center gap-2 rounded-lg border border-line bg-white/[0.02] px-3 py-2 focus-within:border-lime/50">
                   <span className="text-sm" aria-hidden>
                     ✎
                   </span>
