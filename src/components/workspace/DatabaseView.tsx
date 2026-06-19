@@ -86,7 +86,7 @@ export function DatabaseView({
               onClick={() => setActiveViewId(v.id)}
               className={`-mb-px border-b-2 px-2 pb-2 text-sm transition ${
                 v.id === view.id
-                  ? "border-ink font-medium text-ink"
+                  ? "border-lime font-medium text-ink"
                   : "border-transparent text-ink-faint hover:text-ink-soft"
               }`}
             >
@@ -891,7 +891,7 @@ function BoardView({ db, view }: { db: Database; view: DBView }) {
               dropInto(opt.id);
             }}
             className={`w-64 shrink-0 rounded-md p-1 transition ${
-              isOver ? "bg-lime/20 ring-2 ring-lime-deep/40" : ""
+              isOver ? "bg-lime/10 ring-2 ring-lime/40" : ""
             }`}
           >
             <div className="mb-2 flex items-center gap-2 px-1">
@@ -1104,7 +1104,7 @@ function CalendarView({ db, view }: { db: Database; view: DBView }) {
                   : undefined
               }
               className={`group/cell min-h-[92px] border-b border-r border-line p-1.5 [&:nth-child(7n)]:border-r-0 ${
-                isOver ? "bg-lime/20" : ""
+                isOver ? "bg-lime/10" : ""
               }`}
             >
               {day && (
