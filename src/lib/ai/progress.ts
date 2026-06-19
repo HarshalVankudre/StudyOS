@@ -56,7 +56,12 @@ export function reduceAgentActivity(
       ...state,
       phase: event.phase,
       message: event.message,
-      progress: Math.max(state.progress, event.progress),
+      // Monotonic, and never past the (now active) phase's ceiling — so a
+      // stray route value can't claim a phase finished before it really did.
+      progress: Math.min(
+        PHASE_CEILINGS[event.phase],
+        Math.max(state.progress, event.progress),
+      ),
     };
   }
 
@@ -66,7 +71,10 @@ export function reduceAgentActivity(
     );
     return {
       ...state,
-      progress: Math.max(state.progress, event.progress),
+      progress: Math.min(
+        PHASE_CEILINGS[state.phase],
+        Math.max(state.progress, event.progress),
+      ),
       discoveries: [...discoveries, event.discovery].slice(-3),
     };
   }

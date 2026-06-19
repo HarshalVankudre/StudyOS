@@ -163,12 +163,15 @@ export async function POST(request: Request) {
           return;
         }
 
+        // Title only: decision.plan is raw model output and could echo internal
+        // ids/labels, so it is never rendered to the user. The affected areas
+        // (safe, user-facing labels) are surfaced by the workspace-improved
+        // discovery below.
         send({
           type: "discovery",
           discovery: {
             id: "change-shaped",
             title: T.ai.agent.planning,
-            detail: decision.plan,
           },
           progress: 34,
         });
@@ -265,7 +268,9 @@ async function streamInspection(
       type: "phase",
       phase: "inspecting",
       message: fmt(T.ai.agent.inspectingArea, { area: area.label }),
-      progress: Math.min(14, 5 + index * 1.2),
+      // Stay within the Understanding band and at/above the opening 8% so the
+      // emitted stream itself never regresses (not just the consumer's view).
+      progress: Math.min(14, 8 + index * 0.8),
     });
   }
 }

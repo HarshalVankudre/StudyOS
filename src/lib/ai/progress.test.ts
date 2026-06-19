@@ -49,6 +49,16 @@ describe("Living Story progress", () => {
     expect(display).toBe(PHASE_CEILINGS.updating - 2);
   });
 
+  it("clamps confirmed progress to the active phase ceiling", () => {
+    const initial = createInitialAgentActivity("Opening"); // inspecting, ceiling 15
+    const overshoot = reduceAgentActivity(initial, {
+      type: "discovery",
+      discovery: { id: "x", title: "X" },
+      progress: 90,
+    });
+    expect(overshoot.progress).toBe(PHASE_CEILINGS.inspecting);
+  });
+
   it("reaches 100 only after the result event", () => {
     const initial = createInitialAgentActivity("Opening");
     const completed = reduceAgentActivity(initial, {
