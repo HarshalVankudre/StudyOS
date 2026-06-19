@@ -4,10 +4,21 @@
  * real shell/filesystem/network are registered as disabled stubs until the
  * isolated sandbox (Increment B) provides their execution backend.
  */
+import "server-only";
+
 import { z } from "zod";
 import { safeParseWorkspace } from "@/lib/workspace/schema";
 import { applyAgentOps, agentOpsSchema } from "@/lib/ai/agent-ops";
+import { controlledFetch } from "@/lib/net/controlled-fetch";
 import { type ToolRegistry, toolRegistry } from "./registry";
+
+/** Allowlisted hosts for controlled web reading; empty (deny-all) by default. */
+function fetchAllowlist(): string[] {
+  return (process.env.AGENT_FETCH_ALLOWLIST ?? "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
 
 function parseSnapshot(json?: string) {
   if (!json) throw new Error("no workspace snapshot");
@@ -21,7 +32,6 @@ export const STUB_TOOL_IDS = [
   "shell_exec",
   "install_package",
   "native_build",
-  "controlled_fetch",
 ] as const;
 
 export function registerBuiltinTools(registry: ToolRegistry = toolRegistry): void {
@@ -61,6 +71,32 @@ export function registerBuiltinTools(registry: ToolRegistry = toolRegistry): voi
     },
   });
 
+  registry.register({
+    id: "controlled_fetch",
+    description:
+      "Read allowlisted public web content over HTTPS for research. No request body; size- and time-capped.",
+    input: z.object({ url: z.string().url() }),
+    output: z.object({
+      status: z.number().int(),
+      contentType: z.string().nullable(),
+      text: z.string(),
+    }),
+    limits: { timeoutMs: 12_000 },
+    networkPermission: "allowlisted",
+    handler: async (input) => {
+      const result = await controlledFetch(input.url, {
+        allowlist: fetchAllowlist(),
+        audit: (record) =>
+          console.log("[StudyOS] controlled_fetch", record),
+      });
+      return {
+        status: result.status,
+        contentType: result.contentType,
+        text: result.text,
+      };
+    },
+  });
+
   // Disabled stubs: registered so skills/the planner can see them, but inert
   // until the isolated sandbox provides their backend (Increment B).
   for (const id of STUB_TOOL_IDS) {
@@ -70,7 +106,7 @@ export function registerBuiltinTools(registry: ToolRegistry = toolRegistry): voi
       input: z.unknown(),
       output: z.unknown(),
       limits: { timeoutMs: 1_000 },
-      networkPermission: id === "controlled_fetch" ? "allowlisted" : "none",
+      networkPermission: "none",
       enabled: false,
       handler: () => {
         throw new Error("tool backend not available");
