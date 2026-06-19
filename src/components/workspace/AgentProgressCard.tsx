@@ -16,15 +16,11 @@ export function AgentProgressCard({
   onCancel: () => void;
 }) {
   const { dict } = useI18n();
-  const [displayProgress, setDisplayProgress] = useState(activity.progress);
-
-  useEffect(() => {
-    setDisplayProgress((current) => Math.max(current, activity.progress));
-  }, [activity.progress]);
+  const [animatedProgress, setAnimatedProgress] = useState(activity.progress);
 
   useEffect(() => {
     const timer = setInterval(() => {
-      setDisplayProgress((current) =>
+      setAnimatedProgress((current) =>
         advanceAnimatedProgress(
           current,
           activity.progress,
@@ -36,7 +32,11 @@ export function AgentProgressCard({
   }, [activity.phase, activity.progress]);
 
   const activeIndex = PHASE_ORDER.indexOf(activity.phase);
-  const percent = Math.round(displayProgress);
+  // Show whichever is higher: the smoothly-animated value or the latest
+  // confirmed progress, so a real jump appears immediately without waiting for
+  // the next animation tick. Deriving it (rather than syncing in an effect)
+  // keeps the bar monotonic and avoids a cascading setState-in-effect.
+  const percent = Math.round(Math.max(animatedProgress, activity.progress));
   const milestones = useMemo(
     () =>
       PHASE_ORDER.map((phase, index) => ({
