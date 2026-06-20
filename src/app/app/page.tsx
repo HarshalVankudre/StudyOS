@@ -174,7 +174,7 @@ export default async function AppHome({
               <div key={w.id} className="group relative">
                 <Link
                   href={`/app/${w.id}`}
-                  className="flex min-h-[172px] flex-col rounded-md border border-line bg-card p-5 shadow-card transition hover:-translate-y-0.5 hover:border-ink/25 hover:shadow-pop"
+                  className="flex min-h-[172px] flex-col rounded-md border border-line bg-card p-5 shadow-card transition hover:-translate-y-0.5 hover:border-lime/40 hover:shadow-pop"
                 >
                   <span className="flex h-[42px] w-[42px] items-center justify-center rounded-md border border-line bg-surface-2 text-xl">
                     {w.icon ?? A.fallbackIcon}

@@ -71,7 +71,7 @@ export default async function SettingsPage() {
         <section className="mt-8 rounded-2xl border border-ink/10 bg-card/60 p-6">
           <h2 className="font-display text-lg font-bold">{S.profile}</h2>
           <div className="mt-4 flex items-center gap-4">
-            <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-ink text-lg font-bold text-paper">
+            <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-lime text-lg font-bold text-lime-on">
               {initial}
             </span>
             <div className="min-w-0 flex-1">

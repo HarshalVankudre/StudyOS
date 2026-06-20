@@ -12,10 +12,8 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { cjk } from "@streamdown/cjk";
-import { code } from "@streamdown/code";
-import { math } from "@streamdown/math";
-import { mermaid } from "@streamdown/mermaid";
+import { streamdownPlugins } from "@/lib/streamdown-plugins";
+import { sanitizeLatexText } from "@/lib/ai/sanitize";
 import type { UIMessage } from "ai";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import type { ComponentProps, HTMLAttributes, ReactElement } from "react";
@@ -321,10 +319,8 @@ export const MessageBranchPage = ({
 
 export type MessageResponseProps = ComponentProps<typeof Streamdown>;
 
-const streamdownPlugins = { cjk, code, math, mermaid };
-
 export const MessageResponse = memo(
-  ({ className, ...props }: MessageResponseProps) => (
+  ({ className, children, ...props }: MessageResponseProps) => (
     <Streamdown
       className={cn(
         "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
@@ -332,7 +328,9 @@ export const MessageResponse = memo(
       )}
       plugins={streamdownPlugins}
       {...props}
-    />
+    >
+      {typeof children === "string" ? sanitizeLatexText(children) : children}
+    </Streamdown>
   ),
   (prevProps, nextProps) =>
     prevProps.children === nextProps.children &&

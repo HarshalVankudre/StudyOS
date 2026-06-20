@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { Block, Database, Page } from "@/lib/workspace/types";
 import { useI18n } from "@/lib/i18n/client";
 import type { Dictionary } from "@/lib/i18n/dictionaries/en";
+import { BlockText } from "./BlockText";
 import { DatabaseView } from "./DatabaseView";
 import { useWorkspace } from "./WorkspaceContext";
 
@@ -64,7 +65,7 @@ export function PageView({ page }: { page: Page }) {
           }
           aria-label={dict.page.pageIcon}
           maxLength={8}
-          className="w-14 rounded bg-transparent px-1 text-center text-4xl outline-none hover:bg-paper focus:bg-paper"
+          className="w-14 rounded bg-transparent px-1 text-center text-4xl outline-none hover:bg-white/[0.04] focus:bg-white/[0.04]"
         />
         <input
           value={page.title}
@@ -74,7 +75,7 @@ export function PageView({ page }: { page: Page }) {
               if (p) p.title = e.target.value;
             })
           }
-          className="w-full rounded px-1 font-display text-4xl font-bold tracking-tight text-ink outline-none hover:bg-paper focus:bg-paper"
+          className="w-full rounded px-1 font-display text-4xl font-bold tracking-tight text-ink outline-none hover:bg-white/[0.04] focus:bg-white/[0.04]"
         />
       </header>
 
@@ -188,7 +189,7 @@ function BlockView({ pageId, block }: { pageId: string; block: Block }) {
     });
 
   const textInputClass =
-    "w-full rounded bg-transparent px-1 outline-none focus:bg-paper";
+    "w-full rounded bg-transparent px-1 outline-none focus:bg-white/[0.04]";
 
   // Fold the AI revision into each uncontrolled input's key so an AI edit
   // remounts it onto the new text (manual typing leaves `rev` untouched).
@@ -219,10 +220,10 @@ function BlockView({ pageId, block }: { pageId: string; block: Block }) {
             <option value={2}>H2</option>
             <option value={3}>H3</option>
           </select>
-          <input
+          <BlockText
             key={k}
-            defaultValue={block.text}
-            onBlur={(e) => commitText(e.target.value)}
+            value={block.text}
+            onCommit={commitText}
             className={`font-display font-bold text-ink ${size} ${textInputClass}`}
           />
         </div>
@@ -230,10 +231,10 @@ function BlockView({ pageId, block }: { pageId: string; block: Block }) {
     }
     case "paragraph":
       return (
-        <input
+        <BlockText
           key={k}
-          defaultValue={block.text}
-          onBlur={(e) => commitText(e.target.value)}
+          value={block.text}
+          onCommit={commitText}
           placeholder={dict.page.placeholders.paragraph}
           className={`py-1 text-[15px] leading-7 text-ink placeholder:text-ink-soft/40 ${textInputClass}`}
         />
@@ -254,12 +255,12 @@ function BlockView({ pageId, block }: { pageId: string; block: Block }) {
             }
             className="h-4 w-4 rounded border-line-strong text-lime"
           />
-          <input
+          <BlockText
             key={k}
-            defaultValue={block.text}
-            onBlur={(e) => commitText(e.target.value)}
+            value={block.text}
+            onCommit={commitText}
             placeholder={dict.page.placeholders.todo}
-            className={`flex-1 rounded bg-transparent px-1 outline-none focus:bg-paper ${
+            className={`flex-1 rounded bg-transparent px-1 outline-none focus:bg-white/[0.04] ${
               block.checked ? "text-ink-faint line-through" : "text-ink"
             }`}
           />
@@ -269,10 +270,10 @@ function BlockView({ pageId, block }: { pageId: string; block: Block }) {
       return (
         <div className="flex items-center gap-2 py-0.5 text-[15px] text-ink">
           <span className="text-ink-faint">•</span>
-          <input
+          <BlockText
             key={k}
-            defaultValue={block.text}
-            onBlur={(e) => commitText(e.target.value)}
+            value={block.text}
+            onCommit={commitText}
             placeholder={dict.page.placeholders.listItem}
             className={textInputClass}
           />
@@ -282,10 +283,10 @@ function BlockView({ pageId, block }: { pageId: string; block: Block }) {
       return (
         <div className="flex items-center gap-2 py-0.5 text-[15px] text-ink">
           <span className="font-mono text-xs text-ink-faint">1.</span>
-          <input
+          <BlockText
             key={k}
-            defaultValue={block.text}
-            onBlur={(e) => commitText(e.target.value)}
+            value={block.text}
+            onCommit={commitText}
             className={textInputClass}
           />
         </div>
@@ -293,10 +294,10 @@ function BlockView({ pageId, block }: { pageId: string; block: Block }) {
     case "quote":
       return (
         <div className="border-l-2 border-line-strong py-1 pl-4 text-[15px] italic text-ink-soft">
-          <input
+          <BlockText
             key={k}
-            defaultValue={block.text}
-            onBlur={(e) => commitText(e.target.value)}
+            value={block.text}
+            onCommit={commitText}
             className={`${textInputClass} italic`}
           />
         </div>
@@ -318,10 +319,10 @@ function BlockView({ pageId, block }: { pageId: string; block: Block }) {
             maxLength={8}
             className="w-8 shrink-0 bg-transparent text-center text-xl outline-none"
           />
-          <input
+          <BlockText
             key={k}
-            defaultValue={block.text}
-            onBlur={(e) => commitText(e.target.value)}
+            value={block.text}
+            onCommit={commitText}
             placeholder={dict.page.placeholders.callout}
             className={textInputClass}
           />

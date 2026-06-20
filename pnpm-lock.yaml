@@ -38,6 +38,9 @@ importers:
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
+      katex:
+        specifier: ^0.17.0
+        version: 0.17.0
       lucide-react:
         specifier: ^1.21.0
         version: 1.21.0(react@19.2.4)
@@ -3255,6 +3258,10 @@ packages:
 
   katex@0.16.47:
     resolution: {integrity: sha512-Eeo8Ys1doU1z+x8AZsPpQu+p/QcZBI5PeOo7QGQdy2x2m0MU/hYagBbGOmXwr5KVbEfVuWv9LpnQWeehogurjg==}
+    hasBin: true
+
+  katex@0.17.0:
+    resolution: {integrity: sha512-Vdw0ATsQ9V+LuegM/BTwQqV/6cTl5lbGcIrU+BCgLxyf6bo38ybOr372tuSIxir3CN720flu1meYR6XzNMwQnw==}
     hasBin: true
 
   keyv@4.5.4:
@@ -7929,6 +7936,10 @@ snapshots:
       object.values: 1.2.1
 
   katex@0.16.47:
+    dependencies:
+      commander: 8.3.0
+
+  katex@0.17.0:
     dependencies:
       commander: 8.3.0
 

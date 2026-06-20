@@ -4,100 +4,109 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  /* StudyOS — editorial "study desk": warm paper, ink, indigo accent.
-     Palette ported from the StudyOS.dc design system. */
-  --bg: #f2f1ef;
-  --surface: #f9f8f6;
-  --surface-2: #ffffff;
-  --text: #1a1a17;
-  --text-soft: #5c5c56;
-  --text-faint: #97978e;
-  --border-c: rgba(20, 20, 16, 0.1);
-  --border-strong-c: rgba(20, 20, 16, 0.16);
-  --hover-c: rgba(20, 20, 16, 0.04);
-  --accent: #4b53d9;
-  --accent-on: #ffffff;
-  --accent-deep: #3a41c0;
-  --accent-faint: rgba(75, 83, 217, 0.1);
-  --shadow: 0 1px 1px rgba(20, 20, 16, 0.03);
-  --shadow-lg: 0 18px 48px -30px rgba(20, 20, 16, 0.26);
+  /* StudyOS — dark, modern software-product identity. */
+  --bg: #0b0b0a;
+  --surface: #131312;
+  --surface-2: #17171599;
+  --text: #f4f3ef;
+  --text-soft: #a8a89e;
+  --text-faint: #6a6a62;
+  --border-c: rgba(255, 255, 255, 0.08);
+  --border-strong-c: rgba(255, 255, 255, 0.14);
+  --hover-c: rgba(255, 255, 255, 0.05);
 
-  /* Brand utility aliases the whole app relies on (bg-paper, text-ink, …) */
+  --accent: #2dd4bf;
+  --accent-on: #0b0b0a;
+  --accent-deep: #14b8a6;
+  --accent-faint: rgba(45, 212, 191, 0.16);
+  --accent-glow: rgba(45, 212, 191, 0.35);
+
+  --elev-1: 0 1px 1px rgba(0, 0, 0, 0.25);
+  --elev-2: 0 12px 32px -16px rgba(0, 0, 0, 0.6);
+  --elev-3: 0 24px 60px -30px rgba(0, 0, 0, 0.8), 0 0 60px -20px var(--accent-glow);
+
   --paper: var(--bg);
-  --ink: #1a1a17;
-  --ink-soft: #5c5c56;
-  --ink-faint: #97978e;
+  --ink: var(--text);
+  --ink-soft: var(--text-soft);
+  --ink-faint: var(--text-faint);
   --line: var(--border-c);
   --line-strong: var(--border-strong-c);
-  --lime: #4b53d9;
-  --lime-deep: #3a41c0;
+  --lime: var(--accent);
+  --lime-deep: var(--accent-deep);
+  --lime-on: var(--accent-on);
+  --lime-faint: var(--accent-faint);
 
-  /* shadcn/ui semantic tokens, themed to the brand */
-  --radius: 0.375rem;
-  --background: #f2f1ef;
-  --foreground: #1a1a17;
-  --card: #ffffff;
-  --card-foreground: #1a1a17;
-  --popover: #ffffff;
-  --popover-foreground: #1a1a17;
-  --primary: #1a1a17;
-  --primary-foreground: #ffffff;
-  --secondary: #f9f8f6;
-  --secondary-foreground: #1a1a17;
-  --muted: #f9f8f6;
-  --muted-foreground: #5c5c56;
-  --accent-bg: #e8e7e5;
-  --accent-foreground: #1a1a17;
-  --destructive: #e11d48;
-  --border: rgba(20, 20, 16, 0.1);
-  --input: rgba(20, 20, 16, 0.16);
-  --ring: #4b53d9;
+  --radius: 0.625rem;
+  --background: #0b0b0a;
+  --foreground: #f4f3ef;
+  --card: #171715;
+  --card-foreground: #f4f3ef;
+  --popover: #1c1c1a;
+  --popover-foreground: #f4f3ef;
+  --primary: #2dd4bf;
+  --primary-foreground: #0b0b0a;
+  --secondary: #131312;
+  --secondary-foreground: #f4f3ef;
+  --muted: #17171599;
+  --muted-foreground: #a8a89e;
+  --accent-bg: rgba(255, 255, 255, 0.06);
+  --accent-foreground: #f4f3ef;
+  --destructive: #f87171;
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.14);
+  --ring: #2dd4bf;
 }
 
-.dark {
-  --bg: #0e0e0c;
-  --surface: #161613;
-  --surface-2: #1c1c19;
-  --text: #ecebe6;
-  --text-soft: #a0a096;
-  --text-faint: #62625a;
-  --border-c: rgba(255, 255, 255, 0.08);
-  --border-strong-c: rgba(255, 255, 255, 0.15);
-  --hover-c: rgba(255, 255, 255, 0.05);
-  --accent: #8088ff;
-  --accent-on: #0e0e0c;
-  --accent-deep: #9aa0ff;
-  --accent-faint: rgba(128, 136, 255, 0.15);
-  --shadow: 0 1px 1px rgba(0, 0, 0, 0.25);
-  --shadow-lg: 0 24px 60px -34px rgba(0, 0, 0, 0.8);
+.light {
+  --bg: #fafafa;
+  --surface: #ffffff;
+  --surface-2: #f4f4f5;
+  --text: #18181b;
+  --text-soft: #52525b;
+  --text-faint: #a1a1aa;
+  --border-c: rgba(24, 24, 27, 0.1);
+  --border-strong-c: rgba(24, 24, 27, 0.16);
+  --hover-c: rgba(24, 24, 27, 0.04);
+
+  --accent: #0d9488;
+  --accent-on: #ffffff;
+  --accent-deep: #0f766e;
+  --accent-faint: rgba(13, 148, 136, 0.12);
+  --accent-glow: rgba(13, 148, 136, 0.25);
+
+  --elev-1: 0 1px 1px rgba(24, 24, 27, 0.04);
+  --elev-2: 0 4px 16px -8px rgba(24, 24, 27, 0.12);
+  --elev-3: 0 18px 48px -30px rgba(24, 24, 27, 0.26);
 
   --paper: var(--bg);
-  --ink: #ecebe6;
-  --ink-soft: #a0a096;
-  --ink-faint: #62625a;
+  --ink: var(--text);
+  --ink-soft: var(--text-soft);
+  --ink-faint: var(--text-faint);
   --line: var(--border-c);
   --line-strong: var(--border-strong-c);
-  --lime: #8088ff;
-  --lime-deep: #9aa0ff;
+  --lime: var(--accent);
+  --lime-deep: var(--accent-deep);
+  --lime-on: var(--accent-on);
+  --lime-faint: var(--accent-faint);
 
-  --background: #0e0e0c;
-  --foreground: #ecebe6;
-  --card: #1d1d1a;
-  --card-foreground: #ecebe6;
-  --popover: #1d1d1a;
-  --popover-foreground: #ecebe6;
-  --primary: #ecebe6;
-  --primary-foreground: #1a1a17;
-  --secondary: #1c1c19;
-  --secondary-foreground: #ecebe6;
-  --muted: #1c1c19;
-  --muted-foreground: #a0a096;
-  --accent-bg: #26261f;
-  --accent-foreground: #ecebe6;
-  --destructive: #fb7185;
-  --border: rgba(255, 255, 255, 0.08);
-  --input: rgba(255, 255, 255, 0.15);
-  --ring: #8088ff;
+  --background: #fafafa;
+  --foreground: #18181b;
+  --card: #ffffff;
+  --card-foreground: #18181b;
+  --popover: #ffffff;
+  --popover-foreground: #18181b;
+  --primary: #0d9488;
+  --primary-foreground: #ffffff;
+  --secondary: #f4f4f5;
+  --secondary-foreground: #18181b;
+  --muted: #f4f4f5;
+  --muted-foreground: #52525b;
+  --accent-bg: rgba(24, 24, 27, 0.05);
+  --accent-foreground: #18181b;
+  --destructive: #e11d48;
+  --border: rgba(24, 24, 27, 0.1);
+  --input: rgba(24, 24, 27, 0.16);
+  --ring: #0d9488;
 }
 
 @theme inline {
@@ -141,8 +150,8 @@
   --color-hover: var(--hover-c);
 
   /* dark-mode-aware elevation */
-  --shadow-card: var(--shadow);
-  --shadow-pop: var(--shadow-lg);
+  --shadow-card: var(--elev-2);
+  --shadow-pop: var(--elev-3);
 
   --font-sans: var(--font-hanken);
   --font-mono: var(--font-jetbrains);
@@ -216,12 +225,23 @@ body {
   animation: ai-fade 0.4s ease;
 }
 
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.pulse-dot {
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .reveal {
     opacity: 1;
     animation: none;
   }
   .ai-fade {
+    animation: none;
+  }
+  .pulse-dot {
     animation: none;
   }
 }
