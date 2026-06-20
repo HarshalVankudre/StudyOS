@@ -53,7 +53,7 @@ export function BlockText({ value, onCommit, placeholder, className }: BlockText
   }
 
   return (
-    <div>
+    <div className={className}>
       {draft.trim() !== "" && (
         <div className="pointer-events-none mb-1 opacity-90">
           <RichText text={draft} className={className} />
@@ -68,7 +68,7 @@ export function BlockText({ value, onCommit, placeholder, className }: BlockText
           onCommit(draft);
           setEditing(false);
         }}
-        className={className}
+        className={cn(className, "w-full")}
       />
     </div>
   );
