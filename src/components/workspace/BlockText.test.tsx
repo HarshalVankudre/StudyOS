@@ -17,7 +17,8 @@ describe("BlockText", () => {
   it("renders the value typeset when idle", () => {
     render(<BlockText value="hello" onCommit={vi.fn()} />);
     expect(screen.getByTestId("md")).toHaveTextContent("hello");
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    // In idle mode the read-mode div has role="textbox" but no <input> is rendered.
+    expect(screen.queryByDisplayValue("hello")).not.toBeInTheDocument();
   });
 
   it("shows the placeholder when empty and idle", () => {
@@ -31,7 +32,9 @@ describe("BlockText", () => {
     render(<BlockText value="hello" onCommit={onCommit} />);
 
     await user.click(screen.getByText("hello"));
-    const input = screen.getByRole("textbox") as HTMLInputElement;
+    // After entering edit mode, query the input specifically by its element type.
+    const input = screen.getByDisplayValue("hello") as HTMLInputElement;
+    expect(input.tagName).toBe("INPUT");
     expect(input.value).toBe("hello");
 
     await user.clear(input);
@@ -42,7 +45,24 @@ describe("BlockText", () => {
     await user.tab(); // blur
     expect(onCommit).toHaveBeenCalledWith("world $x$");
     // Back to read mode showing the committed value.
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue("world $x$")).not.toBeInTheDocument();
     expect(screen.getByTestId("md")).toHaveTextContent("hello");
+  });
+
+  it("does not call onCommit when blurring without changing the text", async () => {
+    const user = userEvent.setup();
+    const onCommit = vi.fn();
+    render(<BlockText value="hello" onCommit={onCommit} placeholder="Type here" />);
+
+    // Click to enter edit mode.
+    await user.click(screen.getByRole("textbox", { name: "Type here" }));
+    // Verify we are in edit mode (input is present).
+    expect(screen.getByDisplayValue("hello")).toBeInTheDocument();
+
+    // Blur immediately without typing anything.
+    await user.tab();
+
+    // onCommit must NOT have been called since draft === value.
+    expect(onCommit).not.toHaveBeenCalled();
   });
 });

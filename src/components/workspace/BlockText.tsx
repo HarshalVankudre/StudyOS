@@ -32,6 +32,8 @@ export function BlockText({ value, onCommit, placeholder, className }: BlockText
     const isEmpty = value.trim() === "";
     return (
       <div
+        role="textbox"
+        aria-label={placeholder}
         tabIndex={0}
         onClick={startEditing}
         onFocus={startEditing}
@@ -65,7 +67,7 @@ export function BlockText({ value, onCommit, placeholder, className }: BlockText
         placeholder={placeholder}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={() => {
-          onCommit(draft);
+          if (draft !== value) onCommit(draft);
           setEditing(false);
         }}
         className={cn(className, "w-full")}
