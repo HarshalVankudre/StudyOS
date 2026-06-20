@@ -14,3 +14,8 @@ function envFlag(name: string): boolean {
 export function agentSandboxEnabled(): boolean {
   return envFlag("AGENT_SANDBOX");
 }
+
+/** Stage-1 tool-loop agent. Off = legacy two-call planner/editor. */
+export function isAuthenticAgentEnabled(): boolean {
+  return envFlag("AUTHENTIC_AGENT");
+}
