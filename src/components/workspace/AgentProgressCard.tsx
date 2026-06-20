@@ -103,9 +103,9 @@ export function AgentProgressCard({
         {activity.plan && (
           <p className="px-3 pt-2 text-xs font-medium text-ink">{activity.plan.summary}</p>
         )}
-        {activity.areas.length > 0 && (
+        {(activity.areas ?? []).length > 0 && (
           <div className="flex flex-wrap gap-1.5 px-3 pt-1">
-            {activity.areas.map((area) => (
+            {(activity.areas ?? []).map((area) => (
               <span key={area.id} className="rounded-full bg-hover px-2 py-0.5 text-[10px] text-ink-soft">
                 {dict.agentChat.areaStatus[area.status]} · {area.label}
               </span>

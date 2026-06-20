@@ -88,6 +88,7 @@ export function AgentChat({
         const res = await fetch(`/api/agent/task/${taskId}`);
         const body = res.ok ? await res.json().catch(() => null) : null;
         if (Array.isArray(body?.events) && body.events.length) {
+          // Replay persisted progress before applying the result; both state updates batch under React 18.
           setActivity((current) =>
             (body.events as AgentStreamEvent[]).reduce((s, e) => reduceAgentActivity(s, e), current),
           );
