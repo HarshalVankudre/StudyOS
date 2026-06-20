@@ -20,7 +20,7 @@ type Stage = "describe" | "questions";
 
 export function GeneratorClient() {
   const router = useRouter();
-  const { dict, t } = useI18n();
+  const { dict } = useI18n();
   const [prompt, setPrompt] = useState("");
   const [error, setError] = useState<string | null>(null);
 

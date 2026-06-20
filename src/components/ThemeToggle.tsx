@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { useTheme } from "next-themes";
 import { cn } from "@/lib/utils";
+
+const subscribeToClient = () => () => {};
 
 /**
  * Compact light/dark switch. Rendered as a client island inside the (server)
@@ -11,8 +13,11 @@ import { cn } from "@/lib/utils";
  */
 export function ThemeToggle({ className }: { className?: string }) {
   const { resolvedTheme, setTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  const mounted = useSyncExternalStore(
+    subscribeToClient,
+    () => true,
+    () => false,
+  );
 
   const isDark = resolvedTheme === "dark";
 
