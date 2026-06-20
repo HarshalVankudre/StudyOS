@@ -8,6 +8,8 @@
  * never claim a phase finished before the backend confirms it.
  */
 import type {
+  AgentArea,
+  AgentAreaStatus,
   AgentDiscovery,
   AgentPhase,
   AgentStreamEvent,
@@ -34,6 +36,8 @@ export interface AgentActivityState {
   message: string;
   progress: number;
   discoveries: AgentDiscovery[];
+  plan?: { summary: string; areas: AgentArea[] };
+  areas: { id: string; status: AgentAreaStatus; label: string }[];
 }
 
 export function createInitialAgentActivity(
@@ -44,6 +48,7 @@ export function createInitialAgentActivity(
     message,
     progress: 4,
     discoveries: [],
+    areas: [],
   };
 }
 
@@ -81,6 +86,22 @@ export function reduceAgentActivity(
 
   if (event.type === "result") {
     return { ...state, progress: 100 };
+  }
+
+  if (event.type === "plan") {
+    return {
+      ...state,
+      plan: { summary: event.summary, areas: event.areas },
+      areas: event.areas.map((a) => ({ id: a.id, status: "queued", label: a.label })),
+    };
+  }
+
+  if (event.type === "area") {
+    return {
+      ...state,
+      progress: Math.min(PHASE_CEILINGS[state.phase], Math.max(state.progress, event.progress)),
+      areas: state.areas.map((a) => (a.id === event.areaId ? { ...a, status: event.status } : a)),
+    };
   }
 
   return state;

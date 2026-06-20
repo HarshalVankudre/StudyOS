@@ -67,4 +67,13 @@ describe("Living Story progress", () => {
     });
     expect(completed.progress).toBe(100);
   });
+
+  it("records a plan and updates area status", () => {
+    let s = createInitialAgentActivity("start");
+    s = reduceAgentActivity(s, { type: "plan", summary: "Coordinating", areas: [{ id: "p1", type: "page", label: "Home" }] });
+    expect(s.plan?.summary).toBe("Coordinating");
+    expect(s.areas).toHaveLength(1);
+    s = reduceAgentActivity(s, { type: "area", areaId: "p1", status: "working", progress: 60 });
+    expect(s.areas.find((a) => a.id === "p1")?.status).toBe("working");
+  });
 });
