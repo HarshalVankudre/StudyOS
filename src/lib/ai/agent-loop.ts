@@ -4,7 +4,7 @@ import type { Workspace } from "@/lib/workspace/types";
 import { safeParseWorkspace } from "@/lib/workspace/schema";
 import { DEFAULT_LOCALE, type Locale } from "@/lib/i18n/config";
 import { chatCompletion, type ChatMessage } from "./openrouter";
-import { extractJson, WORKSPACE_SHAPE, languageDirective } from "./generate";
+import { WORKSPACE_SHAPE, languageDirective } from "./generate";
 import { applyAgentOps, type AgentOp } from "./agent-ops";
 import { assertResultWithinLimits } from "./limits";
 import { toolRegistry } from "./tools/registry";
@@ -83,7 +83,7 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentRes
   const skill = skillRegistry.get(plan.skillId) ?? skillRegistry.get("precise-edit");
   if (!skill) throw new Error("no skill available");
   const affectedAreas = resolveAreas(plan.affectedAreaIds, areas);
-  await emit({ type: "plan", summary: skill ? "Coordinating your change" : "Working", areas: affectedAreas });
+  await emit({ type: "plan", summary: plan.summary, areas: affectedAreas });
   for (const area of affectedAreas) await emit({ type: "area", areaId: area.id, status: "queued", progress: 35 });
 
   let candidate = workspace;

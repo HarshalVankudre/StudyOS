@@ -52,4 +52,42 @@ describe("runAgentLoop", () => {
     expect(res.choices?.length).toBe(2);
     expect(res.changed).toBe(false);
   });
+
+  it("wall-time budget stops the loop before executing", async () => {
+    mocks.chat.mockReset();
+    mocks.chat.mockResolvedValueOnce(
+      '{"action":"execute","skillId":"precise-edit","summary":"x","affectedAreaIds":["p1"]}',
+    );
+    const events: AgentStreamEvent[] = [];
+    let tick = 0;
+    const res = await runAgentLoop({
+      workspace: WS, history: [], message: "rename home to Dashboard",
+      model: "m",
+      budget: { wallTimeMs: 0, maxModelTurns: 8, maxToolCalls: 12, maxRepairs: 2 },
+      locale: "en", taskId: "t1",
+      emit: (e) => { events.push(e); },
+      now: () => tick++,
+    });
+    expect(res.changed).toBe(false);
+  });
+
+  it("tool outside skill toolIds is refused and loop reaches final", async () => {
+    const { res } = await run([
+      '{"action":"execute","skillId":"precise-edit","summary":"Rename","affectedAreaIds":["p1"]}',
+      '{"action":"tool","tool":"controlled_fetch","input":{"url":"https://x.com"}}',
+      '{"action":"final","reply":"done"}',
+    ]);
+    expect(res.changed).toBe(false);
+    expect(res.reply).toBe("done");
+  });
+
+  it("failed apply_ops does not mutate the candidate", async () => {
+    const { res } = await run([
+      '{"action":"execute","skillId":"precise-edit","summary":"Rename","affectedAreaIds":["p1"]}',
+      '{"action":"tool","tool":"apply_ops","input":{"ops":[{"op":"update_page","pageId":"does-not-exist","title":"X"}]}}',
+      '{"action":"final","reply":"could not"}',
+    ]);
+    expect(res.changed).toBe(false);
+    expect(res.reply).toBe("could not");
+  });
 });
