@@ -1,7 +1,7 @@
 "use client";
 
 import { Check } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useI18n } from "@/lib/i18n/client";
 import type {
   ComponentProgress,
@@ -498,22 +498,16 @@ function LiveDot() {
 
 /** Reveals `text` one character at a time — a small "typing" flourish. */
 function useTypewriter(text: string, speed = 42): string {
-  const [count, setCount] = useState(0);
-  const ref = useRef(text);
-  ref.current = text;
+  const [state, setState] = useState({ text, count: 0 });
+  const count = state.text === text ? state.count : 0;
+
   useEffect(() => {
-    setCount(0);
-    if (!text) return;
-    const id = setInterval(() => {
-      setCount((c) => {
-        if (c >= ref.current.length) {
-          clearInterval(id);
-          return c;
-        }
-        return c + 1;
-      });
+    if (!text || count >= text.length) return;
+    const id = setTimeout(() => {
+      setState({ text, count: count + 1 });
     }, speed);
-    return () => clearInterval(id);
-  }, [text, speed]);
+    return () => clearTimeout(id);
+  }, [count, speed, text]);
+
   return text.slice(0, count);
 }
