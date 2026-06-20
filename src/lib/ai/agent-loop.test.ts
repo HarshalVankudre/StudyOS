@@ -69,6 +69,9 @@ describe("runAgentLoop", () => {
       now: () => tick++,
     });
     expect(res.changed).toBe(false);
+    // Only the planner ran — the execute loop body was entirely skipped.
+    // If the budget guard were removed there would be ≥2 calls.
+    expect(mocks.chat).toHaveBeenCalledTimes(1);
   });
 
   it("tool outside skill toolIds is refused and loop reaches final", async () => {
@@ -79,6 +82,13 @@ describe("runAgentLoop", () => {
     ]);
     expect(res.changed).toBe(false);
     expect(res.reply).toBe("done");
+    // Prove the refusal observation was injected: 3 model calls (plan, refused step, final step)
+    // and the final step's messages include the refusal text.
+    expect(mocks.chat).toHaveBeenCalledTimes(3);
+    const finalMsgs = mocks.chat.mock.calls[2][1] as Array<{ role: string; content: string }>;
+    expect(
+      finalMsgs.some((m) => /not available/i.test(m.content) && m.content.includes("controlled_fetch")),
+    ).toBe(true);
   });
 
   it("failed apply_ops does not mutate the candidate", async () => {
@@ -89,5 +99,14 @@ describe("runAgentLoop", () => {
     ]);
     expect(res.changed).toBe(false);
     expect(res.reply).toBe("could not");
+    // Prove apply_ops was actually invoked, returned ok:false, and the loop fed
+    // the failure observation back to the model without mutating the candidate.
+    expect(mocks.chat).toHaveBeenCalledTimes(3);
+    const finalMsgs = mocks.chat.mock.calls[2][1] as Array<{ role: string; content: string }>;
+    expect(
+      finalMsgs.some(
+        (m) => m.content.includes("Observation from apply_ops") && m.content.includes('"ok":false'),
+      ),
+    ).toBe(true);
   });
 });
