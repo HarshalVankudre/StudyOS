@@ -16,7 +16,10 @@ export async function chatCompletion(
   model: string,
   messages: ChatMessage[],
   maxTokens = 7000,
+  options?: { temperature?: number },
 ): Promise<string> {
+  const body: Record<string, unknown> = { model, max_tokens: maxTokens, messages };
+  if (typeof options?.temperature === "number") body.temperature = options.temperature;
   const res = await fetch(OPENROUTER_URL, {
     method: "POST",
     headers: {
@@ -26,7 +29,7 @@ export async function chatCompletion(
       "HTTP-Referer": "https://studyos.app",
       "X-Title": "StudyOS",
     },
-    body: JSON.stringify({ model, max_tokens: maxTokens, messages }),
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) {

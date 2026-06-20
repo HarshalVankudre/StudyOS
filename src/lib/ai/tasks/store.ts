@@ -10,6 +10,7 @@ import "server-only";
 
 import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/db";
+import type { AgentStreamEvent } from "@/lib/ai/agent-shared";
 
 /** How long a finished task's status/result remains reconnectable. */
 export const TASK_TTL_MS = 10 * 60 * 1000;
@@ -68,8 +69,24 @@ export async function isTaskCancelled(id: string): Promise<boolean> {
 export async function markTaskDone(id: string, result: string): Promise<void> {
   const userId = await requireUserId();
   await prisma.agentTask.updateMany({
-    where: { id, userId },
+    where: { id, userId, status: "running" },
     data: { status: "done", result },
+  });
+}
+
+/** Append a sanitized progress event to the durable task (capped) for reconnect replay. */
+export async function appendTaskEvent(id: string, event: AgentStreamEvent): Promise<void> {
+  const userId = await requireUserId();
+  const row = await prisma.agentTask.findFirst({ where: { id, userId }, select: { events: true } });
+  if (!row) return;
+  let events: AgentStreamEvent[] = [];
+  if (row.events) {
+    try { events = JSON.parse(row.events) as AgentStreamEvent[]; } catch { events = []; }
+  }
+  events.push(event);
+  await prisma.agentTask.updateMany({
+    where: { id, userId },
+    data: { events: JSON.stringify(events.slice(-200)) },
   });
 }
 

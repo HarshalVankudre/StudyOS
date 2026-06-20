@@ -30,5 +30,13 @@ export async function GET(_request: Request, { params }: Props) {
       response = null;
     }
   }
-  return Response.json({ status: task.status, response });
+  let events: unknown[] = [];
+  if (task.events) {
+    try {
+      events = JSON.parse(task.events) as unknown[];
+    } catch {
+      events = [];
+    }
+  }
+  return Response.json({ status: task.status, response, events });
 }
