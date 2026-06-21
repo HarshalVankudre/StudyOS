@@ -26,14 +26,17 @@ export class DaytonaSandboxRunner implements SandboxRunner {
     let exitCode = 0;
     const artifacts: SandboxArtifact[] = [];
     try {
-      await sandbox.process.executeCommand("mkdir -p /work/out");
+      // Paths are relative to the sandbox user's home dir, which is writable and
+      // is also the default cwd for executeCommand. An absolute "/work" is NOT
+      // writable by the non-root sandbox user (mkdir → permission denied).
+      await sandbox.process.executeCommand("mkdir -p out");
       for (const file of spec.inputs) {
         if (signal?.aborted) throw new Error("aborted");
-        await sandbox.fs.uploadFile(Buffer.from(file.content), `/work/${file.path}`);
+        await sandbox.fs.uploadFile(Buffer.from(file.content), file.path);
       }
       for (const cmd of [...spec.setup, ...spec.run]) {
         if (signal?.aborted) throw new Error("aborted");
-        const res = await sandbox.process.executeCommand(`cd /work && ${cmd}`);
+        const res = await sandbox.process.executeCommand(cmd);
         log += `$ ${cmd}\n${res.result ?? ""}\n`;
         exitCode = res.exitCode ?? 0;
         if (exitCode !== 0) break; // stop on first failure; report it
@@ -42,7 +45,7 @@ export class DaytonaSandboxRunner implements SandboxRunner {
         for (const out of spec.outputs) {
           // downloadFile returns Promise<Buffer>; Buffer extends Uint8Array in Node,
           // so new Uint8Array(data) copies into a plain Uint8Array to satisfy SandboxArtifact.
-          const data = await sandbox.fs.downloadFile(`/work/${out}`);
+          const data = await sandbox.fs.downloadFile(out);
           artifacts.push({ path: out, bytes: new Uint8Array(data) });
         }
       }
