@@ -31,6 +31,9 @@ export function registerStage1Skills(registry: SkillRegistry = skillRegistry): v
     toolIds: [...INSPECT, "apply_ops"],
   });
 
+  // This guard MUST stay in sync with the same `agentSandboxEnabled()` guard in
+  // ../tools/register-sandbox.ts: when the flag is off the tool is not registered,
+  // and the skill registry rejects a skill that references an absent toolId.
   if (agentSandboxEnabled()) {
     registry.register({
       id: "render-visual",
