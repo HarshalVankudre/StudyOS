@@ -78,7 +78,7 @@ const TOOL_INPUT_HINTS: Record<string, string> = {
   apply_ops:
     '{"ops":[ <minimal operations; same vocabulary as the editor> ]}  // e.g. {"op":"update_page","pageId":"<id>","title":"<new>"}',
   run_in_sandbox:
-    '{"inputs":[{"path":"main.tex","content":"..."}],"setup":[],"run":["tectonic main.tex","pdftoppm -png main.pdf out/page"],"outputs":["out/page-1.png"],"timeoutSec":60}',
+    '{"inputs":[{"path":"main.tex","content":"..."}],"setup":[],"run":["pdflatex -interaction=nonstopmode main.tex","pdftoppm -png -r 200 main.pdf out/page"],"outputs":["out/page-1.png"],"timeoutSec":90}',
 };
 
 /**
