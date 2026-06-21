@@ -8,6 +8,9 @@
 import { z } from "zod";
 import type { Workspace } from "./types";
 
+/** Max bytes of a react_artifact component source (larger than a text field). */
+export const MAX_COMPONENT_SOURCE = 100_000;
+
 const selectOption = z.object({
   id: z.string(),
   label: z.string(),
@@ -112,6 +115,12 @@ const block = z.discriminatedUnion("type", [
     type: z.literal("database_view"),
     databaseId: z.string(),
     viewId: z.string(),
+  }),
+  z.object({
+    id: z.string(),
+    type: z.literal("react_artifact"),
+    title: z.string().optional(),
+    source: z.string().min(1).max(MAX_COMPONENT_SOURCE),
   }),
 ]);
 

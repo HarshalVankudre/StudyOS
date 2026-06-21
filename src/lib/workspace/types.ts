@@ -112,7 +112,8 @@ export type BlockType =
   | "callout"
   | "divider"
   | "database_view"
-  | "media";
+  | "media"
+  | "react_artifact";
 
 interface BaseBlock {
   id: string;
@@ -182,6 +183,14 @@ export interface DatabaseViewBlock extends BaseBlock {
   viewId: string;
 }
 
+/** A live, interactive React component rendered in a sandboxed iframe. */
+export interface ReactArtifactBlock extends BaseBlock {
+  type: "react_artifact";
+  title?: string;
+  /** Self-contained JSX source defining a top-level `App` component. */
+  source: string;
+}
+
 /** Discriminated union of every block kind (switch on `block.type`). */
 export type Block =
   | HeadingBlock
@@ -193,7 +202,8 @@ export type Block =
   | CalloutBlock
   | DividerBlock
   | MediaBlock
-  | DatabaseViewBlock;
+  | DatabaseViewBlock
+  | ReactArtifactBlock;
 
 export interface Page {
   id: string;
