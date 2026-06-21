@@ -84,7 +84,7 @@ export function watchDurableCancellation({
       if (stopped || controller.signal.aborted) return;
 
       const cancelled = await isCancelled();
-      if (cancelled && !controller.signal.aborted) {
+      if (cancelled && !stopped && !controller.signal.aborted) {
         controller.abort(new TaskCancelledError());
       }
     } catch {

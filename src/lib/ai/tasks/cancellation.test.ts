@@ -14,6 +14,16 @@ describe("task cancellation primitives", () => {
     vi.useRealTimers();
   });
 
+  function deferred<T>() {
+    let resolve!: (value: T | PromiseLike<T>) => void;
+    let reject!: (reason?: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  }
+
   it("registers, aborts, and surfaces local cancellation", () => {
     const controller = new AbortController();
     const cleanup = registerActiveTask("task-1", controller);
@@ -87,5 +97,21 @@ describe("task cancellation primitives", () => {
     expect(isCancelled).toHaveBeenCalledTimes(3);
 
     cleanup();
+  });
+
+  it("does not abort if cleanup runs before an in-flight durable poll resolves true", async () => {
+    const controller = new AbortController();
+    const pending = deferred<boolean>();
+    const isCancelled = vi.fn().mockReturnValueOnce(pending.promise);
+
+    const cleanup = watchDurableCancellation({ controller, isCancelled, intervalMs: 10 });
+
+    expect(isCancelled).toHaveBeenCalledTimes(1);
+    cleanup();
+    pending.resolve(true);
+
+    await Promise.resolve();
+
+    expect(controller.signal.aborted).toBe(false);
   });
 });
