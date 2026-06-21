@@ -7,6 +7,9 @@ export const runtime = "nodejs";
 
 type Props = { params: Promise<{ id: string }> };
 
+// Safe at module scope (flag-off prod included) ONLY because gcsAssetStore() and
+// prismaAssetRepo() are lazy — no Storage/Prisma client is constructed until a
+// request actually calls signedUrlForAsset. Keep them lazy, or move this into GET.
 const assets = createAssetService({ store: gcsAssetStore(), repo: prismaAssetRepo() });
 
 export async function GET(_request: Request, { params }: Props) {

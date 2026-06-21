@@ -341,6 +341,7 @@ function BlockView({ pageId, block }: { pageId: string; block: Block }) {
       return (
         <figure className="my-3">
           {/* SVG is inert when loaded via <img>; never inline it. */}
+          {/* eslint-disable-next-line @next/next/no-img-element -- media serves a 302-redirect signed URL; next/image can't follow it */}
           <img
             src={mediaImgSrc(block.assetId)}
             alt={block.alt ?? block.caption ?? ""}

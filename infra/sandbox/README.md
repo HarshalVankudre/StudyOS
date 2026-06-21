@@ -54,7 +54,7 @@ Set these in the internal Cloud Run service (never in the public production serv
 | `DAYTONA_API_KEY` | API key for the Daytona cloud workspace service. |
 | `STUDYOS_SANDBOX_SNAPSHOT` | Name/ID of the prebuilt Daytona snapshot image to use for workspaces. |
 | `ASSETS_BUCKET` | GCS bucket name where artifacts are stored (e.g. `studyos-sandbox-assets`). |
-| `GCS_SERVICE_ACCOUNT_KEY` | JSON key for the GCS service account with `storage.objects.create` and `storage.objects.get` on `ASSETS_BUCKET`. |
+| `GOOGLE_APPLICATION_CREDENTIALS` | Path to the GCS service account JSON key (Vercel only; Cloud Run uses Application Default Credentials automatically). The SA account requires `storage.objects.create`, `storage.objects.get`, and `storage.objects.delete` on `ASSETS_BUCKET`. |
 
 **Production guard:** Confirm `AGENT_SANDBOX` is absent or `0` in the public Cloud Run service before any rollout. The sandbox routes and tool definitions are entirely suppressed when the flag is off.
 
