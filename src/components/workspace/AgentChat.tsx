@@ -97,7 +97,15 @@ export function AgentChat({
           applyResult(body.response as AgentResponse);
           return true;
         }
-        if (body?.status && body.status !== "running") return false;
+        // `finalizing` is still active work (the server claimed the apply but
+        // hasn't finished) — keep polling rather than giving up on the task.
+        if (
+          body?.status &&
+          body.status !== "running" &&
+          body.status !== "finalizing"
+        ) {
+          return false;
+        }
       } catch {
         // ignore and retry
       }

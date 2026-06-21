@@ -24,11 +24,19 @@ import {
 } from "@/lib/workspace/version-service";
 import {
   appendTaskEvent,
+  claimTaskForFinalization,
   createTask,
   isTaskCancelled,
   markTaskDone,
   markTaskError,
 } from "@/lib/ai/tasks/store";
+import {
+  TaskCancelledError,
+  isTaskCancelledError,
+  registerActiveTask,
+  throwIfTaskCancelled,
+  watchDurableCancellation,
+} from "@/lib/ai/tasks/cancellation";
 import { isAuthenticAgentEnabled } from "@/lib/flags";
 import { runAgentLoop } from "@/lib/ai/agent-loop";
 import { budgetForPlan } from "@/lib/ai/budgets";
@@ -73,6 +81,10 @@ export async function POST(request: Request) {
     async start(controller) {
       let closed = false;
       let taskId: string | null = null;
+      // Cancellation plumbing, torn down in `finally` regardless of outcome.
+      let stopWatching: () => void = () => {};
+      let unregisterActiveTask: () => void = () => {};
+      let taskSignal: AbortSignal | undefined;
 
       const send = (event: AgentStreamEvent) => {
         if (closed || request.signal.aborted) return;
@@ -120,6 +132,30 @@ export async function POST(request: Request) {
         taskId = task.id;
         send({ type: "task", taskId: task.id });
 
+        // Own this task's cancellation. The signal threads into every model,
+        // tool, and controlled-fetch call. A Stop that reaches THIS instance
+        // aborts the controller immediately via the registry; a Stop that lands
+        // on another instance is caught by the bounded durable-status watcher,
+        // which flips the same controller. Both are torn down in `finally`.
+        const taskController = new AbortController();
+        taskSignal = taskController.signal;
+        unregisterActiveTask = registerActiveTask(task.id, taskController);
+        stopWatching = watchDurableCancellation({
+          controller: taskController,
+          isCancelled: () => isTaskCancelled(task.id),
+        });
+
+        // The single atomic gate before any irreversible completion side effect
+        // (charge, apply, mark done, emit result). It claims `running ->
+        // finalizing`; if a cancel already won that race the claim fails and we
+        // throw `TaskCancelledError`, which the catch treats as a clean stop.
+        const claimFinalization = async () => {
+          throwIfTaskCancelled(taskSignal);
+          if (!(await claimTaskForFinalization(task.id))) {
+            throw new TaskCancelledError();
+          }
+        };
+
         // Persist every emitted event so a reconnect can replay the Living Story.
         // `thinking` is the exception: it's high-frequency, live-only reasoning,
         // so it streams to the client but is never persisted (a DB write per
@@ -149,6 +185,7 @@ export async function POST(request: Request) {
               budget: budgetForPlan(plan),
               locale,
               taskId: task.id,
+              signal: taskSignal,
               emit,
               startedAt: requestStartedAt,
             }),
@@ -158,6 +195,7 @@ export async function POST(request: Request) {
 
           // reply / clarify / no-change: no workspace to apply — settle immediately.
           if (!result.changed || !result.workspace) {
+            await claimFinalization();
             await chargeCredits(userId, usageToCredits(usage), "agent");
             await markTaskDone(task.id, JSON.stringify(result));
             await emit({ type: "result", response: result });
@@ -198,12 +236,18 @@ export async function POST(request: Request) {
             progress: 22,
           });
           const planned = await withUsageMeter(() =>
-            planAgentTurn(workspace, history, message, model, locale),
+            planAgentTurn(workspace, history, message, model, locale, {
+              signal: taskSignal,
+              onReasoning: (delta) => {
+                void emit({ type: "thinking", phase: "planning", delta });
+              },
+            }),
           );
           const decision = planned.result;
           usage = addUsage(usage, planned.usage);
 
           if (decision.action === "reply") {
+            await claimFinalization();
             await chargeCredits(userId, usageToCredits(usage), "agent");
             const response: AgentResponse = { reply: decision.reply, changed: false };
             await markTaskDone(task.id, JSON.stringify(response));
@@ -213,6 +257,7 @@ export async function POST(request: Request) {
           }
 
           if (decision.action === "clarify") {
+            await claimFinalization();
             await chargeCredits(userId, usageToCredits(usage), "agent");
             const response: AgentResponse = {
               reply: decision.reply,
@@ -246,7 +291,12 @@ export async function POST(request: Request) {
             progress: 35,
           });
           const edited = await withUsageMeter(() =>
-            executeAgentEdit(workspace, history, message, decision, model, locale),
+            executeAgentEdit(workspace, history, message, decision, model, locale, {
+              signal: taskSignal,
+              onReasoning: (delta) => {
+                void emit({ type: "thinking", phase: "updating", delta });
+              },
+            }),
           );
           result = edited.result;
           usage = addUsage(usage, edited.usage);
@@ -276,15 +326,8 @@ export async function POST(request: Request) {
           });
         }
 
-        // ---- Shared tail: cancel guard → apply → charge → done → result -----
+        // ---- Shared tail: finalization claim → apply → charge → done → result
         // (runs for both the authentic-loop edit path and the legacy edit path)
-
-        // The user may have cancelled while the edit was being produced; never
-        // apply a cancelled task's result.
-        if (await isTaskCancelled(task.id)) {
-          finish();
-          return;
-        }
 
         // ---- Finishing (92–100%) -------------------------------------------
         await emit({
@@ -293,6 +336,11 @@ export async function POST(request: Request) {
           message: T.ai.agent.saving,
           progress: 92,
         });
+        // Atomically claim finalization before applying. This is the stronger
+        // replacement for the old standalone cancel pre-check: cancel and
+        // finalization compete for the single `running` row, so a task that was
+        // cancelled in time can never be applied, charged, or marked done.
+        await claimFinalization();
         // result.workspace is guaranteed non-null here:
         //   flag-on path: returned early above if !result.workspace
         //   legacy path: threw above if !result.workspace
@@ -311,6 +359,19 @@ export async function POST(request: Request) {
         await emit({ type: "result", response });
         finish();
       } catch (error) {
+        // User cancellation is a normal terminal path, not an error: it arrives
+        // either as a TaskCancelledError thrown out of the engines/claim, or as
+        // a durable `cancelled` status set by a cancel on another instance. In
+        // both cases we finish quietly — no error log, no error event, and (per
+        // the store's terminal guards) no overwrite of the cancelled state.
+        const cancelled =
+          isTaskCancelledError(error, taskSignal) ||
+          (taskId ? await isTaskCancelled(taskId).catch(() => false) : false);
+        if (cancelled) {
+          finish();
+          return;
+        }
+
         console.error("[StudyOS] streamed agent failed:", error);
         if (taskId) await markTaskError(taskId, "error").catch(() => {});
         send({
@@ -321,6 +382,11 @@ export async function POST(request: Request) {
               : T.ai.agent.error,
         });
         finish();
+      } finally {
+        // Always release the cancellation plumbing so a finished task can't be
+        // aborted later and the watcher's interval can't leak.
+        stopWatching();
+        unregisterActiveTask();
       }
     },
   });
