@@ -1,6 +1,8 @@
 import "../tools/builtin";          // inspect_workspace, validate_ops, controlled_fetch
 import "../tools/workspace-tools";  // summarize_workspace, find_entities, read_area, apply_ops
+import "../tools/register-sandbox"; // run_in_sandbox (gated by AGENT_SANDBOX)
 import { skillRegistry, type SkillRegistry } from "./registry";
+import { agentSandboxEnabled } from "@/lib/flags";
 
 const INSPECT = ["summarize_workspace", "find_entities", "read_area", "inspect_workspace"];
 
@@ -28,6 +30,16 @@ export function registerStage1Skills(registry: SkillRegistry = skillRegistry): v
       "Final review for any change. Re-inspect the staged result, confirm references resolve and nothing unrelated changed, and either confirm or request one more apply_ops fix. Mandatory before finishing a mutating turn.",
     toolIds: [...INSPECT, "apply_ops"],
   });
+
+  if (agentSandboxEnabled()) {
+    registry.register({
+      id: "render-visual",
+      version: "1.0.0",
+      instructions:
+        "Use when the request needs a rendered image (LaTeX, a diagram, a plot). Write the source with run_in_sandbox (inputs + run commands that write files under out/, list them in outputs). For each returned artifact, read the target page and call apply_ops with set_page_blocks that appends a media block { type:'media', assetId:<handle.assetId>, mediaKind:'image', mime:<handle.mime>, caption:<short> }. Keep ids exact; never inline the image yourself.",
+      toolIds: [...INSPECT, "apply_ops", "run_in_sandbox"],
+    });
+  }
 }
 
 registerStage1Skills();
