@@ -256,33 +256,83 @@ describe("loop tool gating + ownerId", () => {
     expect(capturedOwnerIds).toContain("user_owner_42");
   });
 
-  it("a registered-but-disabled tool is excluded from selectAllowedTools", () => {
-    // Register a disabled tool.
+  it("disabled tool handler is never invoked even when the model requests it", async () => {
+    // Register a DISABLED tool with a spy handler. The tool is registered in the
+    // registry (toolRegistry.has returns true), but enabled: false means
+    // selectAllowedTools must exclude it from allowedTools. If the loop's gating
+    // were reverted to `toolRegistry.has(id)` the handler spy would be called and
+    // this test would FAIL — which is the desired regression signal.
+    const disabledHandlerSpy = vi.fn(() => ({}));
     toolRegistry.register({
-      id: "test_disabled_stub",
-      description: "disabled stub",
+      id: "test_disabled_gating_tool",
+      description: "disabled: must never be called by the loop",
       input: z.object({}),
       output: z.object({}),
       limits: { timeoutMs: 1000 },
       networkPermission: "none",
       enabled: false,
-      handler: () => ({}),
+      handler: disabledHandlerSpy,
     });
 
-    // Register an enabled tool alongside it to prove enabled ones still pass through.
+    // Register an enabled companion tool so the skill has at least one allowed tool.
+    // Note: the skill registry itself rejects disabled tools, so the disabled tool
+    // is intentionally NOT listed in the skill's toolIds. The model will request it
+    // anyway (simulating a jailbreak / confusion scenario), and the loop must gate it.
+    const enabledHandlerSpy = vi.fn(() => ({}));
     toolRegistry.register({
-      id: "test_enabled_stub",
-      description: "enabled stub",
+      id: "test_enabled_gating_tool",
+      description: "enabled companion",
       input: z.object({}),
       output: z.object({}),
       limits: { timeoutMs: 1000 },
       networkPermission: "none",
       enabled: true,
-      handler: () => ({}),
+      handler: enabledHandlerSpy,
     });
 
-    const result = selectAllowedTools(["test_enabled_stub", "test_disabled_stub"]);
-    expect(result).toContain("test_enabled_stub");
-    expect(result).not.toContain("test_disabled_stub");
+    // Skill only declares the enabled tool (disabled tools cannot be in toolIds).
+    skillRegistry.register({
+      id: "test-disabled-gating-skill",
+      version: "1.0.0",
+      instructions: "gating test skill",
+      toolIds: ["test_enabled_gating_tool"],
+    });
+
+    mocks.chat.mockReset();
+    // Planner: execute via our test skill
+    mocks.chat.mockResolvedValueOnce(
+      '{"action":"execute","skillId":"test-disabled-gating-skill","summary":"gating","affectedAreaIds":["p1"]}',
+    );
+    // Step 1: model requests the DISABLED tool (it knows it exists but should be refused)
+    mocks.chat.mockResolvedValueOnce(
+      '{"action":"tool","tool":"test_disabled_gating_tool","input":{}}',
+    );
+    // Step 2: model finalizes after receiving the "not available" observation
+    mocks.chat.mockResolvedValueOnce('{"action":"final","reply":"done"}');
+
+    const events: AgentStreamEvent[] = [];
+    const res = await runAgentLoop({
+      workspace: WS, history: [], message: "run gating test",
+      model: "m", budget, locale: "en",
+      taskId: "task_gating", ownerId: "user_gating",
+      emit: (e) => { events.push(e); }, now: () => 0,
+    });
+
+    // PRIMARY: the disabled tool's handler must NEVER have been invoked.
+    // If gating were reverted to `toolRegistry.has(id)`, this spy would be called
+    // and the test would break — which is the intended regression protection.
+    expect(disabledHandlerSpy).not.toHaveBeenCalled();
+
+    // The loop should have completed and produced a final reply.
+    expect(res.reply).toBe("done");
+
+    // The "not available" observation must have been fed back to the model.
+    expect(mocks.chat).toHaveBeenCalledTimes(3);
+    const finalMsgs = mocks.chat.mock.calls[2][1] as Array<{ role: string; content: string }>;
+    expect(
+      finalMsgs.some(
+        (m) => /not available/i.test(m.content) && m.content.includes("test_disabled_gating_tool"),
+      ),
+    ).toBe(true);
   });
 });
