@@ -1,6 +1,7 @@
 import "../tools/builtin";          // inspect_workspace, validate_ops, controlled_fetch
 import "../tools/workspace-tools";  // summarize_workspace, find_entities, read_area, apply_ops
 import "../tools/register-sandbox"; // run_in_sandbox (gated by AGENT_SANDBOX)
+import "../tools/component-tools";  // check_component (interactive artifacts)
 import { skillRegistry, type SkillRegistry } from "./registry";
 import { agentSandboxEnabled } from "@/lib/flags";
 
@@ -29,6 +30,14 @@ export function registerStage1Skills(registry: SkillRegistry = skillRegistry): v
     instructions:
       "Final review for any change. Re-inspect the staged result, confirm references resolve and nothing unrelated changed, and either confirm or request one more apply_ops fix. Mandatory before finishing a mutating turn.",
     toolIds: [...INSPECT, "apply_ops"],
+  });
+
+  registry.register({
+    id: "interactive-builder",
+    version: "1.0.0",
+    instructions:
+      "Build ONE self-contained interactive React component. Write a top-level component named `App` (function App(){...}) using ONLY the globals `React` and `Recharts` (Recharts for charts) — NO import/export statements. If it needs data, read it first with the inspection tools and bake the values into the source as literals (it has no live data access). Call check_component and fix any error it reports. Then insert it via apply_ops with set_page_blocks as a block { type:'react_artifact', title:<short>, source:<the component> }. Keep ids exact.",
+    toolIds: [...INSPECT, "check_component", "apply_ops"],
   });
 
   // This guard MUST stay in sync with the same `agentSandboxEnabled()` guard in
