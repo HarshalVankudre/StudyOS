@@ -105,3 +105,19 @@ model CreditLedger {
 
   @@index([userId])
 }
+
+// An owner-scoped binary asset (e.g. a sandbox-rendered image). Bytes live in
+// object storage (GCS); this row is the metadata + ownership record.
+model Asset {
+  id          String   @id @default(cuid())
+  ownerId     String
+  workspaceId String?
+  mime        String
+  sizeBytes   Int
+  storageKey  String
+  sourceRunId String?
+  checksum    String?
+  createdAt   DateTime @default(now())
+
+  @@index([ownerId])
+}
