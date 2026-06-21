@@ -98,6 +98,17 @@ const block = z.discriminatedUnion("type", [
   z.object({ id: z.string(), type: z.literal("divider") }),
   z.object({
     id: z.string(),
+    type: z.literal("media"),
+    assetId: z.string(),
+    mediaKind: z.literal("image"),
+    mime: z.string(),
+    width: z.number().optional(),
+    height: z.number().optional(),
+    caption: z.string().optional(),
+    alt: z.string().optional(),
+  }),
+  z.object({
+    id: z.string(),
     type: z.literal("database_view"),
     databaseId: z.string(),
     viewId: z.string(),

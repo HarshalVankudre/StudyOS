@@ -111,7 +111,8 @@ export type BlockType =
   | "quote"
   | "callout"
   | "divider"
-  | "database_view";
+  | "database_view"
+  | "media";
 
 interface BaseBlock {
   id: string;
@@ -160,6 +161,20 @@ export interface DividerBlock extends BaseBlock {
   type: "divider";
 }
 
+/** A rendered image artifact (e.g. a sandbox-produced LaTeX/diagram render). */
+export interface MediaBlock extends BaseBlock {
+  type: "media";
+  /** FK into the Asset table; never a raw or permanent URL. */
+  assetId: string;
+  mediaKind: "image"; // "pdf" later
+  /** Cached for render: image/png | image/svg+xml. */
+  mime: string;
+  width?: number;
+  height?: number;
+  caption?: string;
+  alt?: string;
+}
+
 /** Embeds a specific saved view of a workspace database into a page. */
 export interface DatabaseViewBlock extends BaseBlock {
   type: "database_view";
@@ -177,6 +192,7 @@ export type Block =
   | QuoteBlock
   | CalloutBlock
   | DividerBlock
+  | MediaBlock
   | DatabaseViewBlock;
 
 export interface Page {
