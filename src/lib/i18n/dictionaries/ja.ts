@@ -414,6 +414,10 @@ export const ja = {
     undoFailed: "ワークスペースが変更されたため、この変更は元に戻せません。",
     buildingUpdate: "更新を作成中",
     thinking: "思考中…",
+    stopTask: "タスクを停止",
+    stopping: "停止中…",
+    taskStopped: "タスクを停止しました。",
+    stopFailed: "タスクを停止できませんでした。まだ実行中の可能性があります。",
     steps: {
       inspect: "ワークスペースを確認",
       decide: "最も安全な操作を判断",

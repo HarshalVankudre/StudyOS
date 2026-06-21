@@ -415,6 +415,10 @@ export const pt = {
     undoFailed: "Esta alteração não pode ser desfeita porque o espaço de trabalho mudou.",
     buildingUpdate: "Criando sua atualização",
     thinking: "Pensando…",
+    stopTask: "Parar tarefa",
+    stopping: "Parando…",
+    taskStopped: "Tarefa interrompida.",
+    stopFailed: "Não foi possível parar a tarefa. Ela ainda pode estar em execução.",
     steps: {
       inspect: "Inspecionar espaço de trabalho",
       decide: "Decidir a ação mais segura",

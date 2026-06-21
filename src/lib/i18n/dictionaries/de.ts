@@ -415,6 +415,10 @@ export const de = {
     undoFailed: "Diese Änderung kann nicht rückgängig gemacht werden, weil sich der Arbeitsbereich geändert hat.",
     buildingUpdate: "Deine Aktualisierung wird erstellt",
     thinking: "Denkt nach…",
+    stopTask: "Aufgabe stoppen",
+    stopping: "Wird gestoppt…",
+    taskStopped: "Aufgabe gestoppt.",
+    stopFailed: "Die Aufgabe konnte nicht gestoppt werden. Sie läuft möglicherweise weiter.",
     steps: {
       inspect: "Workspace prüfen",
       decide: "Sicherste Aktion festlegen",

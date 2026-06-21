@@ -414,6 +414,10 @@ export const es = {
     undoFailed: "Este cambio no se puede deshacer porque el espacio de trabajo cambió.",
     buildingUpdate: "Preparando tu actualización",
     thinking: "Pensando…",
+    stopTask: "Detener tarea",
+    stopping: "Deteniendo…",
+    taskStopped: "Tarea detenida.",
+    stopFailed: "No se pudo detener la tarea. Es posible que siga ejecutándose.",
     steps: {
       inspect: "Inspeccionar espacio de trabajo",
       decide: "Decidir la acción más segura",

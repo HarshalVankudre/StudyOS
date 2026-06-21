@@ -415,6 +415,10 @@ export const it = {
     undoFailed: "Questa modifica non può essere annullata perché l’area di lavoro è cambiata.",
     buildingUpdate: "Sto preparando il tuo aggiornamento",
     thinking: "Sto pensando…",
+    stopTask: "Interrompi attività",
+    stopping: "Interruzione…",
+    taskStopped: "Attività interrotta.",
+    stopFailed: "Impossibile interrompere l’attività. Potrebbe essere ancora in esecuzione.",
     steps: {
       inspect: "Esamina lo spazio",
       decide: "Decidi l’azione più sicura",

@@ -414,6 +414,10 @@ export const fr = {
     undoFailed: "Cette modification ne peut pas être annulée, car l’espace de travail a changé.",
     buildingUpdate: "Création de votre mise à jour",
     thinking: "Réflexion…",
+    stopTask: "Arrêter la tâche",
+    stopping: "Arrêt…",
+    taskStopped: "Tâche arrêtée.",
+    stopFailed: "Impossible d’arrêter la tâche. Elle est peut-être toujours en cours.",
     steps: {
       inspect: "Examiner l’espace de travail",
       decide: "Choisir l’action la plus sûre",

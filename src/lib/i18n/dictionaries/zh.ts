@@ -415,6 +415,10 @@ export const zh = {
     undoFailed: "工作区已发生变化，因此无法撤销此更改。",
     buildingUpdate: "正在生成你的更新",
     thinking: "思考中…",
+    stopTask: "停止任务",
+    stopping: "正在停止…",
+    taskStopped: "任务已停止。",
+    stopFailed: "无法停止任务。任务可能仍在运行。",
     steps: {
       inspect: "检查工作空间",
       decide: "决定最稳妥的操作",

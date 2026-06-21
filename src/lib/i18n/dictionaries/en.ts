@@ -428,6 +428,10 @@ export const en = {
       "This change can’t be undone because the workspace changed.",
     buildingUpdate: "Building your update",
     thinking: "Thinking…",
+    stopTask: "Stop task",
+    stopping: "Stopping…",
+    taskStopped: "Task stopped.",
+    stopFailed: "Could not stop the task. It may still be running.",
     steps: {
       inspect: "Inspect workspace",
       decide: "Decide the safest action",

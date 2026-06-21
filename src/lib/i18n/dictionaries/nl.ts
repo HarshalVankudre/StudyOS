@@ -415,6 +415,10 @@ export const nl = {
     undoFailed: "Deze wijziging kan niet ongedaan worden gemaakt omdat de werkruimte is veranderd.",
     buildingUpdate: "Je update bouwen",
     thinking: "Aan het denken…",
+    stopTask: "Taak stoppen",
+    stopping: "Stoppen…",
+    taskStopped: "Taak gestopt.",
+    stopFailed: "De taak kon niet worden gestopt. Mogelijk wordt deze nog uitgevoerd.",
     steps: {
       inspect: "Werkruimte inspecteren",
       decide: "De veiligste actie bepalen",
