@@ -9,9 +9,9 @@ function deps(result = {
   logTail: "ok",
   artifacts: [{ path: "out/page-1.png", bytes: new Uint8Array([1, 2]) }],
 }) {
-  const created: { ownerId: string; mime: string; filename: string }[] = [];
+  const created: { ownerId: string; mime: string; filename: string; sourceRunId: string }[] = [];
   const createAsset: CreateAssetFn = async (input) => {
-    created.push({ ownerId: input.ownerId, mime: input.mime, filename: input.filename });
+    created.push({ ownerId: input.ownerId, mime: input.mime, filename: input.filename, sourceRunId: input.sourceRunId });
     return { assetId: `asset_${created.length}`, mime: input.mime, filename: input.filename };
   };
   const runner = new FakeSandboxRunner(result);
@@ -39,7 +39,7 @@ describe("run_in_sandbox tool", () => {
 
     expect(out.artifacts).toEqual([{ assetId: "asset_1", mime: "image/png", filename: "page-1.png" }]);
     expect(out.exitCode).toBe(0);
-    expect(created[0]).toEqual({ ownerId: "user_1", mime: "image/png", filename: "page-1.png" });
+    expect(created[0]).toEqual({ ownerId: "user_1", mime: "image/png", filename: "page-1.png", sourceRunId: "task_9" });
     // the runner received a spec whose outputs are under out/
     expect(runner.lastSpec?.outputs).toEqual(["out/page-1.png"]);
   });
