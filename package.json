@@ -17,6 +17,7 @@
   "dependencies": {
     "@clerk/localizations": "^4.9.0",
     "@clerk/nextjs": "^7.5.5",
+    "@google-cloud/storage": "^7.21.0",
     "@prisma/client": "^6.19.3",
     "@streamdown/cjk": "^1.0.3",
     "@streamdown/code": "^1.1.1",
