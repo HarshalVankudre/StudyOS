@@ -7,9 +7,12 @@ vi.mock("./openrouter", () => ({
   chatCompletion: mocks.chat,
 }));
 
-import { runAgentLoop } from "./agent-loop";
+import { runAgentLoop, selectAllowedTools } from "./agent-loop";
 import { TaskCancelledError } from "./tasks/cancellation";
 import type { AgentStreamEvent } from "./agent-shared";
+import { toolRegistry } from "./tools/registry";
+import { skillRegistry } from "./skills/registry";
+import { z } from "zod";
 
 const WS = {
   id: "ws1", name: "S",
@@ -25,7 +28,7 @@ function run(scripts: string[]) {
   const events: AgentStreamEvent[] = [];
   return runAgentLoop({
     workspace: WS, history: [], message: "rename home to Dashboard",
-    model: "m", budget, locale: "en", taskId: "t1",
+    model: "m", budget, locale: "en", taskId: "t1", ownerId: "user_test",
     emit: (e) => { events.push(e); },
     now: () => 0,
   }).then((res) => ({ res, events }));
@@ -68,7 +71,7 @@ describe("runAgentLoop", () => {
       workspace: WS, history: [], message: "rename home to Dashboard",
       model: "m",
       budget: { wallTimeMs: 0, maxModelTurns: 8, maxToolCalls: 12, maxRepairs: 2 },
-      locale: "en", taskId: "t1",
+      locale: "en", taskId: "t1", ownerId: "user_test",
       emit: (e) => { events.push(e); },
       now: () => tick++,
     });
@@ -90,7 +93,7 @@ describe("runAgentLoop", () => {
       workspace: WS, history: [], message: "do something",
       model: "m",
       budget: { wallTimeMs: 0, maxModelTurns: 8, maxToolCalls: 12, maxRepairs: 2 },
-      locale: "en", taskId: "t1",
+      locale: "en", taskId: "t1", ownerId: "user_test",
       emit: (e) => { events.push(e); },
       now: () => tick++,
     });
@@ -163,6 +166,7 @@ describe("runAgentLoop", () => {
       budget,
       locale: "en",
       taskId: "t1",
+      ownerId: "user_test",
       signal: controller.signal,
       emit: vi.fn(),
       now: () => 0,
@@ -191,7 +195,7 @@ describe("runAgentLoop", () => {
     const events: AgentStreamEvent[] = [];
     await runAgentLoop({
       workspace: WS, history: [], message: "hello",
-      model: "m", budget, locale: "en", taskId: "t1",
+      model: "m", budget, locale: "en", taskId: "t1", ownerId: "user_test",
       emit: (e) => { events.push(e); },
       now: () => 0,
     });
@@ -201,5 +205,84 @@ describe("runAgentLoop", () => {
     expect(thinking.length).toBe(2);
     expect(thinking.map((e) => e.delta).join("")).toBe("Let me think about this.");
     expect(thinking[0].phase).toBe("planning");
+  });
+});
+
+describe("loop tool gating + ownerId", () => {
+  it("ownerId is forwarded into the tool context", async () => {
+    // Register a spy tool that captures the ctx it receives.
+    const capturedOwnerIds: (string | undefined)[] = [];
+    toolRegistry.register({
+      id: "test_spy_owner_tool",
+      description: "spy: records ctx.ownerId",
+      input: z.object({}),
+      output: z.object({ ok: z.boolean() }),
+      limits: { timeoutMs: 5000 },
+      networkPermission: "none",
+      enabled: true,
+      handler: (_input, ctx) => {
+        capturedOwnerIds.push(ctx.ownerId);
+        return { ok: true };
+      },
+    });
+
+    // Register a skill that uses the spy tool.
+    skillRegistry.register({
+      id: "test-spy-skill",
+      version: "1.0.0",
+      instructions: "spy skill",
+      toolIds: ["test_spy_owner_tool"],
+    });
+
+    mocks.chat.mockReset();
+    // Planner: execute via our test skill
+    mocks.chat.mockResolvedValueOnce(
+      '{"action":"execute","skillId":"test-spy-skill","summary":"spy","affectedAreaIds":["p1"]}',
+    );
+    // Step 1: call the spy tool
+    mocks.chat.mockResolvedValueOnce(
+      '{"action":"tool","tool":"test_spy_owner_tool","input":{}}',
+    );
+    // Step 2: finalize
+    mocks.chat.mockResolvedValueOnce('{"action":"final","reply":"done"}');
+
+    await runAgentLoop({
+      workspace: WS, history: [], message: "run spy",
+      model: "m", budget, locale: "en",
+      taskId: "task_spy", ownerId: "user_owner_42",
+      emit: vi.fn(), now: () => 0,
+    });
+
+    expect(capturedOwnerIds).toContain("user_owner_42");
+  });
+
+  it("a registered-but-disabled tool is excluded from selectAllowedTools", () => {
+    // Register a disabled tool.
+    toolRegistry.register({
+      id: "test_disabled_stub",
+      description: "disabled stub",
+      input: z.object({}),
+      output: z.object({}),
+      limits: { timeoutMs: 1000 },
+      networkPermission: "none",
+      enabled: false,
+      handler: () => ({}),
+    });
+
+    // Register an enabled tool alongside it to prove enabled ones still pass through.
+    toolRegistry.register({
+      id: "test_enabled_stub",
+      description: "enabled stub",
+      input: z.object({}),
+      output: z.object({}),
+      limits: { timeoutMs: 1000 },
+      networkPermission: "none",
+      enabled: true,
+      handler: () => ({}),
+    });
+
+    const result = selectAllowedTools(["test_enabled_stub", "test_disabled_stub"]);
+    expect(result).toContain("test_enabled_stub");
+    expect(result).not.toContain("test_disabled_stub");
   });
 });

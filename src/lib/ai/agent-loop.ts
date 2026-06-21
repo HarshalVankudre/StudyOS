@@ -49,6 +49,8 @@ export interface RunAgentLoopParams {
   budget: AgentBudget;
   locale: Locale;
   taskId: string;
+  /** Owner (Clerk userId); forwarded to tools so produced assets are owner-scoped. */
+  ownerId: string;
   /**
    * Task cancellation signal. When it aborts, the loop stops the in-flight model
    * call, refuses further tool/validation work, and rejects with
@@ -75,10 +77,23 @@ const TOOL_INPUT_HINTS: Record<string, string> = {
   inspect_workspace: "{}",
   apply_ops:
     '{"ops":[ <minimal operations; same vocabulary as the editor> ]}  // e.g. {"op":"update_page","pageId":"<id>","title":"<new>"}',
+  run_in_sandbox:
+    '{"inputs":[{"path":"main.tex","content":"..."}],"setup":[],"run":["tectonic main.tex","pdftoppm -png main.pdf out/page"],"outputs":["out/page-1.png"],"timeoutSec":60}',
 };
 
+/**
+ * Returns the subset of `skill.toolIds` that are registered AND enabled.
+ * Disabled tools (e.g. flag-off) are invisible to the model.
+ */
+export function selectAllowedTools(skillToolIds: string[]): string[] {
+  return skillToolIds.filter((id) => {
+    const def = toolRegistry.get(id);
+    return !!def && def.enabled !== false;
+  });
+}
+
 export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentResponse> {
-  const { workspace, history, message, model, budget, taskId } = params;
+  const { workspace, history, message, model, budget, taskId, ownerId } = params;
   const locale = params.locale ?? DEFAULT_LOCALE;
   const now = params.now ?? (() => Date.now());
   const emit = params.emit;
@@ -194,7 +209,7 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentRes
   let toolCalls = 0;
   let repairs = 0;
   const observations: ChatMessage[] = [];
-  const allowedTools = skill.toolIds.filter((id) => toolRegistry.has(id));
+  const allowedTools = selectAllowedTools(skill.toolIds);
 
   await emit({ type: "phase", phase: "updating", message: dict.agentChat.phase.updating, progress: 40 });
 
@@ -239,6 +254,7 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentRes
     }
     const ctx = {
       taskId,
+      ownerId,
       workspaceJson: JSON.stringify(candidate),
       signal: params.signal,
     };

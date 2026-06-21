@@ -185,6 +185,7 @@ export async function POST(request: Request) {
               budget: budgetForPlan(plan),
               locale,
               taskId: task.id,
+              ownerId: userId,
               signal: taskSignal,
               emit,
               startedAt: requestStartedAt,
