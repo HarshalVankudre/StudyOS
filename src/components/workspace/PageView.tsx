@@ -6,6 +6,7 @@ import { useI18n } from "@/lib/i18n/client";
 import type { Dictionary } from "@/lib/i18n/dictionaries/en";
 import { BlockText } from "./BlockText";
 import { DatabaseView } from "./DatabaseView";
+import { ReactArtifact } from "./ReactArtifact";
 import { useWorkspace } from "./WorkspaceContext";
 
 /** The authenticated, owner-checked source for a media asset. */
@@ -354,6 +355,8 @@ function BlockView({ pageId, block }: { pageId: string; block: Block }) {
           ) : null}
         </figure>
       );
+    case "react_artifact":
+      return <ReactArtifact source={block.source} title={block.title} />;
     default:
       return null;
   }
