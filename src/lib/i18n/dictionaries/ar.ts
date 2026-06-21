@@ -461,6 +461,7 @@ export const ar = {
       callout: "تنبيه",
       divider: "فاصل",
       database: "جدول",
+      media: "صورة",
     },
     placeholders: {
       paragraph: "اكتب شيئًا…",

@@ -460,6 +460,7 @@ export const es = {
       callout: "Aviso",
       divider: "Separador",
       database: "Tabla",
+      media: "Imagen",
     },
     placeholders: {
       paragraph: "Escribe algo…",

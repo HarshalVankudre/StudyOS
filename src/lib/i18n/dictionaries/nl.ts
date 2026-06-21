@@ -461,6 +461,7 @@ export const nl = {
       callout: "Callout",
       divider: "Scheidingslijn",
       database: "Tabel",
+      media: "Afbeelding",
     },
     placeholders: {
       paragraph: "Typ iets…",

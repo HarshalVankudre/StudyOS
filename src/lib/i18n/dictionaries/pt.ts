@@ -461,6 +461,7 @@ export const pt = {
       callout: "Destaque",
       divider: "Divisor",
       database: "Tabela",
+      media: "Imagem",
     },
     placeholders: {
       paragraph: "Digite algo…",

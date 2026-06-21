@@ -461,6 +461,7 @@ export const it = {
       callout: "Riquadro",
       divider: "Separatore",
       database: "Tabella",
+      media: "Immagine",
     },
     placeholders: {
       paragraph: "Scrivi qualcosa…",

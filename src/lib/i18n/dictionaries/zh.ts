@@ -461,6 +461,7 @@ export const zh = {
       callout: "标注",
       divider: "分隔线",
       database: "表格",
+      media: "图片",
     },
     placeholders: {
       paragraph: "输入点什么…",

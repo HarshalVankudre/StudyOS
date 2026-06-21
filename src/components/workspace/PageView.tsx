@@ -8,6 +8,11 @@ import { BlockText } from "./BlockText";
 import { DatabaseView } from "./DatabaseView";
 import { useWorkspace } from "./WorkspaceContext";
 
+/** The authenticated, owner-checked source for a media asset. */
+export function mediaImgSrc(assetId: string): string {
+  return `/api/asset/${assetId}`;
+}
+
 const BLOCK_TYPES = [
   { type: "paragraph", icon: "¶" },
   { type: "heading", icon: "H" },
@@ -332,6 +337,22 @@ function BlockView({ pageId, block }: { pageId: string; block: Block }) {
       return <hr className="my-4 border-line" />;
     case "database_view":
       return <DatabaseView databaseId={block.databaseId} viewId={block.viewId} />;
+    case "media":
+      return (
+        <figure className="my-3">
+          {/* SVG is inert when loaded via <img>; never inline it. */}
+          <img
+            src={mediaImgSrc(block.assetId)}
+            alt={block.alt ?? block.caption ?? ""}
+            className="max-w-full rounded-md border border-line"
+          />
+          {block.caption ? (
+            <figcaption className="mt-1 text-center text-xs text-ink-soft">
+              {block.caption}
+            </figcaption>
+          ) : null}
+        </figure>
+      );
     default:
       return null;
   }

@@ -460,6 +460,7 @@ export const fr = {
       callout: "Encadré",
       divider: "Séparateur",
       database: "Tableau",
+      media: "Image",
     },
     placeholders: {
       paragraph: "Saisissez quelque chose…",

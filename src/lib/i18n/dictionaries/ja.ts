@@ -460,6 +460,7 @@ export const ja = {
       callout: "コールアウト",
       divider: "区切り線",
       database: "テーブル",
+      media: "画像",
     },
     placeholders: {
       paragraph: "入力してください…",

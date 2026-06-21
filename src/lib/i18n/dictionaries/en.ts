@@ -474,6 +474,7 @@ export const en = {
       callout: "Callout",
       divider: "Divider",
       database: "Table",
+      media: "Image",
     },
     placeholders: {
       paragraph: "Type something…",

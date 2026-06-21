@@ -461,6 +461,7 @@ export const de = {
       callout: "Hinweis",
       divider: "Trennlinie",
       database: "Tabelle",
+      media: "Bild",
     },
     placeholders: {
       paragraph: "Schreib etwas…",
