@@ -8,6 +8,7 @@ vi.mock("./openrouter", () => ({
 }));
 
 import { runAgentLoop } from "./agent-loop";
+import { TaskCancelledError } from "./tasks/cancellation";
 import type { AgentStreamEvent } from "./agent-shared";
 
 const WS = {
@@ -133,6 +134,42 @@ describe("runAgentLoop", () => {
         (m) => m.content.includes("Observation from apply_ops") && m.content.includes('"ok":false'),
       ),
     ).toBe(true);
+  });
+
+  it("stops the active model turn when the task signal aborts", async () => {
+    mocks.chat.mockReset();
+    const controller = new AbortController();
+    mocks.chat.mockImplementationOnce(
+      async (
+        _model: string,
+        _messages: unknown,
+        _maxTokens: number,
+        options?: { signal?: AbortSignal },
+      ) =>
+        new Promise((_resolve, reject) => {
+          options?.signal?.addEventListener(
+            "abort",
+            () => reject(options.signal?.reason),
+            { once: true },
+          );
+        }),
+    );
+
+    const pending = runAgentLoop({
+      workspace: WS,
+      history: [],
+      message: "rename",
+      model: "m",
+      budget,
+      locale: "en",
+      taskId: "t1",
+      signal: controller.signal,
+      emit: vi.fn(),
+      now: () => 0,
+    });
+    controller.abort(new TaskCancelledError());
+
+    await expect(pending).rejects.toBeInstanceOf(TaskCancelledError);
   });
 
   it("streams the model's reasoning as thinking events", async () => {

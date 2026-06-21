@@ -13,6 +13,11 @@ import "./skills/catalog"; // ensure Stage-1 skills + their tools are registered
 import { workspaceAreas } from "./agent";
 import type { AgentBudget } from "./budgets";
 import {
+  TaskCancelledError,
+  isTaskCancelledError,
+  throwIfTaskCancelled,
+} from "./tasks/cancellation";
+import {
   parseAgentPlan,
   parseAgentStep,
   type AgentPlanDecision,
@@ -44,6 +49,12 @@ export interface RunAgentLoopParams {
   budget: AgentBudget;
   locale: Locale;
   taskId: string;
+  /**
+   * Task cancellation signal. When it aborts, the loop stops the in-flight model
+   * call, refuses further tool/validation work, and rejects with
+   * `TaskCancelledError` (never a fallback reply) so the route exits cleanly.
+   */
+  signal?: AbortSignal;
   emit: (event: AgentStreamEvent) => void | Promise<void>;
   now?: () => number;
   /**
@@ -99,6 +110,9 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentRes
     phase: AgentPhase,
     opts?: { temperature?: number },
   ): Promise<string> => {
+    // Fail fast if the task was already cancelled before this turn started — the
+    // model deadline signal alone can't represent a user Stop.
+    throwIfTaskCancelled(params.signal);
     const remaining = modelDeadline - now();
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -109,6 +123,12 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentRes
       // un-timeboxed request that could run past maxDuration.
       controller.abort();
     }
+    // Link task cancellation to this turn's deadline controller so a Stop aborts
+    // the in-flight model call. Preserve the task's abort reason so the catch can
+    // tell a user Stop (TaskCancelledError) apart from the wall-clock deadline.
+    const abortFromTask = () =>
+      controller.abort(params.signal?.reason ?? new TaskCancelledError());
+    params.signal?.addEventListener("abort", abortFromTask, { once: true });
     try {
       return await streamChatCompletion(model, messages, maxTokens, {
         temperature: opts?.temperature,
@@ -118,6 +138,9 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentRes
         },
       });
     } catch (error) {
+      // User cancellation is classified first: it must never be mistaken for the
+      // graceful deadline path (which would degrade to a fallback reply).
+      if (params.signal?.aborted) throw new TaskCancelledError();
       // Translate our own deadline-abort into a typed signal so every caller can
       // distinguish "ran out of time" from a genuine transport/model error
       // deterministically (not by re-reading the clock).
@@ -125,8 +148,13 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentRes
       throw error;
     } finally {
       if (timer) clearTimeout(timer);
+      params.signal?.removeEventListener("abort", abortFromTask);
     }
   };
+
+  // Cancellation is checked at loop entry and at each model/tool/validation
+  // boundary below; an aborted task throws TaskCancelledError out of the loop.
+  throwIfTaskCancelled(params.signal);
 
   // ---- Plan ----------------------------------------------------------
   await emit({ type: "phase", phase: "planning", message: dict.agentChat.phase.planning, progress: 18 });
@@ -209,7 +237,11 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentRes
       observations.push({ role: "user", content: `Tool "${step.tool}" is not available for this task. Available: ${allowedTools.join(", ")}.` });
       continue;
     }
-    const ctx = { taskId, workspaceJson: JSON.stringify(candidate) };
+    const ctx = {
+      taskId,
+      workspaceJson: JSON.stringify(candidate),
+      signal: params.signal,
+    };
     const def = toolRegistry.get(step.tool);
     try {
       const output = await toolRegistry.run(step.tool, step.input, ctx);
@@ -230,11 +262,16 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentRes
       observations.push({ role: "assistant", content: JSON.stringify(step) });
       observations.push({ role: "user", content: `Observation from ${step.tool}: ${JSON.stringify(output).slice(0, 4000)}` });
     } catch (error) {
+      // A cancelled task surfaces here as a tool abort — never feed it back as a
+      // recoverable tool failure; let it end the loop.
+      if (isTaskCancelledError(error, params.signal)) throw error;
       observations.push({ role: "user", content: `Tool ${step.tool} failed: ${error instanceof Error ? error.message : "error"}. Choose another action.` });
     }
   }
 
   // ---- Validate the candidate before handing it to the route ----
+  // Cancellation boundary: don't spend validation work on a stopped task.
+  throwIfTaskCancelled(params.signal);
   await emit({ type: "phase", phase: "validating", message: dict.agentChat.phase.validating, progress: 80 });
   for (const area of affectedAreas) await emit({ type: "area", areaId: area.id, status: "complete", progress: 88 });
 
