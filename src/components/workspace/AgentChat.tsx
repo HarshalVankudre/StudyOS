@@ -185,7 +185,13 @@ export function AgentChat({
 
           if (event.type === "task") {
             taskIdRef.current = event.taskId;
-          } else if (event.type === "phase" || event.type === "discovery" || event.type === "plan" || event.type === "area") {
+          } else if (
+            event.type === "phase" ||
+            event.type === "discovery" ||
+            event.type === "plan" ||
+            event.type === "area" ||
+            event.type === "thinking"
+          ) {
             setActivity((current) => reduceAgentActivity(current, event));
           } else if (event.type === "result") {
             receivedResult = true;

@@ -34,7 +34,7 @@ import { runAgentLoop } from "@/lib/ai/agent-loop";
 import { budgetForPlan } from "@/lib/ai/budgets";
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 const requestSchema = z.object({
   workspaceId: z.string().min(1).max(100),
@@ -53,6 +53,9 @@ const requestSchema = z.object({
 const encoder = new TextEncoder();
 
 export async function POST(request: Request) {
+  // Captured before any await so the agent budget is measured from the same
+  // instant as the route's `maxDuration` clock (request invocation).
+  const requestStartedAt = Date.now();
   const locale = await getLocale();
   const T = getDictionary(locale);
 
@@ -118,8 +121,13 @@ export async function POST(request: Request) {
         send({ type: "task", taskId: task.id });
 
         // Persist every emitted event so a reconnect can replay the Living Story.
+        // `thinking` is the exception: it's high-frequency, live-only reasoning,
+        // so it streams to the client but is never persisted (a DB write per
+        // delta would be wasteful and would crowd out real milestones in the
+        // capped event log).
         const emit = async (event: AgentStreamEvent) => {
           send(event);
+          if (event.type === "thinking") return;
           await appendTaskEvent(task.id, event).catch(() => {});
         };
 
@@ -142,6 +150,7 @@ export async function POST(request: Request) {
               locale,
               taskId: task.id,
               emit,
+              startedAt: requestStartedAt,
             }),
           );
           result = loop.result;

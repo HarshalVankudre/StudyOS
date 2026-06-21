@@ -414,6 +414,7 @@ export const zh = {
     undone: "已撤销更改",
     undoFailed: "工作区已发生变化，因此无法撤销此更改。",
     buildingUpdate: "正在生成你的更新",
+    thinking: "思考中…",
     steps: {
       inspect: "检查工作空间",
       decide: "决定最稳妥的操作",

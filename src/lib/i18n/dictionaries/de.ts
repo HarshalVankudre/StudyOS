@@ -414,6 +414,7 @@ export const de = {
     undone: "Änderung rückgängig gemacht",
     undoFailed: "Diese Änderung kann nicht rückgängig gemacht werden, weil sich der Arbeitsbereich geändert hat.",
     buildingUpdate: "Deine Aktualisierung wird erstellt",
+    thinking: "Denkt nach…",
     steps: {
       inspect: "Workspace prüfen",
       decide: "Sicherste Aktion festlegen",

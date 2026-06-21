@@ -2,7 +2,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ chat: vi.fn() }));
-vi.mock("./openrouter", () => ({ chatCompletion: mocks.chat }));
+vi.mock("./openrouter", () => ({
+  streamChatCompletion: mocks.chat,
+  chatCompletion: mocks.chat,
+}));
 
 import { runAgentLoop } from "./agent-loop";
 import type { AgentStreamEvent } from "./agent-shared";
@@ -74,6 +77,28 @@ describe("runAgentLoop", () => {
     expect(mocks.chat).toHaveBeenCalledTimes(1);
   });
 
+  it("degrades to a graceful reply when the planner runs out of budget", async () => {
+    mocks.chat.mockReset();
+    // With a zero wall budget the planner call is aborted up front; the mocked
+    // model rejects (as the aborted fetch would), and the loop must finalize
+    // with a plain reply instead of throwing a hard error.
+    mocks.chat.mockRejectedValue(new Error("aborted"));
+    const events: AgentStreamEvent[] = [];
+    let tick = 0;
+    const res = await runAgentLoop({
+      workspace: WS, history: [], message: "do something",
+      model: "m",
+      budget: { wallTimeMs: 0, maxModelTurns: 8, maxToolCalls: 12, maxRepairs: 2 },
+      locale: "en", taskId: "t1",
+      emit: (e) => { events.push(e); },
+      now: () => tick++,
+    });
+    expect(res.changed).toBe(false);
+    expect(typeof res.reply).toBe("string");
+    expect(res.reply.length).toBeGreaterThan(0);
+    expect(events.some((e) => e.type === "error")).toBe(false);
+  });
+
   it("tool outside skill toolIds is refused and loop reaches final", async () => {
     const { res } = await run([
       '{"action":"execute","skillId":"precise-edit","summary":"Rename","affectedAreaIds":["p1"]}',
@@ -108,5 +133,36 @@ describe("runAgentLoop", () => {
         (m) => m.content.includes("Observation from apply_ops") && m.content.includes('"ok":false'),
       ),
     ).toBe(true);
+  });
+
+  it("streams the model's reasoning as thinking events", async () => {
+    mocks.chat.mockReset();
+    // The planner call surfaces reasoning via the onReasoning callback, then
+    // resolves a plain reply so the turn ends without an edit.
+    mocks.chat.mockImplementationOnce(
+      async (
+        _model: string,
+        _messages: unknown,
+        _maxTokens: number,
+        opts?: { onReasoning?: (text: string) => void },
+      ) => {
+        opts?.onReasoning?.("Let me ");
+        opts?.onReasoning?.("think about this.");
+        return '{"action":"reply","reply":"Hi"}';
+      },
+    );
+    const events: AgentStreamEvent[] = [];
+    await runAgentLoop({
+      workspace: WS, history: [], message: "hello",
+      model: "m", budget, locale: "en", taskId: "t1",
+      emit: (e) => { events.push(e); },
+      now: () => 0,
+    });
+    const thinking = events.filter(
+      (e): e is Extract<AgentStreamEvent, { type: "thinking" }> => e.type === "thinking",
+    );
+    expect(thinking.length).toBe(2);
+    expect(thinking.map((e) => e.delta).join("")).toBe("Let me think about this.");
+    expect(thinking[0].phase).toBe("planning");
   });
 });

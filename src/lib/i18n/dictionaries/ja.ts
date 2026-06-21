@@ -413,6 +413,7 @@ export const ja = {
     undone: "変更を元に戻しました",
     undoFailed: "ワークスペースが変更されたため、この変更は元に戻せません。",
     buildingUpdate: "更新を作成中",
+    thinking: "思考中…",
     steps: {
       inspect: "ワークスペースを確認",
       decide: "最も安全な操作を判断",

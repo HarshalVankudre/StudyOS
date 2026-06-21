@@ -414,6 +414,7 @@ export const it = {
     undone: "Modifica annullata",
     undoFailed: "Questa modifica non può essere annullata perché l’area di lavoro è cambiata.",
     buildingUpdate: "Sto preparando il tuo aggiornamento",
+    thinking: "Sto pensando…",
     steps: {
       inspect: "Esamina lo spazio",
       decide: "Decidi l’azione più sicura",

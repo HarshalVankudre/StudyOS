@@ -413,6 +413,7 @@ export const es = {
     undone: "Cambio deshecho",
     undoFailed: "Este cambio no se puede deshacer porque el espacio de trabajo cambió.",
     buildingUpdate: "Preparando tu actualización",
+    thinking: "Pensando…",
     steps: {
       inspect: "Inspeccionar espacio de trabajo",
       decide: "Decidir la acción más segura",

@@ -413,6 +413,7 @@ export const fr = {
     undone: "Modification annulée",
     undoFailed: "Cette modification ne peut pas être annulée, car l’espace de travail a changé.",
     buildingUpdate: "Création de votre mise à jour",
+    thinking: "Réflexion…",
     steps: {
       inspect: "Examiner l’espace de travail",
       decide: "Choisir l’action la plus sûre",

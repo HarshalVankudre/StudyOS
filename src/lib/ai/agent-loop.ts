@@ -3,7 +3,7 @@ import "server-only";
 import type { Workspace } from "@/lib/workspace/types";
 import { safeParseWorkspace } from "@/lib/workspace/schema";
 import { DEFAULT_LOCALE, type Locale } from "@/lib/i18n/config";
-import { chatCompletion, type ChatMessage } from "./openrouter";
+import { streamChatCompletion, type ChatMessage } from "./openrouter";
 import { WORKSPACE_SHAPE, languageDirective } from "./generate";
 import { applyAgentOps, type AgentOp } from "./agent-ops";
 import { assertResultWithinLimits } from "./limits";
@@ -20,12 +20,21 @@ import {
 import type {
   AgentArea,
   AgentMessage,
+  AgentPhase,
   AgentResponse,
   AgentStreamEvent,
 } from "./agent-shared";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 
 const MAX_HISTORY = 8;
+
+/** Thrown when a model call is cut off by the wall-clock deadline (not an error). */
+class ModelDeadlineError extends Error {
+  constructor() {
+    super("model deadline reached");
+    this.name = "ModelDeadlineError";
+  }
+}
 
 export interface RunAgentLoopParams {
   workspace: Workspace;
@@ -37,6 +46,14 @@ export interface RunAgentLoopParams {
   taskId: string;
   emit: (event: AgentStreamEvent) => void | Promise<void>;
   now?: () => number;
+  /**
+   * Wall-clock origin for the budget, in ms. Pass the request-handler start time
+   * so the budget is measured from request invocation (which is also when the
+   * route's `maxDuration` clock starts) rather than from loop entry — otherwise
+   * the awaited route preamble silently eats into the reserved save tail.
+   * Defaults to `now()` (loop entry) for tests.
+   */
+  startedAt?: number;
 }
 
 /** Per-tool, plain-language hint about the input JSON, injected into the loop prompt. */
@@ -54,26 +71,84 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentRes
   const locale = params.locale ?? DEFAULT_LOCALE;
   const now = params.now ?? (() => Date.now());
   const emit = params.emit;
-  const deadline = now() + budget.wallTimeMs;
+  // Anchor the budget at request start (see `startedAt`) so the awaited route
+  // preamble counts against it — the route's maxDuration clock starts there too.
+  const deadline = (params.startedAt ?? now()) + budget.wallTimeMs;
+  // Reserve a slice of the wall budget for the post-loop tail (validate, apply,
+  // charge, persist) so a model call near the deadline cannot run past the
+  // route's maxDuration and get hard-killed mid-save.
+  const TAIL_RESERVE_MS = 10_000;
+  const modelDeadline = deadline - TAIL_RESERVE_MS;
   const areas = workspaceAreas(workspace);
   const dict = getDictionary(locale);
 
   let modelTurns = 0;
+  // Gate against the model deadline (not the full wall deadline) so no new turn
+  // starts inside the reserved save-tail window.
   const overBudget = () =>
-    now() >= deadline || modelTurns >= budget.maxModelTurns;
+    now() >= modelDeadline || modelTurns >= budget.maxModelTurns;
+
+  // One model call: streams the model's reasoning ("thinking") to the client
+  // under `phase`, and aborts at the model deadline so a single turn cannot
+  // overrun the budget. The signal is the wall-clock deadline ONLY — never the
+  // request signal — so the durable task keeps working if the client drops and
+  // can be recovered on reconnect.
+  const callModel = async (
+    messages: ChatMessage[],
+    maxTokens: number,
+    phase: AgentPhase,
+    opts?: { temperature?: number },
+  ): Promise<string> => {
+    const remaining = modelDeadline - now();
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    if (remaining > 0) {
+      timer = setTimeout(() => controller.abort(), remaining);
+    } else {
+      // Out of budget already — abort up front rather than issue an
+      // un-timeboxed request that could run past maxDuration.
+      controller.abort();
+    }
+    try {
+      return await streamChatCompletion(model, messages, maxTokens, {
+        temperature: opts?.temperature,
+        signal: controller.signal,
+        onReasoning: (delta) => {
+          void emit({ type: "thinking", phase, delta });
+        },
+      });
+    } catch (error) {
+      // Translate our own deadline-abort into a typed signal so every caller can
+      // distinguish "ran out of time" from a genuine transport/model error
+      // deterministically (not by re-reading the clock).
+      if (controller.signal.aborted) throw new ModelDeadlineError();
+      throw error;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  };
 
   // ---- Plan ----------------------------------------------------------
   await emit({ type: "phase", phase: "planning", message: dict.agentChat.phase.planning, progress: 18 });
-  modelTurns += 1;
-  const planRaw = await chatCompletion(model, buildPlanMessages(history, message, areas, locale), 1400, { temperature: 0.2 });
   let plan: AgentPlanDecision;
   try {
-    plan = parseAgentPlan(planRaw);
-  } catch {
-    // one bounded repair
     modelTurns += 1;
-    const retry = await chatCompletion(model, buildPlanMessages(history, message, areas, locale, true), 1400, { temperature: 0 });
-    plan = parseAgentPlan(retry);
+    const planRaw = await callModel(buildPlanMessages(history, message, areas, locale), 1400, "planning", { temperature: 0.2 });
+    try {
+      plan = parseAgentPlan(planRaw);
+    } catch {
+      // one bounded repair
+      modelTurns += 1;
+      const retry = await callModel(buildPlanMessages(history, message, areas, locale, true), 1400, "planning", { temperature: 0 });
+      plan = parseAgentPlan(retry);
+    }
+  } catch (error) {
+    // Running out of budget during planning should degrade gracefully (a plain
+    // reply), exactly like the step loop — not surface as a hard agent error.
+    if (error instanceof ModelDeadlineError) {
+      return { reply: dict.ai.agent.fallbackReply, changed: false };
+    }
+    throw error;
   }
 
   if (plan.action === "reply") return { reply: plan.reply, changed: false };
@@ -98,12 +173,21 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentRes
   let finalReply = dict.ai.agent.fallbackReply;
   while (!overBudget() && toolCalls < budget.maxToolCalls) {
     modelTurns += 1;
-    const stepRaw = await chatCompletion(
-      model,
-      buildStepMessages(candidate, message, skill.instructions, allowedTools, observations, locale),
-      4000,
-      { temperature: 0.1 },
-    );
+    let stepRaw: string;
+    try {
+      stepRaw = await callModel(
+        buildStepMessages(candidate, message, skill.instructions, allowedTools, observations, locale),
+        4000,
+        "updating",
+        { temperature: 0.1 },
+      );
+    } catch (error) {
+      // Hitting the model deadline mid-turn is expected near the budget ceiling:
+      // stop gracefully and finalize with what the loop has so far. Re-throw
+      // anything else (a genuine transport/model error).
+      if (error instanceof ModelDeadlineError) break;
+      throw error;
+    }
     let step;
     try {
       step = parseAgentStep(stepRaw);

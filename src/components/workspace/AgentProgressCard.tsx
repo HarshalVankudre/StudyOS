@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "@/lib/i18n/client";
 import {
   PHASE_ORDER,
@@ -17,6 +17,13 @@ export function AgentProgressCard({
 }) {
   const { dict } = useI18n();
   const [animatedProgress, setAnimatedProgress] = useState(activity.progress);
+  const thinkingRef = useRef<HTMLDivElement>(null);
+
+  // Keep the streamed reasoning pinned to its latest line as it grows.
+  useEffect(() => {
+    const el = thinkingRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [activity.thinking]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -100,6 +107,22 @@ export function AgentProgressCard({
       </div>
 
       <div className="space-y-3 p-3">
+        {activity.thinking && (
+          <div className="rounded-lg border border-line bg-hover/50 p-2.5">
+            <div className="mb-1.5 flex items-center gap-1.5">
+              <span className="ai-orb h-1.5 w-1.5 rounded-full bg-lime-on" aria-hidden />
+              <span className="font-display text-[11px] font-semibold text-ink-soft">
+                {dict.agentChat.thinking}
+              </span>
+            </div>
+            <div
+              ref={thinkingRef}
+              className="max-h-28 overflow-y-auto whitespace-pre-wrap break-words font-mono text-[10.5px] leading-relaxed text-ink-soft/85"
+            >
+              {activity.thinking}
+            </div>
+          </div>
+        )}
         {activity.plan && (
           <p className="px-3 pt-2 text-xs font-medium text-ink">{activity.plan.summary}</p>
         )}

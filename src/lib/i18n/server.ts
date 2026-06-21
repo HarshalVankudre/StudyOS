@@ -19,18 +19,32 @@ import {
   type Locale,
 } from "./config";
 import { getDictionary, type Dictionary } from "./dictionaries";
+import { countryFromHeaders, localeFromCountry } from "./geo";
 import { fmt } from "./interpolate";
 
 /** Resolve the active locale for the current request. */
 export async function getLocale(): Promise<Locale> {
+  // 1. The user's explicit choice (set by the language switcher) always wins.
   const cookieStore = await cookies();
   const fromCookie = cookieStore.get(LOCALE_COOKIE)?.value;
   if (isLocale(fromCookie)) return fromCookie;
 
   const headerList = await headers();
+
+  // 2. The visitor's country, resolved server-side from the IP by the hosting
+  //    platform's geo headers — so a first-time visitor from Germany gets German
+  //    with NO browser geolocation prompt. `STUDYOS_GEO_COUNTRY` forces a
+  //    country for local testing (e.g. set STUDYOS_GEO_COUNTRY=DE in .env.local).
+  const country =
+    process.env.STUDYOS_GEO_COUNTRY ?? countryFromHeaders(headerList);
+  const fromCountry = localeFromCountry(country);
+  if (fromCountry) return fromCountry;
+
+  // 3. The browser's language preference.
   const fromHeader = matchAcceptLanguage(headerList.get("accept-language"));
   if (fromHeader) return fromHeader;
 
+  // 4. Default to English.
   return DEFAULT_LOCALE;
 }
 

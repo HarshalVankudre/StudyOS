@@ -12,9 +12,14 @@ export interface AgentBudget {
   maxRepairs: number;
 }
 
+// Every tier gets the full 5-minute window. The wall budget is the model-loop
+// ceiling; the loop reserves a small tail under it (see agent-loop) and is
+// anchored at request start, so the work still finishes within the route's
+// `maxDuration = 300`. Higher tiers get more model turns / tool calls so they
+// can actually use the time on richer changes.
 const BUDGETS: Record<Plan, AgentBudget> = {
-  free: { wallTimeMs: 90_000, maxModelTurns: 8, maxToolCalls: 12, maxRepairs: 2 },
-  pro: { wallTimeMs: 180_000, maxModelTurns: 14, maxToolCalls: 24, maxRepairs: 2 },
+  free: { wallTimeMs: 300_000, maxModelTurns: 18, maxToolCalls: 30, maxRepairs: 2 },
+  pro: { wallTimeMs: 300_000, maxModelTurns: 26, maxToolCalls: 44, maxRepairs: 3 },
 };
 
 export function budgetForPlan(plan: Plan): AgentBudget {

@@ -414,6 +414,7 @@ export const nl = {
     undone: "Wijziging ongedaan gemaakt",
     undoFailed: "Deze wijziging kan niet ongedaan worden gemaakt omdat de werkruimte is veranderd.",
     buildingUpdate: "Je update bouwen",
+    thinking: "Aan het denken…",
     steps: {
       inspect: "Werkruimte inspecteren",
       decide: "De veiligste actie bepalen",

@@ -414,6 +414,7 @@ export const pt = {
     undone: "Alteração desfeita",
     undoFailed: "Esta alteração não pode ser desfeita porque o espaço de trabalho mudou.",
     buildingUpdate: "Criando sua atualização",
+    thinking: "Pensando…",
     steps: {
       inspect: "Inspecionar espaço de trabalho",
       decide: "Decidir a ação mais segura",

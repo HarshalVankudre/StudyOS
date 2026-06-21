@@ -427,6 +427,7 @@ export const en = {
     undoFailed:
       "This change can’t be undone because the workspace changed.",
     buildingUpdate: "Building your update",
+    thinking: "Thinking…",
     steps: {
       inspect: "Inspect workspace",
       decide: "Decide the safest action",

@@ -38,7 +38,12 @@ export interface AgentActivityState {
   discoveries: AgentDiscovery[];
   plan?: { summary: string; areas: AgentArea[] };
   areas: { id: string; status: AgentAreaStatus; label: string }[];
+  /** Rolling buffer of streamed reasoning ("thinking") text; capped, live-only. */
+  thinking?: string;
 }
+
+/** Cap the live thinking buffer so the DOM/state can't grow without bound. */
+export const THINKING_BUFFER_MAX = 4000;
 
 export function createInitialAgentActivity(
   message: string,
@@ -81,6 +86,17 @@ export function reduceAgentActivity(
         Math.max(state.progress, event.progress),
       ),
       discoveries: [...discoveries, event.discovery].slice(-3),
+    };
+  }
+
+  if (event.type === "thinking") {
+    const next = (state.thinking ?? "") + event.delta;
+    return {
+      ...state,
+      thinking:
+        next.length > THINKING_BUFFER_MAX
+          ? next.slice(next.length - THINKING_BUFFER_MAX)
+          : next,
     };
   }
 

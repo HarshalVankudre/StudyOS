@@ -87,6 +87,14 @@ export type AgentStreamEvent =
       progress: number;
     }
   | {
+      // Live reasoning ("thinking") tokens streamed from the model as it works.
+      // Ephemeral UX: streamed to the client but not persisted, so it does not
+      // replay on reconnect. `delta` is an incremental chunk to append.
+      type: "thinking";
+      phase: AgentPhase;
+      delta: string;
+    }
+  | {
       type: "result";
       response: AgentResponse;
     }

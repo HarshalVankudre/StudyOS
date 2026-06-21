@@ -20,7 +20,7 @@ import { saveNewWorkspace } from "@/lib/workspace/store";
 import type { Workspace } from "@/lib/workspace/types";
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 const requestSchema = z.object({
   prompt: z.string().trim().min(1).max(2000),
