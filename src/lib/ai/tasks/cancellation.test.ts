@@ -50,6 +50,7 @@ describe("task cancellation primitives", () => {
     expect(newController.signal.aborted).toBe(true);
 
     newCleanup();
+    expect(abortActiveTask("task-2")).toBe(false);
   });
 
   it("throws a task cancelled error when a signal was aborted for another reason", () => {
@@ -95,6 +96,70 @@ describe("task cancellation primitives", () => {
     expect(controller.signal.aborted).toBe(true);
     expect(controller.signal.reason).toBeInstanceOf(TaskCancelledError);
     expect(isCancelled).toHaveBeenCalledTimes(3);
+
+    cleanup();
+  });
+
+  it("does not overlap durable polls while one is already in flight", async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const firstPoll = deferred<boolean>();
+    const isCancelled = vi.fn().mockReturnValueOnce(firstPoll.promise).mockResolvedValue(false);
+
+    const cleanup = watchDurableCancellation({ controller, isCancelled, intervalMs: 10 });
+
+    expect(isCancelled).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(30);
+    expect(isCancelled).toHaveBeenCalledTimes(1);
+
+    firstPoll.resolve(false);
+    await Promise.resolve();
+
+    await vi.advanceTimersByTimeAsync(10);
+    expect(isCancelled).toHaveBeenCalledTimes(2);
+
+    cleanup();
+  });
+
+  it("stops future polling when the controller is aborted externally", async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const firstPoll = deferred<boolean>();
+    const isCancelled = vi.fn().mockReturnValueOnce(firstPoll.promise).mockResolvedValue(false);
+
+    const cleanup = watchDurableCancellation({ controller, isCancelled, intervalMs: 10 });
+
+    expect(isCancelled).toHaveBeenCalledTimes(1);
+    controller.abort(new TaskCancelledError());
+
+    await vi.advanceTimersByTimeAsync(50);
+    expect(isCancelled).toHaveBeenCalledTimes(1);
+
+    firstPoll.resolve(false);
+    await Promise.resolve();
+
+    await vi.advanceTimersByTimeAsync(50);
+    expect(isCancelled).toHaveBeenCalledTimes(1);
+
+    cleanup();
+  });
+
+  it("does not leave a timer active when the initial durable check aborts synchronously", async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const isCancelled = vi.fn(() => {
+      controller.abort(new TaskCancelledError());
+      return true;
+    });
+
+    const cleanup = watchDurableCancellation({ controller, isCancelled, intervalMs: 10 });
+
+    await Promise.resolve();
+
+    expect(controller.signal.aborted).toBe(true);
+    expect(isCancelled).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
 
     cleanup();
   });

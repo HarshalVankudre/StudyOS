@@ -99,12 +99,11 @@ export function watchDurableCancellation({
 
   if (!stopped) {
     controller.signal.addEventListener("abort", stop, { once: true });
-    void check();
-
     timer = setInterval(() => {
       void check();
     }, intervalMs);
     unrefTimer(timer);
+    void check();
   }
 
   return () => {
