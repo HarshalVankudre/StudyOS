@@ -307,13 +307,22 @@ function resolveAreas(ids: string[], areas: AgentArea[]): AgentArea[] {
 }
 
 function buildPlanMessages(history: AgentMessage[], message: string, areas: AgentArea[], locale: Locale, corrective = false): ChatMessage[] {
+  // render-visual is only reachable when its skill is registered (AGENT_SANDBOX on);
+  // otherwise the planner must not be told about it.
+  const canRender = !!skillRegistry.get("render-visual");
+  const skillMenu = canRender
+    ? "precise-edit|study-planner|render-visual"
+    : "precise-edit|study-planner";
   const system = [
     "You are the planning layer of the StudyOS workspace agent. Decide what to do for the latest message.",
     "Return exactly one JSON object and nothing else, one of:",
     '{"action":"reply","reply":"<concise answer, no edit needed>"}',
     '{"action":"clarify","reply":"<one question>","choices":[{"id":"a","label":"<short>","value":"<full answer>"}]}  // 2-4 choices, only when materially ambiguous',
-    '{"action":"execute","skillId":"<precise-edit|study-planner>","summary":"<one-sentence user-facing goal>","affectedAreaIds":["<existing id>"]}',
+    `{"action":"execute","skillId":"<${skillMenu}>","summary":"<one-sentence user-facing goal>","affectedAreaIds":["<existing id>"]}`,
     "Pick study-planner for exam/assignment/revision/schedule work; otherwise precise-edit.",
+    canRender
+      ? "Pick render-visual when the user wants a LaTeX formula, math, diagram, plot, figure, or a cheat-sheet/document rendered as an IMAGE placed into a page. It embeds an image in the workspace (PNG), not a downloadable file."
+      : "",
     corrective ? "Your previous reply was not valid JSON. Return ONLY the JSON object." : "",
     "Valid workspace area ids:",
     JSON.stringify(areas),
