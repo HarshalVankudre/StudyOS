@@ -527,15 +527,83 @@ Block = one of:
   { id; type:"divider" }
   { id; type:"database_view"; databaseId; viewId }`;
 
-/** Pull the JSON object out of the model's reply, tolerating fences or stray prose. */
+/**
+ * Pull the JSON object out of the model's reply, tolerating fences or stray
+ * prose — without ever throwing.
+ *
+ * Order matters: parse the whole trimmed reply FIRST. The requested output is
+ * pure JSON, and a direct parse is the only branch that correctly preserves
+ * ``` fences and `{ }` braces living INSIDE string values (e.g. a mermaid
+ * diagram). Stripping an "inner" fence or slicing on a raw brace corrupts such
+ * a reply — that is exactly why agent turns that added a mermaid/code block
+ * failed with a raw `SyntaxError`. We only fall back to fence-unwrapping and
+ * balanced-object extraction when the reply is genuinely wrapped in prose or a
+ * code fence. On total failure we return `null` so callers' `safeParse(...)`
+ * treats it as invalid input instead of a raw SyntaxError crashing the request.
+ */
 export function extractJson(text: string): unknown {
-  let t = text.trim();
-  const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (fence) t = fence[1].trim();
-  const start = t.indexOf("{");
-  const end = t.lastIndexOf("}");
-  if (start !== -1 && end !== -1) t = t.slice(start, end + 1);
-  return JSON.parse(t);
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+
+  // 1) Pure JSON (the requested format) — preserves ``` and `{ }` inside strings.
+  const direct = tryParseJson(trimmed);
+  if (direct.ok) return direct.value;
+
+  // 2) The whole reply wrapped in a ```json … ``` fence.
+  const fenced = trimmed.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?\s*```$/i);
+  if (fenced) {
+    const inner = tryParseJson(fenced[1].trim());
+    if (inner.ok) return inner.value;
+  }
+
+  // 3) JSON embedded in prose: take the first BALANCED top-level object,
+  //    scanning past string literals so a `}` inside a string can't end it early.
+  const candidate = firstBalancedJsonObject(trimmed);
+  if (candidate) {
+    const obj = tryParseJson(candidate);
+    if (obj.ok) return obj.value;
+  }
+
+  return null;
+}
+
+function tryParseJson(
+  s: string,
+): { ok: true; value: unknown } | { ok: false } {
+  try {
+    return { ok: true, value: JSON.parse(s) };
+  } catch {
+    return { ok: false };
+  }
+}
+
+/**
+ * The first balanced `{ … }` object in `text`, ignoring braces that appear
+ * inside JSON string literals (so a `}` inside a mermaid/code string does not
+ * prematurely close the object). Returns null if no balanced object exists.
+ */
+function firstBalancedJsonObject(text: string): string | null {
+  const start = text.indexOf("{");
+  if (start === -1) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i += 1) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{") depth += 1;
+    else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  return null;
 }
 
 // ===========================================================================
