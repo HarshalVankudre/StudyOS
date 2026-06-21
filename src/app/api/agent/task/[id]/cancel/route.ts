@@ -1,5 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
-import { cancelTask } from "@/lib/ai/tasks/store";
+import { abortActiveTask } from "@/lib/ai/tasks/cancellation";
+import { cancelTask, getTask } from "@/lib/ai/tasks/store";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { getLocale } from "@/lib/i18n/server";
 
@@ -19,5 +20,37 @@ export async function POST(_request: Request, { params }: Props) {
   }
   const { id } = await params;
   const cancelled = await cancelTask(id);
-  return Response.json({ cancelled });
+
+  if (cancelled) {
+    return Response.json(
+      {
+        status: "cancelled",
+        interrupted: abortActiveTask(id),
+      },
+      { status: 200 },
+    );
+  }
+
+  const task = await getTask(id);
+  if (!task) {
+    return Response.json({ error: "Task not found" }, { status: 404 });
+  }
+
+  if (task.status === "cancelled") {
+    return Response.json(
+      {
+        status: "cancelled",
+        interrupted: false,
+      },
+      { status: 200 },
+    );
+  }
+
+  return Response.json(
+    {
+      status: "already_finished",
+      interrupted: false,
+    },
+    { status: 200 },
+  );
 }
