@@ -19,6 +19,7 @@ vi.mock("@/lib/db", () => ({
 }));
 
 import {
+  claimTaskForFinalization,
   TASK_TTL_MS,
   appendTaskEvent,
   cancelTask,
@@ -26,6 +27,7 @@ import {
   getTask,
   isTaskCancelled,
   markTaskDone,
+  markTaskError,
 } from "./store";
 
 describe("agent task store", () => {
@@ -75,6 +77,24 @@ describe("agent task store", () => {
     await expect(cancelTask("task-1")).resolves.toBe(false);
   });
 
+  it("claims only the current user's running task for finalization", async () => {
+    mocks.updateMany.mockResolvedValueOnce({ count: 1 });
+    await expect(claimTaskForFinalization("task-1")).resolves.toBe(true);
+    expect(mocks.updateMany).toHaveBeenCalledWith({
+      where: { id: "task-1", userId: "user-1", status: "running" },
+      data: { status: "finalizing" },
+    });
+  });
+
+  it("reports when claiming a task for finalization fails", async () => {
+    mocks.updateMany.mockResolvedValueOnce({ count: 0 });
+    await expect(claimTaskForFinalization("task-1")).resolves.toBe(false);
+    expect(mocks.updateMany).toHaveBeenCalledWith({
+      where: { id: "task-1", userId: "user-1", status: "running" },
+      data: { status: "finalizing" },
+    });
+  });
+
   it("reports cancellation for the apply guard", async () => {
     mocks.findFirst.mockResolvedValue({ status: "cancelled" });
     await expect(isTaskCancelled("task-1")).resolves.toBe(true);
@@ -82,12 +102,31 @@ describe("agent task store", () => {
     await expect(isTaskCancelled("task-1")).resolves.toBe(false);
   });
 
-  it("markTaskDone only updates a still-running task", async () => {
+  it("markTaskDone only updates a finalizing task and reports success", async () => {
     mocks.updateMany.mockResolvedValue({ count: 1 });
-    await markTaskDone("task-1", "{}");
-    expect(mocks.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: "task-1", userId: "user-1", status: "running" } }),
-    );
+    await expect(markTaskDone("task-1", "{}")).resolves.toBe(true);
+    expect(mocks.updateMany).toHaveBeenCalledWith({
+      where: { id: "task-1", userId: "user-1", status: "finalizing" },
+      data: { status: "done", result: "{}" },
+    });
+  });
+
+  it("reports when markTaskDone cannot update a task", async () => {
+    mocks.updateMany.mockResolvedValue({ count: 0 });
+    await expect(markTaskDone("task-1", "{}")).resolves.toBe(false);
+    expect(mocks.updateMany).toHaveBeenCalledWith({
+      where: { id: "task-1", userId: "user-1", status: "finalizing" },
+      data: { status: "done", result: "{}" },
+    });
+  });
+
+  it("markTaskError only touches running or finalizing tasks", async () => {
+    mocks.updateMany.mockResolvedValue({ count: 1 });
+    await markTaskError("task-1", "boom");
+    expect(mocks.updateMany).toHaveBeenCalledWith({
+      where: { id: "task-1", userId: "user-1", status: { in: ["running", "finalizing"] } },
+      data: { status: "error", error: "boom" },
+    });
   });
 
   it("appendTaskEvent reads, appends, and writes back capped events (null start)", async () => {

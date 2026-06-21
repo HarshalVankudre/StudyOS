@@ -15,7 +15,7 @@ import type { AgentStreamEvent } from "@/lib/ai/agent-shared";
 /** How long a finished task's status/result remains reconnectable. */
 export const TASK_TTL_MS = 10 * 60 * 1000;
 
-export type AgentTaskStatus = "running" | "done" | "cancelled" | "error";
+export type AgentTaskStatus = "running" | "finalizing" | "done" | "cancelled" | "error";
 
 async function requireUserId(): Promise<string> {
   const { userId } = await auth();
@@ -56,6 +56,15 @@ export async function cancelTask(id: string): Promise<boolean> {
   return result.count === 1;
 }
 
+export async function claimTaskForFinalization(id: string): Promise<boolean> {
+  const userId = await requireUserId();
+  const result = await prisma.agentTask.updateMany({
+    where: { id, userId, status: "running" },
+    data: { status: "finalizing" },
+  });
+  return result.count === 1;
+}
+
 /** True if the task was cancelled — consulted before applying a result. */
 export async function isTaskCancelled(id: string): Promise<boolean> {
   const userId = await requireUserId();
@@ -66,12 +75,13 @@ export async function isTaskCancelled(id: string): Promise<boolean> {
   return row?.status === "cancelled";
 }
 
-export async function markTaskDone(id: string, result: string): Promise<void> {
+export async function markTaskDone(id: string, result: string): Promise<boolean> {
   const userId = await requireUserId();
-  await prisma.agentTask.updateMany({
-    where: { id, userId, status: "running" },
+  const update = await prisma.agentTask.updateMany({
+    where: { id, userId, status: "finalizing" },
     data: { status: "done", result },
   });
+  return update.count === 1;
 }
 
 /** Append a sanitized progress event to the durable task (capped) for reconnect replay. */
@@ -93,7 +103,7 @@ export async function appendTaskEvent(id: string, event: AgentStreamEvent): Prom
 export async function markTaskError(id: string, error: string): Promise<void> {
   const userId = await requireUserId();
   await prisma.agentTask.updateMany({
-    where: { id, userId },
+    where: { id, userId, status: { in: ["running", "finalizing"] } },
     data: { status: "error", error },
   });
 }
