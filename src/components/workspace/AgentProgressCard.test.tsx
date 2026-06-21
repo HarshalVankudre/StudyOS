@@ -9,6 +9,9 @@ vi.mock("@/lib/i18n/client", () => ({
       common: { cancel: "Cancel" },
       agentChat: {
         buildingUpdate: "Making it feel effortless",
+        stopTask: "Stop task",
+        stopping: "Stopping…",
+        thinking: "Thinking…",
         phase: {
           inspecting: "Understanding",
           planning: "Shaping",
@@ -16,6 +19,7 @@ vi.mock("@/lib/i18n/client", () => ({
           validating: "Checking",
           saving: "Finishing",
         },
+        areaStatus: { queued: "Queued", working: "Updating", complete: "Ready" },
       },
     },
   }),
@@ -27,7 +31,14 @@ describe("AgentProgressCard", () => {
       ...createInitialAgentActivity("Creating more breathing room"),
       progress: 68,
     };
-    render(<AgentProgressCard activity={activity} onCancel={vi.fn()} />);
+    render(
+      <AgentProgressCard
+        activity={activity}
+        onStop={vi.fn()}
+        stopping={false}
+        canStop
+      />,
+    );
     expect(screen.getByRole("progressbar")).toHaveAttribute(
       "aria-valuenow",
       "68",
@@ -46,7 +57,14 @@ describe("AgentProgressCard", () => {
         },
       ],
     };
-    render(<AgentProgressCard activity={activity} onCancel={vi.fn()} />);
+    render(
+      <AgentProgressCard
+        activity={activity}
+        onStop={vi.fn()}
+        stopping={false}
+        canStop
+      />,
+    );
     expect(screen.getByText("Layout understood")).toBeInTheDocument();
     expect(
       screen.getByText("I found where the dashboard was crowded"),
@@ -61,7 +79,12 @@ describe("AgentProgressCard", () => {
       progress: 35,
     };
     const { unmount } = render(
-      <AgentProgressCard activity={activity} onCancel={vi.fn()} />,
+      <AgentProgressCard
+        activity={activity}
+        onStop={vi.fn()}
+        stopping={false}
+        canStop
+      />,
     );
     act(() => vi.advanceTimersByTime(120_000));
     expect(screen.getByRole("progressbar")).toHaveAttribute(
@@ -70,5 +93,36 @@ describe("AgentProgressCard", () => {
     );
     unmount();
     vi.useRealTimers();
+  });
+
+  it("shows thinking and a prominent Stop task control", () => {
+    const onStop = vi.fn();
+    render(
+      <AgentProgressCard
+        activity={{
+          ...createInitialAgentActivity("Working"),
+          thinking: "Reviewing the course plan",
+        }}
+        onStop={onStop}
+        stopping={false}
+        canStop
+      />,
+    );
+
+    expect(screen.getByText("Reviewing the course plan")).toBeInTheDocument();
+    screen.getByRole("button", { name: "Stop task" }).click();
+    expect(onStop).toHaveBeenCalledOnce();
+  });
+
+  it("disables the control and shows Stopping while cancellation is pending", () => {
+    render(
+      <AgentProgressCard
+        activity={createInitialAgentActivity("Working")}
+        onStop={vi.fn()}
+        stopping
+        canStop
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Stopping…" })).toBeDisabled();
   });
 });

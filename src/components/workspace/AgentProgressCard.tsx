@@ -10,10 +10,14 @@ import {
 
 export function AgentProgressCard({
   activity,
-  onCancel,
+  onStop,
+  stopping,
+  canStop,
 }: {
   activity: AgentActivityState;
-  onCancel: () => void;
+  onStop: () => void;
+  stopping: boolean;
+  canStop: boolean;
 }) {
   const { dict } = useI18n();
   const [animatedProgress, setAnimatedProgress] = useState(activity.progress);
@@ -80,10 +84,12 @@ export function AgentProgressCard({
             <p className="mt-2 text-xs text-paper/65">{activity.message}</p>
           </div>
           <button
-            onClick={onCancel}
-            className="font-mono text-[9px] uppercase tracking-wider text-paper/50 transition hover:text-paper"
+            type="button"
+            onClick={onStop}
+            disabled={!canStop || stopping}
+            className="rounded-md border border-paper/25 bg-paper/10 px-2.5 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-paper transition hover:border-rose-300/70 hover:bg-rose-400/15 hover:text-rose-100 disabled:cursor-not-allowed disabled:opacity-45"
           >
-            {dict.common.cancel}
+            {stopping ? dict.agentChat.stopping : dict.agentChat.stopTask}
           </button>
         </div>
 

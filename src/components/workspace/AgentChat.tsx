@@ -48,6 +48,8 @@ export function AgentChat({
   const [items, setItems] = useState<ChatItem[]>([]);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [stopping, setStopping] = useState(false);
+  const [taskId, setTaskId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activity, setActivity] = useState(initialActivity);
   const [otherOpen, setOtherOpen] = useState<Record<string, boolean>>({});
@@ -55,6 +57,9 @@ export function AgentChat({
   const scrollRef = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<AbortController | null>(null);
   const taskIdRef = useRef<string | null>(null);
+  // Mirrors `stopping` for synchronous reads inside the stream loop/catch, which
+  // run outside React's render cycle and can't see the latest state value.
+  const stoppingRef = useRef(false);
 
   // Propagate busy state to the editor so it can suppress autosave while the
   // agent is processing (avoids a workspace version conflict on commit).
@@ -163,6 +168,9 @@ export function AgentChat({
     const controller = new AbortController();
     controllerRef.current = controller;
     taskIdRef.current = null;
+    setTaskId(null);
+    stoppingRef.current = false;
+    setStopping(false);
     let receivedResult = false;
 
     try {
@@ -193,6 +201,7 @@ export function AgentChat({
 
           if (event.type === "task") {
             taskIdRef.current = event.taskId;
+            setTaskId(event.taskId);
           } else if (
             event.type === "phase" ||
             event.type === "discovery" ||
@@ -216,6 +225,9 @@ export function AgentChat({
       if (!receivedResult)
         throw new Error(dict.agentChat.errorEndedUnexpectedly);
     } catch (cause) {
+      // An acknowledged Stop owns the terminal transition (it aborts this very
+      // stream on purpose); don't treat that as a failure or try to recover.
+      if (stoppingRef.current) return;
       if (!controller.signal.aborted) {
         const recovered =
           taskIdRef.current && !receivedResult
@@ -239,22 +251,71 @@ export function AgentChat({
       }
     } finally {
       controllerRef.current = null;
-      setBusy(false);
+      // Leave busy on while Stop is finishing its acknowledged transition; it
+      // clears busy itself once the server confirms cancellation.
+      if (!stoppingRef.current) setBusy(false);
     }
   };
 
-  const cancel = () => {
-    // Cancel server-side too, so a task already past the stream still won't be
-    // applied; then abort the local stream.
+  // Stop is a durable, acknowledged handshake — not a cosmetic local abort. We
+  // ask the server to cancel, wait for confirmation, and only then close the
+  // local stream and report "Task stopped." If the endpoint fails we never
+  // falsely claim success; if the task had already finished we recover its
+  // result instead of pretending it stopped.
+  const stopTask = async () => {
     const id = taskIdRef.current;
-    if (id) {
-      void fetch(`/api/agent/task/${id}/cancel`, { method: "POST" }).catch(
-        () => {},
+    if (!id || stoppingRef.current) return;
+    stoppingRef.current = true;
+    setStopping(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`/api/agent/task/${id}/cancel`, {
+        method: "POST",
+      });
+      const body = response.ok ? await response.json().catch(() => null) : null;
+      if (!response.ok) throw new Error(dict.agentChat.stopFailed);
+
+      if (body?.status === "already_finished") {
+        stoppingRef.current = false;
+        setStopping(false);
+        if (!controllerRef.current) {
+          const recovered = await recoverTask(id);
+          setBusy(false);
+          if (!recovered) setError(dict.agentChat.stopFailed);
+        }
+        return;
+      }
+      if (body?.status !== "cancelled") {
+        throw new Error(dict.agentChat.stopFailed);
+      }
+
+      controllerRef.current?.abort();
+      controllerRef.current = null;
+      taskIdRef.current = null;
+      setTaskId(null);
+      setItems((previous) => [
+        ...previous,
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: dict.agentChat.taskStopped,
+        },
+      ]);
+      setBusy(false);
+      stoppingRef.current = false;
+      setStopping(false);
+    } catch (cause) {
+      stoppingRef.current = false;
+      setStopping(false);
+      setError(
+        cause instanceof Error ? cause.message : dict.agentChat.stopFailed,
       );
+      if (!controllerRef.current) {
+        await recoverTask(id);
+        setBusy(false);
+      }
     }
-    controllerRef.current?.abort();
-    controllerRef.current = null;
-    setBusy(false);
   };
 
   return (
@@ -447,7 +508,14 @@ export function AgentChat({
           ),
         )}
 
-        {busy && <AgentProgressCard activity={activity} onCancel={cancel} />}
+        {busy && (
+          <AgentProgressCard
+            activity={activity}
+            onStop={stopTask}
+            stopping={stopping}
+            canStop={Boolean(taskId)}
+          />
+        )}
       </div>
 
       <div className="border-t border-line p-3">
