@@ -14,6 +14,7 @@ export class DaytonaSandboxRunner implements SandboxRunner {
   private client = new Daytona({ apiKey: process.env.DAYTONA_API_KEY });
 
   async run(spec: SandboxRunSpec, signal?: AbortSignal): Promise<SandboxRunResult> {
+    if (signal?.aborted) throw new Error("aborted");
     // ephemeral + auto-stop is the crash backstop: a leaked container still dies.
     const sandbox = await this.client.create({
       snapshot: process.env.STUDYOS_SANDBOX_SNAPSHOT, // prebuilt image w/ toolchains
@@ -27,6 +28,7 @@ export class DaytonaSandboxRunner implements SandboxRunner {
     try {
       await sandbox.process.executeCommand("mkdir -p /work/out");
       for (const file of spec.inputs) {
+        if (signal?.aborted) throw new Error("aborted");
         await sandbox.fs.uploadFile(Buffer.from(file.content), `/work/${file.path}`);
       }
       for (const cmd of [...spec.setup, ...spec.run]) {
