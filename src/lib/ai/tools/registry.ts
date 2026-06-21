@@ -22,6 +22,8 @@ export interface ToolContext {
    * (or a slow tool) is interrupted even if the handler ignores the signal.
    */
   signal?: AbortSignal;
+  /** Owner (Clerk userId) of the task — assets produced by a tool are scoped to it. */
+  ownerId?: string;
 }
 
 /** A sanitized, user-facing milestone derived from a completed tool call. */
