@@ -14,6 +14,8 @@ const eslintConfig = defineConfig([
     "build/**",
     "src/generated/**",
     "next-env.d.ts",
+    // Bundled sandbox-iframe runtime (esbuild output, not source).
+    "public/embed/**",
   ]),
 ]);
 

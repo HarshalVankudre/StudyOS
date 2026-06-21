@@ -19,7 +19,8 @@ describe("react_artifact block", () => {
   });
 
   it("requires source and rejects oversized source", () => {
-    const { source: _s, ...noSource } = valid;
+    const noSource: Record<string, unknown> = { ...valid };
+    delete noSource.source;
     expect(blockSchema.safeParse(noSource).success).toBe(false);
     expect(
       blockSchema.safeParse({ ...valid, source: "x".repeat(MAX_COMPONENT_SOURCE + 1) }).success,
