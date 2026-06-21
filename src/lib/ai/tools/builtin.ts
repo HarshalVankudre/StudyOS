@@ -83,9 +83,10 @@ export function registerBuiltinTools(registry: ToolRegistry = toolRegistry): voi
     }),
     limits: { timeoutMs: 12_000 },
     networkPermission: "allowlisted",
-    handler: async (input) => {
+    handler: async (input, ctx) => {
       const result = await controlledFetch(input.url, {
         allowlist: fetchAllowlist(),
+        signal: ctx.signal,
         audit: (record) =>
           console.log("[StudyOS] controlled_fetch", record),
       });

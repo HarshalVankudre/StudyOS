@@ -105,4 +105,34 @@ describe("controlled fetch SSRF defenses", () => {
     ).rejects.toBeInstanceOf(FetchDeniedError);
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("forwards caller cancellation to fetch", async () => {
+    mocks.lookup.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
+    const controller = new AbortController();
+    // Mirror the real fetch contract: reject immediately if the passed signal is
+    // already aborted, otherwise reject when it aborts. (The DNS check is awaited
+    // before fetch, so caller cancellation can land before fetch is even called.)
+    const fetchMock = vi.fn(
+      async (_url: URL, init?: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          const signal = init?.signal;
+          if (signal?.aborted) {
+            reject(signal.reason);
+            return;
+          }
+          signal?.addEventListener("abort", () => reject(signal.reason), {
+            once: true,
+          });
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const pending = controlledFetch("https://example.com", {
+      allowlist: ["example.com"],
+      signal: controller.signal,
+    });
+    controller.abort(new Error("cancelled"));
+
+    await expect(pending).rejects.toThrow("cancelled");
+  });
 });

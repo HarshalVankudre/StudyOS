@@ -33,6 +33,8 @@ export interface ControlledFetchOptions {
   timeoutMs?: number;
   maxRedirects?: number;
   method?: "GET" | "HEAD";
+  /** Caller cancellation (e.g. a cancelled agent task); combined with the timeout. */
+  signal?: AbortSignal;
   audit?: (record: { host: string; status: number; bytes: number }) => void;
 }
 
@@ -161,8 +163,16 @@ export async function controlledFetch(
     audit,
   } = options;
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  // The fetch is bounded by a timeout AND the caller's cancellation: a cancelled
+  // task must abort an in-flight web read, not just wait out the time cap.
+  const timeout = new AbortController();
+  const timer = setTimeout(
+    () => timeout.abort(new Error("controlled fetch timed out")),
+    timeoutMs,
+  );
+  const signal = options.signal
+    ? AbortSignal.any([options.signal, timeout.signal])
+    : timeout.signal;
   try {
     let current = rawUrl;
     for (let hop = 0; hop <= maxRedirects; hop += 1) {
@@ -172,7 +182,7 @@ export async function controlledFetch(
       const response = await fetch(url, {
         method,
         redirect: "manual",
-        signal: controller.signal,
+        signal,
         headers: { accept: "text/html,text/plain,application/json" },
       });
 

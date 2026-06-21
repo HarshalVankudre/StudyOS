@@ -16,6 +16,12 @@ export interface ToolContext {
   taskId: string;
   /** Sanitized, owner-scoped workspace snapshot (JSON) the task started from. */
   workspaceJson?: string;
+  /**
+   * Task cancellation signal. The registry combines it with the per-tool
+   * timeout and passes the combined signal to the handler, so a cancelled task
+   * (or a slow tool) is interrupted even if the handler ignores the signal.
+   */
+  signal?: AbortSignal;
 }
 
 /** A sanitized, user-facing milestone derived from a completed tool call. */
@@ -45,6 +51,7 @@ export interface ToolDefinition<
 export class UnknownToolError extends Error {}
 export class ToolDisabledError extends Error {}
 export class ToolValidationError extends Error {}
+export class ToolTimeoutError extends Error {}
 
 function isZodSchema(value: unknown): value is z.ZodTypeAny {
   return typeof (value as { safeParse?: unknown })?.safeParse === "function";
@@ -94,12 +101,46 @@ export function createToolRegistry(): ToolRegistry {
       if (!input.success) {
         throw new ToolValidationError(`invalid input for "${id}"`);
       }
-      const result = await def.handler(input.data, ctx);
-      const output = def.output.safeParse(result);
-      if (!output.success) {
-        throw new ToolValidationError(`invalid output from "${id}"`);
+
+      // Enforce the tool's timeout AND task cancellation through one combined
+      // signal. We race the handler against an abort promise so a handler that
+      // ignores its signal still cannot keep this call (or the registry promise)
+      // pending past the deadline or a user Stop. The original abort reason is
+      // preserved so cancellation stays a cancellation — never a validation error.
+      const timeout = new AbortController();
+      const timer = setTimeout(
+        () => timeout.abort(new ToolTimeoutError(`tool "${id}" timed out`)),
+        def.limits.timeoutMs,
+      );
+      const signal = ctx.signal
+        ? AbortSignal.any([ctx.signal, timeout.signal])
+        : timeout.signal;
+      let abortListener: (() => void) | undefined;
+      const aborted = new Promise<never>((_resolve, reject) => {
+        abortListener = () =>
+          reject(
+            signal.reason instanceof Error
+              ? signal.reason
+              : new Error(`tool "${id}" aborted`),
+          );
+        if (signal.aborted) abortListener();
+        else signal.addEventListener("abort", abortListener, { once: true });
+      });
+
+      try {
+        const result = await Promise.race([
+          Promise.resolve(def.handler(input.data, { ...ctx, signal })),
+          aborted,
+        ]);
+        const output = def.output.safeParse(result);
+        if (!output.success) {
+          throw new ToolValidationError(`invalid output from "${id}"`);
+        }
+        return output.data;
+      } finally {
+        clearTimeout(timer);
+        if (abortListener) signal.removeEventListener("abort", abortListener);
       }
-      return output.data;
     },
   };
 }

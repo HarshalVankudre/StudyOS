@@ -65,4 +65,28 @@ describe("tool registry", () => {
     );
     expect(handler).not.toHaveBeenCalled();
   });
+
+  it("passes a task signal to the handler and rejects promptly on cancellation", async () => {
+    const reg = createToolRegistry();
+    const controller = new AbortController();
+    let receivedSignal: AbortSignal | undefined;
+    reg.register(
+      echoTool({
+        handler: async (_input, handlerCtx) => {
+          receivedSignal = handlerCtx.signal;
+          await new Promise(() => undefined);
+          return { value: "never" };
+        },
+      }),
+    );
+
+    const pending = reg.run("echo", { value: "hi" }, {
+      taskId: "t1",
+      signal: controller.signal,
+    });
+    controller.abort(new Error("cancelled"));
+
+    await expect(pending).rejects.toThrow("cancelled");
+    expect(receivedSignal?.aborted).toBe(true);
+  });
 });
