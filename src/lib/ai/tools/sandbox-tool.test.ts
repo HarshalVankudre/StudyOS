@@ -9,7 +9,7 @@ function deps(result = {
   logTail: "ok",
   artifacts: [{ path: "out/page-1.png", bytes: new Uint8Array([1, 2]) }],
 }) {
-  const created: { ownerId: string; mime: string; filename: string; sourceRunId: string }[] = [];
+  const created: { ownerId: string; mime: string; filename: string; sourceRunId: string | undefined }[] = [];
   const createAsset: CreateAssetFn = async (input) => {
     created.push({ ownerId: input.ownerId, mime: input.mime, filename: input.filename, sourceRunId: input.sourceRunId });
     return { assetId: `asset_${created.length}`, mime: input.mime, filename: input.filename };
