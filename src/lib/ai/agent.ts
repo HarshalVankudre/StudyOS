@@ -18,11 +18,22 @@ import {
 import { extractJson, WORKSPACE_SHAPE, languageDirective } from "./generate";
 import { applyAgentOps, agentOpsSchema, type AgentOp } from "./agent-ops";
 import { assertResultWithinLimits } from "./limits";
-import { chatCompletion, type ChatMessage } from "./openrouter";
+import { streamChatCompletion, type ChatMessage } from "./openrouter";
 import { DEFAULT_LOCALE, type Locale } from "@/lib/i18n/config";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 
 const MAX_HISTORY = 8;
+
+/**
+ * Shared options for the legacy model calls. `signal` lets a cancelled task
+ * abort an in-flight OpenRouter request; `onReasoning` forwards streamed
+ * "thinking" deltas so the legacy path shows live reasoning like the authentic
+ * loop does. Both are optional — every existing caller keeps working unchanged.
+ */
+export interface AgentModelCallOptions {
+  signal?: AbortSignal;
+  onReasoning?: (text: string) => void;
+}
 
 const decisionSchema = z.discriminatedUnion("action", [
   z.object({
@@ -66,6 +77,7 @@ export async function planAgentTurn(
   message: string,
   model: string,
   locale: Locale = DEFAULT_LOCALE,
+  options: AgentModelCallOptions = {},
 ): Promise<AgentDecision> {
   requireAgentKey();
 
@@ -89,7 +101,10 @@ export async function planAgentTurn(
     },
   ];
 
-  const raw = await chatCompletion(model, messages, 1400);
+  const raw = await streamChatCompletion(model, messages, 1400, {
+    signal: options.signal,
+    onReasoning: options.onReasoning,
+  });
   const parsed = decisionSchema.safeParse(extractJson(raw));
   if (!parsed.success) {
     throw new Error(`Agent planning returned invalid JSON: ${parsed.error.message}`);
@@ -117,6 +132,7 @@ export async function executeAgentEdit(
   decision: Extract<AgentDecision, { action: "edit" }>,
   model: string,
   locale: Locale = DEFAULT_LOCALE,
+  options: AgentModelCallOptions = {},
 ): Promise<AgentResponse> {
   requireAgentKey();
 
@@ -148,7 +164,10 @@ export async function executeAgentEdit(
 
   // Operations are small, so this call stays cheap and fast no matter how large
   // the workspace is — the model never re-emits unchanged data.
-  const raw = await chatCompletion(model, messages, 8000);
+  const raw = await streamChatCompletion(model, messages, 8000, {
+    signal: options.signal,
+    onReasoning: options.onReasoning,
+  });
   const { reply, ops } = parseEditReply(
     raw,
     getDictionary(locale).ai.agent.fallbackReply,
