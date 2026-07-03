@@ -683,6 +683,12 @@ export const nl = {
       "Je AI-credits zijn op. Voeg er meer toe via de Prijzen-pagina om te blijven genereren.",
     outAgent:
       "Je AI-credits zijn op. Voeg er meer toe via de Prijzen-pagina om de agent te blijven gebruiken.",
+    // Transparency: always-visible meter, per-action cost, low-balance nudge.
+    low: "Laag",
+    runningLow: "Je credits raken op.",
+    turnCostTitle: "Credits deze beurt",
+    buysApprox: "≈ {gens} werkruimte-generaties of {edits} agentbewerkingen",
+    buyMore: "Meer kopen",
   },
 
   // ---- Account menu -----------------------------------------------------

@@ -683,6 +683,12 @@ export const zh = {
       "你的 AI 积分已用完。请在定价页面添加更多积分以继续生成。",
     outAgent:
       "你的 AI 积分已用完。请在定价页面添加更多积分以继续使用智能体。",
+    // Transparency: always-visible meter, per-action cost, low-balance nudge.
+    low: "偏低",
+    runningLow: "你的积分快用完了。",
+    turnCostTitle: "本回合积分",
+    buysApprox: "≈ {gens} 次工作区生成或 {edits} 次智能体编辑",
+    buyMore: "购买更多",
   },
 
   // ---- Account menu -----------------------------------------------------

@@ -8,6 +8,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { useI18n } from "@/lib/i18n/client";
 import type { Workspace } from "@/lib/workspace/types";
 import { AccountMenu } from "@/components/account/AccountMenu";
+import { CreditMeter } from "@/components/account/CreditMeter";
 import { AgentChat } from "./AgentChat";
 import { PageView } from "./PageView";
 import { StudyLauncher } from "./StudyLauncher";
@@ -16,9 +17,11 @@ import { WorkspaceProvider, type SaveStatus } from "./WorkspaceContext";
 export function WorkspaceEditor({
   id,
   initialWorkspace,
+  initialCredits = 0,
 }: {
   id: string;
   initialWorkspace: Workspace;
+  initialCredits?: number;
 }) {
   const { dict } = useI18n();
   const [workspace, setWorkspace] = useState(initialWorkspace);
@@ -225,6 +228,7 @@ export function WorkspaceEditor({
             </div>
             <div className="flex items-center gap-3">
               <StudyLauncher />
+              <CreditMeter initial={initialCredits} />
               <ThemeToggle />
               <LanguageSwitcher compact />
               <button

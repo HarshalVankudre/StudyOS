@@ -14,6 +14,7 @@ import {
   createInitialAgentActivity,
   reduceAgentActivity,
 } from "@/lib/ai/progress";
+import { emitCreditsBalance } from "@/lib/credits-bus";
 import type { Workspace } from "@/lib/workspace/types";
 import { AgentProgressCard } from "./AgentProgressCard";
 import { AgentUndoButton } from "./AgentUndoButton";
@@ -28,6 +29,7 @@ interface ChatItem {
   affectedAreas?: AgentArea[];
   changeId?: string;
   undone?: boolean;
+  creditsCost?: number;
 }
 
 export function AgentChat({
@@ -41,7 +43,7 @@ export function AgentChat({
   onClose: () => void;
   onBusyChange?: (busy: boolean) => void;
 }) {
-  const { dict } = useI18n();
+  const { dict, t } = useI18n();
   const initialActivity = createInitialAgentActivity(
     dict.agentChat.initialMessage,
   );
@@ -80,9 +82,14 @@ export function AgentChat({
         changeId: response.changeId,
         choices: response.choices,
         affectedAreas: response.affectedAreas,
+        creditsCost: response.creditsCost,
       },
     ]);
     if (response.changed && response.workspace) onApplied(response.workspace);
+    // Broadcast the new balance so the header meter updates live.
+    if (typeof response.creditsBalance === "number") {
+      emitCreditsBalance(response.creditsBalance);
+    }
   };
 
   // After a dropped stream, the task may have finished server-side. Poll the
@@ -383,6 +390,15 @@ export function AgentChat({
               <div className="max-w-[94%] rounded-2xl rounded-bl-sm border border-line bg-card px-3.5 py-2 text-sm text-ink">
                 <MessageResponse>{item.content}</MessageResponse>
               </div>
+
+              {typeof item.creditsCost === "number" && item.creditsCost > 0 && (
+                <span
+                  className="ml-1 font-mono text-[10px] text-ink-soft/70"
+                  title={dict.credits.turnCostTitle}
+                >
+                  {t(dict.credits.amount, { count: item.creditsCost })}
+                </span>
+              )}
 
               {item.choices && item.choices.length > 0 && (
                 <div className="grid w-[94%] gap-1.5 pt-1">

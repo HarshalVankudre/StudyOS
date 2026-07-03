@@ -698,6 +698,12 @@ export const en = {
       "You’re out of AI credits. Add more from the Pricing page to keep generating.",
     outAgent:
       "You’re out of AI credits. Add more from the Pricing page to keep using the agent.",
+    // Transparency: always-visible meter, per-action cost, low-balance nudge.
+    low: "Low",
+    runningLow: "You’re running low on credits.",
+    turnCostTitle: "Credits this turn",
+    buysApprox: "≈ {gens} workspace builds or {edits} agent edits",
+    buyMore: "Buy more",
   },
 
   // ---- Account menu -----------------------------------------------------

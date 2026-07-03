@@ -682,6 +682,12 @@ export const fr = {
       "Vous n’avez plus de crédits IA. Ajoutez-en depuis la page Tarifs pour continuer à générer.",
     outAgent:
       "Vous n’avez plus de crédits IA. Ajoutez-en depuis la page Tarifs pour continuer à utiliser l’agent.",
+    // Transparency: always-visible meter, per-action cost, low-balance nudge.
+    low: "Faible",
+    runningLow: "Vos crédits s’épuisent.",
+    turnCostTitle: "Crédits pour ce tour",
+    buysApprox: "≈ {gens} générations d’espaces de travail ou {edits} modifications de l’agent",
+    buyMore: "En acheter plus",
   },
 
   // ---- Account menu -----------------------------------------------------

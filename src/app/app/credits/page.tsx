@@ -7,6 +7,7 @@ import {
   CREDIT_PACK_SIZE,
   getCreditBalance,
 } from "@/lib/credits";
+import { estimatedEdits, estimatedGenerations } from "@/lib/credits-info";
 import { getI18n } from "@/lib/i18n/server";
 import { buyCreditsAction } from "../billing-actions";
 
@@ -72,6 +73,12 @@ export default async function BuyCreditsPage() {
           <div className="mt-4 font-display text-3xl font-bold">
             ${CREDIT_PACK_PRICE_USD}
           </div>
+          <p className="mt-2 text-xs text-ink-soft">
+            {t(dict.credits.buysApprox, {
+              gens: estimatedGenerations(CREDIT_PACK_SIZE),
+              edits: estimatedEdits(CREDIT_PACK_SIZE),
+            })}
+          </p>
           <form action={buyCreditsAction} className="mt-6">
             <button
               type="submit"

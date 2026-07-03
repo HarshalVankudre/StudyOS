@@ -12,7 +12,12 @@ import { formatPreferences } from "@/lib/ai/onboarding";
 import { modelForPlan } from "@/lib/ai/plans";
 import { addUsage, withUsageMeter } from "@/lib/ai/usage-meter";
 import { getUserPlan } from "@/lib/billing";
-import { chargeCredits, hasCredits, usageToCredits } from "@/lib/credits";
+import {
+  chargeCredits,
+  getCreditBalance,
+  hasCredits,
+  usageToCredits,
+} from "@/lib/credits";
 import { checkUsageLimit, recordFunnelEvent } from "@/lib/usage-limits";
 import { getLocale } from "@/lib/i18n/server";
 import { getDictionary, type Dictionary } from "@/lib/i18n/dictionaries";
@@ -170,7 +175,7 @@ export async function POST(request: Request) {
         ticker = null;
 
         // Spend credits for the GLM 5.2 tokens this generation actually used.
-        await chargeCredits(
+        const creditsCost = await chargeCredits(
           userId,
           usageToCredits(addUsage(planned.usage, generated.usage)),
           "generate",
@@ -201,7 +206,12 @@ export async function POST(request: Request) {
         });
         const workspaceId = await saveNewWorkspace(workspace);
         recordFunnelEvent(userId, "generate_complete");
-        send({ type: "complete", workspaceId });
+        send({
+          type: "complete",
+          workspaceId,
+          credits: creditsCost,
+          balance: await getCreditBalance(userId),
+        });
         finish();
       } catch (error) {
         console.error("[StudyOS] streamed generation failed:", error);

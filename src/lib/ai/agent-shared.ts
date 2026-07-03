@@ -40,6 +40,10 @@ export interface AgentResponse {
   affectedAreas?: AgentArea[];
   /** Server-generated id for the agent change that may be undone. */
   changeId?: string;
+  /** Credits this turn cost (0 when nothing ran, e.g. the local mock). */
+  creditsCost?: number;
+  /** The user's credit balance after this turn was charged. */
+  creditsBalance?: number;
 }
 
 export type AgentPhase =

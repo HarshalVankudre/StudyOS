@@ -683,6 +683,12 @@ export const de = {
       "Deine KI-Credits sind aufgebraucht. Lade auf der Preise-Seite mehr nach, um weiter zu generieren.",
     outAgent:
       "Deine KI-Credits sind aufgebraucht. Lade auf der Preise-Seite mehr nach, um den Agenten weiter zu nutzen.",
+    // Transparency: always-visible meter, per-action cost, low-balance nudge.
+    low: "Niedrig",
+    runningLow: "Deine Credits gehen zur Neige.",
+    turnCostTitle: "Credits in dieser Runde",
+    buysApprox: "≈ {gens} Workspace-Generierungen oder {edits} Agent-Bearbeitungen",
+    buyMore: "Mehr kaufen",
   },
 
   // ---- Account menu -----------------------------------------------------

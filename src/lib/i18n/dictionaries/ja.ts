@@ -682,6 +682,12 @@ export const ja = {
       "AIクレジットが残っていません。生成を続けるには、料金ページからクレジットを追加してください。",
     outAgent:
       "AIクレジットが残っていません。エージェントを使い続けるには、料金ページからクレジットを追加してください。",
+    // Transparency: always-visible meter, per-action cost, low-balance nudge.
+    low: "残りわずか",
+    runningLow: "クレジットが残りわずかです。",
+    turnCostTitle: "今回のクレジット",
+    buysApprox: "≈ ワークスペース生成 {gens} 回、またはエージェント編集 {edits} 回",
+    buyMore: "さらに購入",
   },
 
   // ---- Account menu -----------------------------------------------------

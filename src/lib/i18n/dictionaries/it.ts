@@ -683,6 +683,12 @@ export const it = {
       "Hai esaurito i crediti IA. Aggiungine altri dalla pagina Prezzi per continuare a generare.",
     outAgent:
       "Hai esaurito i crediti IA. Aggiungine altri dalla pagina Prezzi per continuare a usare l’agente.",
+    // Transparency: always-visible meter, per-action cost, low-balance nudge.
+    low: "Basso",
+    runningLow: "Stai per esaurire i crediti.",
+    turnCostTitle: "Crediti di questo turno",
+    buysApprox: "≈ {gens} generazioni di spazi o {edits} modifiche dell’agente",
+    buyMore: "Acquista altri",
   },
 
   // ---- Account menu -----------------------------------------------------
