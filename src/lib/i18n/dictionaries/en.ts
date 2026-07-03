@@ -778,6 +778,21 @@ export const en = {
     contact: "Contact",
   },
 
+  // ---- Calendar subscription (ICS feed) ----------------------------------
+  calendar: {
+    title: "Calendar sync",
+    description:
+      "Subscribe to your deadlines in Google, Apple, or Outlook Calendar. Your assignments, exams, and dated items stay up to date automatically.",
+    urlLabel: "Your private calendar link",
+    copy: "Copy",
+    copied: "Copied ✓",
+    addToCalendar: "Add to calendar",
+    reset: "Reset link",
+    resetting: "Resetting…",
+    instructions:
+      "Paste this link into your calendar app’s “Subscribe from URL” option. Keep it private — anyone with the link can see your deadlines. Reset it anytime to revoke access.",
+  },
+
   // ---- Usage limits --------------------------------------------------------
   limits: {
     rateLimited:

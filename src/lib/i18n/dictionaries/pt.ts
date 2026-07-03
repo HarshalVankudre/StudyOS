@@ -763,6 +763,21 @@ export const pt = {
     contact: "Contato",
   },
 
+  // ---- Calendar subscription (ICS feed) ----------------------------------
+  calendar: {
+    title: "Sincronização de calendário",
+    description:
+      "Assine seus prazos no Google, Apple ou Outlook Calendar. Suas tarefas, provas e itens com data se mantêm atualizados automaticamente.",
+    urlLabel: "Seu link privado de calendário",
+    copy: "Copiar",
+    copied: "Copiado ✓",
+    addToCalendar: "Adicionar ao calendário",
+    reset: "Redefinir link",
+    resetting: "Redefinindo…",
+    instructions:
+      "Cole este link na opção “Assinar de um URL” do seu app de calendário. Mantenha-o privado — qualquer pessoa com o link pode ver seus prazos. Redefina-o quando quiser para revogar o acesso.",
+  },
+
   // ---- Usage limits --------------------------------------------------------
   limits: {
     rateLimited:

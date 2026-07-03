@@ -100,6 +100,16 @@ model UsageEvent {
   @@index([userId, kind, createdAt])
 }
 
+// A per-user unguessable capability token for the read-only ICS calendar feed.
+// The feed URL (/api/calendar/<token>) is fetched by calendar apps that can't
+// authenticate, so the token IS the credential. One active token per user;
+// resetting rotates it and revokes the old URL.
+model CalendarToken {
+  token     String   @id
+  userId    String   @unique
+  createdAt DateTime @default(now())
+}
+
 // A user's AI credit balance. Credits are spent per AI request based on the
 // GLM 5.2 tokens it actually used (see lib/credits.ts).
 model CreditAccount {

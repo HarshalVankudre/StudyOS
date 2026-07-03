@@ -762,6 +762,21 @@ export const ja = {
     contact: "お問い合わせ",
   },
 
+  // ---- Calendar subscription (ICS feed) ----------------------------------
+  calendar: {
+    title: "カレンダー同期",
+    description:
+      "Google、Apple、Outlook のカレンダーで締め切りを購読できます。課題や試験、日付のある項目が自動的に最新の状態に保たれます。",
+    urlLabel: "あなた専用のカレンダーリンク",
+    copy: "コピー",
+    copied: "コピーしました ✓",
+    addToCalendar: "カレンダーに追加",
+    reset: "リンクをリセット",
+    resetting: "リセットしています…",
+    instructions:
+      "このリンクをカレンダーアプリの「URL から購読」オプションに貼り付けてください。リンクを知っている人は誰でもあなたの締め切りを見られるため、非公開にしてください。アクセスを取り消すには、いつでもリセットできます。",
+  },
+
   // ---- Usage limits --------------------------------------------------------
   limits: {
     rateLimited:

@@ -762,6 +762,21 @@ export const fr = {
     contact: "Contact",
   },
 
+  // ---- Calendar subscription (ICS feed) ----------------------------------
+  calendar: {
+    title: "Synchronisation du calendrier",
+    description:
+      "Abonnez-vous à vos échéances dans Google, Apple ou Outlook Calendar. Vos devoirs, examens et éléments datés restent à jour automatiquement.",
+    urlLabel: "Votre lien de calendrier privé",
+    copy: "Copier",
+    copied: "Copié ✓",
+    addToCalendar: "Ajouter au calendrier",
+    reset: "Réinitialiser le lien",
+    resetting: "Réinitialisation…",
+    instructions:
+      "Collez ce lien dans l’option « S’abonner à partir d’une URL » de votre application de calendrier. Gardez-le privé — toute personne disposant du lien peut voir vos échéances. Réinitialisez-le à tout moment pour révoquer l’accès.",
+  },
+
   // ---- Usage limits --------------------------------------------------------
   limits: {
     rateLimited:
