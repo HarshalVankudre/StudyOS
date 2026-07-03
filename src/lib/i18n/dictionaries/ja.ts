@@ -324,6 +324,16 @@ export const ja = {
       examplesLabel: "迷ったら、例から始めましょう",
       finePrint: "無料 · クレジットカード不要 · 数秒で完成",
     },
+    syllabus: {
+      toggle: "📄 シラバスを追加",
+      optional: "任意",
+      hint: "シラバスや履修科目リストを貼り付けるか、.txt ファイルをアップロードすると、StudyOS があなたの実際の科目・締め切り・トピックをもとに作成します。",
+      placeholder:
+        "ここにシラバス、履修科目リスト、学期の時間割を貼り付けてください…",
+      upload: ".txt をアップロード",
+      attached: "{chars} 文字を追加しました",
+      clear: "クリア",
+    },
     questions: {
       back: "← 説明を編集",
       step: "ステップ 2 / 2",

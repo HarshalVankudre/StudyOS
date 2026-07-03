@@ -324,6 +324,16 @@ export const fr = {
       examplesLabel: "Vous hésitez ? Partez d’un exemple",
       finePrint: "Gratuit · sans carte bancaire · prêt en quelques secondes",
     },
+    syllabus: {
+      toggle: "📄 Ajouter votre programme",
+      optional: "facultatif",
+      hint: "Collez votre programme ou votre liste de cours — ou importez un fichier .txt — et StudyOS part de vos cours, échéances et sujets réels.",
+      placeholder:
+        "Collez ici votre programme, votre liste de cours ou votre emploi du temps du semestre…",
+      upload: "Importer .txt",
+      attached: "{chars} caractères ajoutés",
+      clear: "Effacer",
+    },
     questions: {
       back: "← Modifier la description",
       step: "Étape 2 sur 2",

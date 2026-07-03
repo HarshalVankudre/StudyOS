@@ -325,6 +325,16 @@ export const nl = {
       examplesLabel: "Niet zeker? Begin met een voorbeeld",
       finePrint: "Gratis · geen creditcard · klaar in seconden",
     },
+    syllabus: {
+      toggle: "📄 Voeg je studiewijzer toe",
+      optional: "optioneel",
+      hint: "Plak je studiewijzer of vakkenlijst — of upload een .txt-bestand — en StudyOS bouwt op je echte vakken, deadlines en onderwerpen.",
+      placeholder:
+        "Plak hier je studiewijzer, vakkenlijst of semesterrooster…",
+      upload: ".txt uploaden",
+      attached: "{chars} tekens toegevoegd",
+      clear: "Wissen",
+    },
     questions: {
       back: "← Beschrijving bewerken",
       step: "Stap 2 van 2",
