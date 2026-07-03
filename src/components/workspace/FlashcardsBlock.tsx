@@ -163,7 +163,11 @@ export function FlashcardsBlock({
         </div>
       )}
 
-      {studying && items.length > 0 && (
+      {/* No live-length guard: `items` empties as cards are graded, and gating
+          the render on it would unmount the session before its completion
+          screen. StudySession snapshots its own queue; opening is already
+          gated on stats.due > 0. */}
+      {studying && (
         <StudySession
           items={items}
           title={block.title || S.untitledDeck}

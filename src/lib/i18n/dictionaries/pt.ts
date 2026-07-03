@@ -752,6 +752,8 @@ export const pt = {
       "Excluir sua conta permanentemente?\n\nTodos os espaços de trabalho, créditos e sua assinatura serão removidos. Isso não pode ser desfeito.",
     deleteAccountButton: "Excluir minha conta",
     deleting: "Excluindo…",
+    deleteAccountError:
+      "Não conseguimos cancelar sua assinatura agora, então nada foi excluído. Tente novamente em instantes.",
   },
 
   // ---- Workspace card (delete control) ----------------------------------

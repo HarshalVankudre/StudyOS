@@ -82,7 +82,9 @@ export function createSandboxTool(deps: {
         timeoutSec: input.timeoutSec,
       };
       const result = await deps.runner.run(spec, ctx.signal);
-      // Charge once the run consumed compute, success or not.
+      // Charge once the run completed. (A run that throws — timeout/infra
+      // error — is not charged: we don't bill users for failed renders. The
+      // daily quota was already consumed by the pre-run check.)
       await deps.quota?.settle(ctx.ownerId).catch(() => {});
 
       const artifacts: { assetId: string; mime: string; filename: string }[] = [];

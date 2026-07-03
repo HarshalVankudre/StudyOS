@@ -22,6 +22,19 @@ export interface CalendarEvent {
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}/;
 
+/** True only for a real calendar date — rejects e.g. 2026-99-99 or 2026-13-40. */
+function isRealDay(day: string): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
+  if (!m) return false;
+  const [, y, mo, d] = m;
+  const dt = new Date(Number(y), Number(mo) - 1, Number(d));
+  return (
+    dt.getFullYear() === Number(y) &&
+    dt.getMonth() === Number(mo) - 1 &&
+    dt.getDate() === Number(d)
+  );
+}
+
 /** Render a select/status/text cell to a human label (option id → label). */
 function cellLabel(db: Database, propId: string, row: DatabaseRow): string | undefined {
   const prop = getProperty(db, propId);
@@ -63,6 +76,7 @@ export function workspaceEvents(workspace: Workspace): CalendarEvent[] {
         const raw = row.cells[dateProp.id];
         if (typeof raw !== "string" || !DATE_RE.test(raw)) continue;
         const date = raw.slice(0, 10);
+        if (!isRealDay(date)) continue; // skip malformed dates, not the feed
         const summary = category ? `${titleText} · ${category}` : titleText;
         const parts = [db.name, dateProp.name].filter(Boolean);
         events.push({

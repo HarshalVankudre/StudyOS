@@ -752,6 +752,8 @@ export const de = {
       "Dein Konto dauerhaft löschen?\n\nAlle Workspaces, Credits und dein Abo werden entfernt. Das kann nicht rückgängig gemacht werden.",
     deleteAccountButton: "Mein Konto löschen",
     deleting: "Wird gelöscht…",
+    deleteAccountError:
+      "Wir konnten dein Abo gerade nicht kündigen, deshalb wurde nichts gelöscht. Bitte versuch es in einem Moment erneut.",
   },
 
   // ---- Workspace card (delete control) ----------------------------------

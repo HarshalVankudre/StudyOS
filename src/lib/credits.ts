@@ -88,15 +88,19 @@ async function maybeMonthlyRefresh(
   balance: number,
 ): Promise<number> {
   if (balance >= FREE_MONTHLY_CREDITS) return 0;
+  const monthKey = new Date().toISOString().slice(0, 7); // YYYY-MM
+  const idempotencyKey = `free_monthly:${userId}:${monthKey}`;
+  // Hot path: getCreditBalance runs on every credit gate, agent charge, and
+  // meter render. Once this month's refresh exists, skip the doomed grant
+  // (which would otherwise open a transaction that always fails P2002).
+  const already = await prisma.creditLedger.findUnique({
+    where: { idempotencyKey },
+    select: { id: true },
+  });
+  if (already) return 0;
   const sub = await prisma.subscription.findUnique({ where: { userId } });
   if (sub?.status === "active") return 0;
-  const monthKey = new Date().toISOString().slice(0, 7); // YYYY-MM
-  await grantCredits(
-    userId,
-    FREE_MONTHLY_CREDITS,
-    "free_monthly",
-    `free_monthly:${userId}:${monthKey}`,
-  );
+  await grantCredits(userId, FREE_MONTHLY_CREDITS, "free_monthly", idempotencyKey);
   const account = await prisma.creditAccount.findUnique({ where: { userId } });
   return account ? account.balance - balance : 0;
 }

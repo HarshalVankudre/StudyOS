@@ -17,19 +17,31 @@ export function escapeText(value: string): string {
     .replace(/\r?\n/g, "\\n");
 }
 
-/** Fold a content line to <=75 octets with CRLF + space continuations (§3.1). */
+const utf8Bytes = (s: string): number => new TextEncoder().encode(s).length;
+
+/**
+ * Fold a content line to <=75 OCTETS with CRLF + space continuations (§3.1).
+ * Folds on UTF-8 byte length and only ever breaks between code points, so a
+ * multibyte character (accented course name, CJK, emoji) is never split into
+ * invalid bytes — which naive length-based folding would do.
+ */
 export function foldLine(line: string): string {
-  if (line.length <= 75) return line;
-  const chunks: string[] = [];
-  let rest = line;
-  chunks.push(rest.slice(0, 75));
-  rest = rest.slice(75);
-  while (rest.length > 74) {
-    chunks.push(" " + rest.slice(0, 74));
-    rest = rest.slice(74);
+  if (utf8Bytes(line) <= 75) return line;
+  const out: string[] = [];
+  let cur = "";
+  let limit = 75; // first line has no leading space
+  for (const cp of line) {
+    // Iterating a string yields whole code points, never half a surrogate pair.
+    if (utf8Bytes(cur) + utf8Bytes(cp) > limit) {
+      out.push(cur);
+      cur = cp;
+      limit = 74; // continuation lines spend 1 octet on the leading space
+    } else {
+      cur += cp;
+    }
   }
-  if (rest.length > 0) chunks.push(" " + rest);
-  return chunks.join("\r\n");
+  if (cur) out.push(cur);
+  return out.map((l, i) => (i === 0 ? l : " " + l)).join("\r\n");
 }
 
 /** UTC timestamp form YYYYMMDDTHHMMSSZ for DTSTAMP. */
@@ -57,7 +69,7 @@ export function buildIcs(
   ];
   for (const ev of events) {
     lines.push("BEGIN:VEVENT");
-    lines.push(foldLine(`UID:${ev.uid}`));
+    lines.push(foldLine(`UID:${escapeText(ev.uid)}`));
     lines.push(`DTSTAMP:${stamp}`);
     lines.push(`DTSTART;VALUE=DATE:${icsDate(ev.date)}`);
     lines.push(foldLine(`SUMMARY:${escapeText(ev.summary)}`));

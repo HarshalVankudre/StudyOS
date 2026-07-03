@@ -752,6 +752,8 @@ export const zh = {
       "永久删除你的账户？\n\n所有工作空间、积分和订阅都将被移除。此操作无法撤销。",
     deleteAccountButton: "删除我的账户",
     deleting: "正在删除…",
+    deleteAccountError:
+      "我们暂时无法取消你的订阅，因此未删除任何内容。请稍后重试。",
   },
 
   // ---- Workspace card (delete control) ----------------------------------

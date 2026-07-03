@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   accountCreate: vi.fn(),
   accountUpdate: vi.fn(),
   ledgerCreate: vi.fn(),
+  ledgerFindUnique: vi.fn(),
   subFindUnique: vi.fn(),
   transaction: vi.fn(),
 }));
@@ -16,7 +17,10 @@ vi.mock("@/lib/db", () => ({
       create: mocks.accountCreate,
       update: mocks.accountUpdate,
     },
-    creditLedger: { create: mocks.ledgerCreate },
+    creditLedger: {
+      create: mocks.ledgerCreate,
+      findUnique: mocks.ledgerFindUnique,
+    },
     subscription: { findUnique: mocks.subFindUnique },
     $transaction: mocks.transaction,
   },
@@ -32,6 +36,7 @@ beforeEach(() => {
   for (const m of Object.values(mocks)) m.mockReset();
   mocks.transaction.mockResolvedValue([]);
   mocks.subFindUnique.mockResolvedValue(null);
+  mocks.ledgerFindUnique.mockResolvedValue(null); // no prior refresh this month
 });
 
 describe("monthly free refresh", () => {
@@ -64,15 +69,14 @@ describe("monthly free refresh", () => {
     expect(mocks.transaction).not.toHaveBeenCalled();
   });
 
-  it("is idempotent within a month (duplicate key ignored)", async () => {
-    mocks.accountFindUnique
-      .mockResolvedValueOnce({ balance: 10 })
-      .mockResolvedValueOnce({ balance: 10 }); // grant was a no-op duplicate
-    mocks.transaction.mockRejectedValue(
-      Object.assign(new Error("dup"), { code: "P2002" }),
-    );
+  it("skips the grant entirely when this month's refresh already exists", async () => {
+    mocks.accountFindUnique.mockResolvedValue({ balance: 10 });
+    mocks.ledgerFindUnique.mockResolvedValue({ id: "led_1" }); // already refreshed
     const balance = await getCreditBalance("user_1");
     expect(balance).toBe(10);
+    // No doomed transaction on the hot path.
+    expect(mocks.transaction).not.toHaveBeenCalled();
+    expect(mocks.subFindUnique).not.toHaveBeenCalled();
   });
 });
 
