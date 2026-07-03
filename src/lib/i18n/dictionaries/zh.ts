@@ -763,6 +763,21 @@ export const zh = {
     contact: "联系我们",
   },
 
+  // ---- Calendar subscription (ICS feed) ----------------------------------
+  calendar: {
+    title: "日历同步",
+    description:
+      "在 Google、Apple 或 Outlook Calendar 中订阅你的截止日期。你的作业、考试和带日期的事项会自动保持最新。",
+    urlLabel: "你的私人日历链接",
+    copy: "复制",
+    copied: "已复制 ✓",
+    addToCalendar: "添加到日历",
+    reset: "重置链接",
+    resetting: "正在重置…",
+    instructions:
+      "将此链接粘贴到日历应用的“通过网址订阅”选项中。请妥善保密——任何拿到链接的人都能看到你的截止日期。你可以随时重置以撤销访问权限。",
+  },
+
   // ---- Usage limits --------------------------------------------------------
   limits: {
     rateLimited:

@@ -763,6 +763,21 @@ export const nl = {
     contact: "Contact",
   },
 
+  // ---- Calendar subscription (ICS feed) ----------------------------------
+  calendar: {
+    title: "Agenda synchroniseren",
+    description:
+      "Abonneer je op je deadlines in Google, Apple of Outlook Calendar. Je opdrachten, tentamens en gedateerde items blijven automatisch up-to-date.",
+    urlLabel: "Je privé-agendalink",
+    copy: "Kopiëren",
+    copied: "Gekopieerd ✓",
+    addToCalendar: "Aan agenda toevoegen",
+    reset: "Link resetten",
+    resetting: "Resetten…",
+    instructions:
+      "Plak deze link in de optie “Abonneren via URL” van je agenda-app. Houd hem privé — iedereen met de link kan je deadlines zien. Reset hem wanneer je wilt om de toegang in te trekken.",
+  },
+
   // ---- Usage limits --------------------------------------------------------
   limits: {
     rateLimited:

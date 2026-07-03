@@ -763,6 +763,21 @@ export const it = {
     contact: "Contatti",
   },
 
+  // ---- Calendar subscription (ICS feed) ----------------------------------
+  calendar: {
+    title: "Sincronizzazione del calendario",
+    description:
+      "Iscriviti alle tue scadenze in Google, Apple o Outlook Calendar. I tuoi compiti, esami ed elementi con data restano aggiornati automaticamente.",
+    urlLabel: "Il tuo link privato del calendario",
+    copy: "Copia",
+    copied: "Copiato ✓",
+    addToCalendar: "Aggiungi al calendario",
+    reset: "Reimposta link",
+    resetting: "Reimpostazione…",
+    instructions:
+      "Incolla questo link nell’opzione “Iscriviti tramite URL” della tua app di calendario. Tienilo privato — chiunque abbia il link può vedere le tue scadenze. Reimpostalo quando vuoi per revocare l’accesso.",
+  },
+
   // ---- Usage limits --------------------------------------------------------
   limits: {
     rateLimited:

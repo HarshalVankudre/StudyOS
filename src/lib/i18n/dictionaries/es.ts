@@ -762,6 +762,21 @@ export const es = {
     contact: "Contacto",
   },
 
+  // ---- Calendar subscription (ICS feed) ----------------------------------
+  calendar: {
+    title: "Sincronización de calendario",
+    description:
+      "Suscríbete a tus fechas de entrega en Google, Apple u Outlook Calendar. Tus tareas, exámenes y elementos con fecha se mantienen actualizados automáticamente.",
+    urlLabel: "Tu enlace privado de calendario",
+    copy: "Copiar",
+    copied: "Copiado ✓",
+    addToCalendar: "Añadir al calendario",
+    reset: "Restablecer enlace",
+    resetting: "Restableciendo…",
+    instructions:
+      "Pega este enlace en la opción “Suscribirse desde una URL” de tu aplicación de calendario. Mantenlo privado — cualquiera que tenga el enlace puede ver tus fechas de entrega. Restablécelo cuando quieras para revocar el acceso.",
+  },
+
   // ---- Usage limits --------------------------------------------------------
   limits: {
     rateLimited:

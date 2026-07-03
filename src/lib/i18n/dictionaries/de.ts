@@ -763,6 +763,21 @@ export const de = {
     contact: "Kontakt",
   },
 
+  // ---- Calendar subscription (ICS feed) ----------------------------------
+  calendar: {
+    title: "Kalendersynchronisierung",
+    description:
+      "Abonniere deine Fristen in Google, Apple oder Outlook Calendar. Deine Aufgaben, Prüfungen und Einträge mit Datum bleiben automatisch aktuell.",
+    urlLabel: "Dein privater Kalenderlink",
+    copy: "Kopieren",
+    copied: "Kopiert ✓",
+    addToCalendar: "Zum Kalender hinzufügen",
+    reset: "Link zurücksetzen",
+    resetting: "Wird zurückgesetzt…",
+    instructions:
+      "Füge diesen Link in deiner Kalender-App unter „Aus URL abonnieren“ ein. Halte ihn privat — wer den Link hat, sieht deine Fristen. Setz ihn jederzeit zurück, um den Zugriff zu widerrufen.",
+  },
+
   // ---- Usage limits --------------------------------------------------------
   limits: {
     rateLimited:
