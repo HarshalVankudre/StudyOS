@@ -11,7 +11,7 @@ export const zh = {
     generateTitle: "生成你的工作空间 · StudyOS",
     pricingTitle: "定价 · StudyOS",
     pricingDescription:
-      "对比 StudyOS 免费版与 Pro 版。免费开始，想要最强大的模型、无限次生成和优先支持时再升级。",
+      "对比 StudyOS 免费版与 Pro 版。免费开始，想要最强大的模型、更高的每月积分额度和优先支持时再升级。",
     workspaceTitle: "{name} · StudyOS",
     brandFallback: "StudyOS",
   },
@@ -168,7 +168,7 @@ export const zh = {
     badge: "简单、对学生友好的定价",
     title: "免费开始。准备好了再升级。",
     subtitle:
-      "整理学期所需的一切都是免费的。Pro 版增加最强大的模型、无限次生成和优先支持。",
+      "整理学期所需的一切都是免费的。Pro 版增加最强大的模型、更高的每月积分额度和优先支持。",
     free: {
       name: "免费",
       price: "$0",
@@ -181,7 +181,7 @@ export const zh = {
       ],
       ctaSignedOut: "免费开始使用",
       ctaSignedIn: "打开你的工作空间",
-      bulletCredits: "{count} 个入门 AI 积分",
+      bulletCredits: "每月 {count} 个免费 AI 积分",
     },
     pro: {
       badge: "最受欢迎",
@@ -191,7 +191,7 @@ export const zh = {
       billed: "按月计费 · 随时取消。",
       bullets: [
         "包含免费版的全部功能",
-        "无限次生成工作空间",
+        "满足重度使用的每月积分额度",
         "最强大、最详尽的模型",
         "优先支持与抢先体验",
       ],
@@ -199,7 +199,7 @@ export const zh = {
       manageBilling: "管理账单",
       upgrade: "升级到 Pro",
       ctaSignedOut: "开始使用 Pro",
-      bulletCredits: "包含 {count} 个 AI 积分",
+      bulletCredits: "每月 {count} 个 AI 积分",
     },
     comparison: {
       title: "方案对比",
@@ -235,9 +235,9 @@ export const zh = {
       heading: "AI 由积分驱动",
       intro:
         "每次 AI 请求都会按其工作量消耗积分 —— 一个小调整花费一点点，搭建整个工作空间则花费更多。Pro 自带充足积分，你也可以随时充值。",
-      freeIncludes: "免费版包含 {count} 个入门积分",
-      proIncludes: "Pro 版包含 {count} 个积分",
-      neverExpire: "随时充值 —— 积分永不过期",
+      freeIncludes: "免费版每月包含 {count} 个积分",
+      proIncludes: "Pro 版每月包含 {count} 个积分",
+      neverExpire: "随时充值 —— 购买的积分包永不过期",
       balance: "你的余额：{count} 个积分",
       pack: "积分包",
       unit: "积分",
@@ -253,7 +253,7 @@ export const zh = {
       },
       {
         q: "Pro 版能带给我什么？",
-        a: "无限次生成、用于打造更丰富更精准工作空间的最强大模型、优先支持，以及新功能的抢先体验。",
+        a: "充足的每月积分额度、用于打造更丰富更精准工作空间的最强大模型、优先支持，以及新功能的抢先体验。",
       },
       {
         q: "我可以随时取消吗？",
@@ -676,10 +676,18 @@ export const zh = {
     upgrade: "升级到 Pro",
     comparePlans: "对比方案",
     creditsDesc:
-      "积分为每次 AI 请求提供动力。随时充值 —— 积分永不过期。",
+      "积分为每次 AI 请求提供动力。你的方案每月刷新积分，购买的积分包永不过期。",
     buyPack: "购买 {count} 个积分 · ${price}",
     viewPricing: "查看定价",
     signOut: "退出登录",
+    dangerZone: "危险区域",
+    deleteAccount: "删除账户",
+    deleteAccountDesc:
+      "永久删除你的账户、工作空间、积分和订阅。此操作无法撤销。",
+    deleteAccountConfirm:
+      "永久删除你的账户？\n\n所有工作空间、积分和订阅都将被移除。此操作无法撤销。",
+    deleteAccountButton: "删除我的账户",
+    deleting: "正在删除…",
   },
 
   // ---- Workspace card (delete control) ----------------------------------
@@ -688,6 +696,31 @@ export const zh = {
     deleteAria: "删除 {name}",
     deleteConfirm:
       "删除“{name}”？\n\n这将永久移除该工作空间及其中的一切。此操作无法撤销。",
+  },
+
+  // ---- Error & not-found pages -------------------------------------------
+  errors: {
+    notFoundTitle: "页面未找到",
+    notFoundBody: "此页面不存在 —— 它可能已被移动或删除。",
+    errorTitle: "出了点问题",
+    errorBody:
+      "发生了意外错误。你的工作已自动保存 —— 请重试。",
+    tryAgain: "重试",
+    backHome: "返回首页",
+  },
+
+  // ---- Legal & footer -----------------------------------------------------
+  legal: {
+    terms: "服务条款",
+    privacy: "隐私政策",
+    contact: "联系我们",
+  },
+
+  // ---- Usage limits --------------------------------------------------------
+  limits: {
+    rateLimited:
+      "你暂时达到了请求上限。请稍等片刻后重试。",
+    sandboxQuota: "你已达到今天的渲染上限。明天将自动重置。",
   },
 
   // ---- Mock generator scaffolding (no-API-key fallback) ------------------

@@ -10,7 +10,7 @@ export const ja = {
     generateTitle: "ワークスペースを生成 · StudyOS",
     pricingTitle: "料金 · StudyOS",
     pricingDescription:
-      "StudyOS の無料プランと Pro プランを比較。まずは無料で始めて、最も高性能なモデル、無制限の生成、優先サポートが必要になったらアップグレードできます。",
+      "StudyOS の無料プランと Pro プランを比較。まずは無料で始めて、最も高性能なモデル、より大きな毎月のクレジット枠、優先サポートが必要になったらアップグレードできます。",
     workspaceTitle: "{name} · StudyOS",
     brandFallback: "StudyOS",
   },
@@ -167,7 +167,7 @@ export const ja = {
     badge: "シンプルで、学生にやさしい料金",
     title: "まずは無料で。準備ができたらアップグレード。",
     subtitle:
-      "学期を整理するために必要なものはすべて無料です。Pro では最も高性能なモデル、無制限の生成、優先サポートが加わります。",
+      "学期を整理するために必要なものはすべて無料です。Pro では最も高性能なモデル、より大きな毎月のクレジット枠、優先サポートが加わります。",
     free: {
       name: "無料",
       price: "$0",
@@ -180,7 +180,7 @@ export const ja = {
       ],
       ctaSignedOut: "無料で始める",
       ctaSignedIn: "ワークスペースを開く",
-      bulletCredits: "{count} クレジットのスターターAIクレジット",
+      bulletCredits: "無料のAIクレジットを毎月 {count} 付与",
     },
     pro: {
       badge: "一番人気",
@@ -190,7 +190,7 @@ export const ja = {
       billed: "月額課金 · いつでも解約可能。",
       bullets: [
         "無料プランのすべて",
-        "無制限のワークスペース生成",
+        "たっぷり使える毎月のクレジット枠",
         "最も高性能で、最も詳細なモデル",
         "優先サポートと先行アクセス",
       ],
@@ -198,7 +198,7 @@ export const ja = {
       manageBilling: "請求を管理",
       upgrade: "Pro にアップグレード",
       ctaSignedOut: "Pro で始める",
-      bulletCredits: "{count} クレジットのAIクレジット込み",
+      bulletCredits: "AIクレジットを毎月 {count} 付与",
     },
     comparison: {
       title: "プランを比較",
@@ -234,9 +234,9 @@ export const ja = {
       heading: "AIはクレジットで動きます",
       intro:
         "AIリクエストはその処理量に応じてクレジットを消費します — ちょっとした調整なら少しだけ、ワークスペースをまるごと構築するならもっと多く。Pro にはクレジットがたっぷり含まれ、いつでも追加できます。",
-      freeIncludes: "無料プランには {count} クレジットのスターターが含まれます",
-      proIncludes: "Pro には {count} クレジットが含まれます",
-      neverExpire: "いつでも追加 — クレジットは期限切れになりません",
+      freeIncludes: "無料プランには毎月 {count} クレジットが含まれます",
+      proIncludes: "Pro には毎月 {count} クレジットが含まれます",
+      neverExpire: "いつでも追加 — 購入したパックは期限切れになりません",
       balance: "残高：{count} クレジット",
       pack: "クレジットパック",
       unit: "クレジット",
@@ -252,7 +252,7 @@ export const ja = {
       },
       {
         q: "Pro では何が得られますか？",
-        a: "無制限の生成、より豊かで正確なワークスペースのための最高性能モデル、優先サポート、そして新機能への先行アクセスです。",
+        a: "毎月たっぷり付与されるクレジット、より豊かで正確なワークスペースのための最高性能モデル、優先サポート、そして新機能への先行アクセスです。",
       },
       {
         q: "いつでも解約できますか？",
@@ -675,10 +675,18 @@ export const ja = {
     upgrade: "Pro にアップグレード",
     comparePlans: "プランを比較",
     creditsDesc:
-      "クレジットがすべてのAIリクエストを動かします。いつでも追加 — クレジットは期限切れになりません。",
+      "クレジットがすべてのAIリクエストを動かします。プランのクレジットは毎月更新され、購入したパックは期限切れになりません。",
     buyPack: "{count} クレジットを購入 · ${price}",
     viewPricing: "料金を見る",
     signOut: "サインアウト",
+    dangerZone: "危険な操作",
+    deleteAccount: "アカウントを削除",
+    deleteAccountDesc:
+      "アカウント、ワークスペース、クレジット、サブスクリプションを完全に削除します。この操作は取り消せません。",
+    deleteAccountConfirm:
+      "アカウントを完全に削除しますか？\n\nすべてのワークスペース、クレジット、サブスクリプションが削除されます。この操作は取り消せません。",
+    deleteAccountButton: "アカウントを削除する",
+    deleting: "削除中…",
   },
 
   // ---- Workspace card (delete control) ----------------------------------
@@ -687,6 +695,31 @@ export const ja = {
     deleteAria: "{name} を削除",
     deleteConfirm:
       "「{name}」を削除しますか？\n\nワークスペースとその中身がすべて完全に削除されます。この操作は取り消せません。",
+  },
+
+  // ---- Error & not-found pages -------------------------------------------
+  errors: {
+    notFoundTitle: "ページが見つかりません",
+    notFoundBody: "このページは存在しません — 移動または削除された可能性があります。",
+    errorTitle: "問題が発生しました",
+    errorBody:
+      "予期しないエラーが発生しました。作業内容は自動保存されています — もう一度お試しください。",
+    tryAgain: "もう一度試す",
+    backHome: "ホームに戻る",
+  },
+
+  // ---- Legal & footer -----------------------------------------------------
+  legal: {
+    terms: "利用規約",
+    privacy: "プライバシーポリシー",
+    contact: "お問い合わせ",
+  },
+
+  // ---- Usage limits --------------------------------------------------------
+  limits: {
+    rateLimited:
+      "現在リクエストの上限に達しています。少し待ってからもう一度お試しください。",
+    sandboxQuota: "本日のレンダリング上限に達しました。明日リセットされます。",
   },
 
   // ---- Mock generator scaffolding (no-API-key fallback) ------------------

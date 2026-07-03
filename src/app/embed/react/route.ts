@@ -8,7 +8,9 @@ export async function GET() {
     "default-src 'none'",
     `script-src 'nonce-${nonce}' 'unsafe-eval'`,
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: https:",
+    // No remote hosts: an arbitrary-https img-src would be an exfiltration
+    // channel for a hostile component (data in the URL of a tracking pixel).
+    "img-src 'self' data: blob:",
     "font-src 'self' data:",
     "base-uri 'none'",
     "form-action 'none'",

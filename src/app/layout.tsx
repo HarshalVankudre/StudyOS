@@ -4,6 +4,7 @@ import { Hanken_Grotesk, JetBrains_Mono, Newsreader } from "next/font/google";
 import "katex/dist/katex.min.css";
 import "./globals.css";
 import { getI18n } from "@/lib/i18n/server";
+import { siteUrl } from "@/lib/site";
 import { I18nProvider } from "@/lib/i18n/client";
 import { clerkLocalization } from "@/lib/i18n/clerk";
 import { ThemeProvider } from "@/components/ThemeProvider";
@@ -27,8 +28,22 @@ const newsreader = Newsreader({
 export async function generateMetadata(): Promise<Metadata> {
   const { dict } = await getI18n();
   return {
+    metadataBase: new URL(siteUrl()),
     title: dict.meta.homeTitle,
     description: dict.meta.homeDescription,
+    applicationName: "StudyOS",
+    openGraph: {
+      title: dict.meta.homeTitle,
+      description: dict.meta.homeDescription,
+      url: "/",
+      siteName: "StudyOS",
+      type: "website",
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: dict.meta.homeTitle,
+      description: dict.meta.homeDescription,
+    },
   };
 }
 

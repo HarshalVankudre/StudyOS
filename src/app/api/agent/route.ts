@@ -25,11 +25,16 @@ import {
 import {
   appendTaskEvent,
   claimTaskForFinalization,
+  countActiveTasks,
   createTask,
   isTaskCancelled,
   markTaskDone,
   markTaskError,
 } from "@/lib/ai/tasks/store";
+import {
+  checkUsageLimit,
+  MAX_CONCURRENT_AGENT_TASKS,
+} from "@/lib/usage-limits";
 import {
   TaskCancelledError,
   isTaskCancelledError,
@@ -122,6 +127,20 @@ export async function POST(request: Request) {
             type: "error",
             message: T.credits.outAgent,
           });
+          finish();
+          return;
+        }
+
+        // Burst-rate throttle + concurrent-work cap. Credits bound total
+        // spend; these bound how fast it can be spent and how many model
+        // loops one user can hold open at once.
+        if (!(await checkUsageLimit(userId, "agent")).allowed) {
+          send({ type: "error", message: T.limits.rateLimited });
+          finish();
+          return;
+        }
+        if ((await countActiveTasks()) >= MAX_CONCURRENT_AGENT_TASKS) {
+          send({ type: "error", message: T.limits.rateLimited });
           finish();
           return;
         }

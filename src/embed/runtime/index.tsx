@@ -31,7 +31,14 @@ const root = createRoot(document.getElementById("root")!);
 function renderSource(source: string) {
   let code: string | null | undefined;
   try {
-    code = transform(source, { presets: ["react"], filename: "component.tsx" }).code;
+    // `runtime: "classic"` emits React.createElement (provided by the closure
+    // below). The default "automatic" runtime emits `import ... from
+    // "react/jsx-runtime"`, which `new Function` rejects with "Cannot use
+    // import statement outside a module" — i.e. every JSX component fails.
+    code = transform(source, {
+      presets: [["react", { runtime: "classic" }]],
+      filename: "component.tsx",
+    }).code;
   } catch (e) {
     root.render(
       React.createElement("div", { style: errStyle }, "⚠️ Couldn't compile: " + (e as Error).message),

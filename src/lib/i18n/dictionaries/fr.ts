@@ -10,7 +10,7 @@ export const fr = {
     generateTitle: "Générez votre espace de travail · StudyOS",
     pricingTitle: "Tarifs · StudyOS",
     pricingDescription:
-      "Comparez StudyOS Gratuit et Pro. Commencez gratuitement et passez à l’offre supérieure quand vous voulez le modèle le plus performant, des générations illimitées et un support prioritaire.",
+      "Comparez StudyOS Gratuit et Pro. Commencez gratuitement et passez à l’offre supérieure quand vous voulez le modèle le plus performant, une enveloppe mensuelle de crédits plus généreuse et un support prioritaire.",
     workspaceTitle: "{name} · StudyOS",
     brandFallback: "StudyOS",
   },
@@ -167,7 +167,7 @@ export const fr = {
     badge: "Des tarifs simples, pensés pour les étudiants",
     title: "Commencez gratuitement. Évoluez quand vous êtes prêt.",
     subtitle:
-      "Tout ce dont vous avez besoin pour organiser votre semestre est gratuit. L’offre Pro ajoute le modèle le plus performant, des générations illimitées et un support prioritaire.",
+      "Tout ce dont vous avez besoin pour organiser votre semestre est gratuit. L’offre Pro ajoute le modèle le plus performant, une enveloppe mensuelle de crédits plus généreuse et un support prioritaire.",
     free: {
       name: "Gratuit",
       price: "$0",
@@ -180,7 +180,7 @@ export const fr = {
       ],
       ctaSignedOut: "Commencer gratuitement",
       ctaSignedIn: "Ouvrir vos espaces de travail",
-      bulletCredits: "{count} crédits IA de départ",
+      bulletCredits: "{count} crédits IA gratuits chaque mois",
     },
     pro: {
       badge: "Le plus populaire",
@@ -190,7 +190,7 @@ export const fr = {
       billed: "Facturé mensuellement · annulable à tout moment.",
       bullets: [
         "Tout ce que contient l’offre Gratuit",
-        "Générations d’espaces de travail illimitées",
+        "Une enveloppe mensuelle pour un usage intensif",
         "Le modèle le plus performant et le plus détaillé",
         "Support prioritaire et accès anticipé",
       ],
@@ -198,7 +198,7 @@ export const fr = {
       manageBilling: "Gérer la facturation",
       upgrade: "Passer à Pro",
       ctaSignedOut: "Commencer avec Pro",
-      bulletCredits: "{count} crédits IA inclus",
+      bulletCredits: "{count} crédits IA chaque mois",
     },
     comparison: {
       title: "Comparer les offres",
@@ -234,9 +234,9 @@ export const fr = {
       heading: "L’IA fonctionne avec des crédits",
       intro:
         "Chaque requête IA dépense des crédits selon son ampleur — un petit ajustement coûte peu, construire un espace de travail entier coûte plus. L’offre Pro arrive chargée de crédits, et vous pouvez recharger à tout moment.",
-      freeIncludes: "L’offre Gratuit inclut {count} crédits de départ",
-      proIncludes: "L’offre Pro inclut {count} crédits",
-      neverExpire: "Rechargez à tout moment — les crédits n’expirent jamais",
+      freeIncludes: "L’offre Gratuit inclut {count} crédits chaque mois",
+      proIncludes: "L’offre Pro inclut {count} crédits chaque mois",
+      neverExpire: "Rechargez à tout moment — les packs achetés n’expirent jamais",
       balance: "Votre solde : {count} crédits",
       pack: "Pack de crédits",
       unit: "crédits",
@@ -252,7 +252,7 @@ export const fr = {
       },
       {
         q: "Qu’est-ce que j’obtiens avec Pro ?",
-        a: "Des générations illimitées, le modèle le plus performant pour des espaces de travail plus riches et plus précis, un support prioritaire et un accès anticipé aux nouvelles fonctionnalités.",
+        a: "Une généreuse enveloppe mensuelle de crédits, le modèle le plus performant pour des espaces de travail plus riches et plus précis, un support prioritaire et un accès anticipé aux nouvelles fonctionnalités.",
       },
       {
         q: "Puis-je annuler à tout moment ?",
@@ -675,10 +675,18 @@ export const fr = {
     upgrade: "Passer à Pro",
     comparePlans: "Comparer les offres",
     creditsDesc:
-      "Les crédits alimentent chaque requête IA. Rechargez à tout moment — les crédits n’expirent jamais.",
+      "Les crédits alimentent chaque requête IA. Votre offre les renouvelle chaque mois, et les packs achetés n’expirent jamais.",
     buyPack: "Acheter {count} crédits · ${price}",
     viewPricing: "Voir les tarifs",
     signOut: "Se déconnecter",
+    dangerZone: "Zone de danger",
+    deleteAccount: "Supprimer le compte",
+    deleteAccountDesc:
+      "Supprimez définitivement votre compte, vos espaces de travail, vos crédits et votre abonnement. Cette action est irréversible.",
+    deleteAccountConfirm:
+      "Supprimer définitivement votre compte ?\n\nTous vos espaces de travail, vos crédits et votre abonnement seront supprimés. Cette action est irréversible.",
+    deleteAccountButton: "Supprimer mon compte",
+    deleting: "Suppression…",
   },
 
   // ---- Workspace card (delete control) ----------------------------------
@@ -687,6 +695,31 @@ export const fr = {
     deleteAria: "Supprimer {name}",
     deleteConfirm:
       "Supprimer « {name} » ?\n\nCela supprime définitivement l’espace de travail et tout son contenu. Cette action est irréversible.",
+  },
+
+  // ---- Error & not-found pages -------------------------------------------
+  errors: {
+    notFoundTitle: "Page introuvable",
+    notFoundBody: "Cette page n’existe pas — elle a peut-être été déplacée ou supprimée.",
+    errorTitle: "Une erreur est survenue",
+    errorBody:
+      "Une erreur inattendue s’est produite. Votre travail est enregistré automatiquement — réessayez.",
+    tryAgain: "Réessayer",
+    backHome: "Retour à l’accueil",
+  },
+
+  // ---- Legal & footer -----------------------------------------------------
+  legal: {
+    terms: "Conditions d’utilisation",
+    privacy: "Politique de confidentialité",
+    contact: "Contact",
+  },
+
+  // ---- Usage limits --------------------------------------------------------
+  limits: {
+    rateLimited:
+      "Vous avez atteint la limite de requêtes pour le moment. Veuillez patienter un instant puis réessayer.",
+    sandboxQuota: "Vous avez atteint la limite de rendu du jour. Elle se réinitialise demain.",
   },
 
   // ---- Mock generator scaffolding (no-API-key fallback) ------------------

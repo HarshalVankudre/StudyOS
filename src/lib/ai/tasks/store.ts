@@ -40,6 +40,21 @@ export async function createTask(input: {
   });
 }
 
+/**
+ * How many of the user's tasks are currently live (running or finalizing and
+ * not yet expired). Used to cap concurrent agent work per user.
+ */
+export async function countActiveTasks(): Promise<number> {
+  const userId = await requireUserId();
+  return prisma.agentTask.count({
+    where: {
+      userId,
+      status: { in: ["running", "finalizing"] },
+      expiresAt: { gt: new Date() },
+    },
+  });
+}
+
 /** Owner-scoped load for reconnect. Returns null for another user's task. */
 export async function getTask(id: string) {
   const userId = await requireUserId();

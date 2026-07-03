@@ -327,6 +327,20 @@ export default async function Home() {
       <footer className="border-t border-line">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 px-5 py-8 sm:flex-row sm:px-7">
           <Brand />
+          <nav className="flex items-center gap-5 text-sm text-ink-faint">
+            <Link href="/terms" className="transition hover:text-ink">
+              {dict.legal.terms}
+            </Link>
+            <Link href="/privacy" className="transition hover:text-ink">
+              {dict.legal.privacy}
+            </Link>
+            <a
+              href="mailto:harshalvankudre@gmail.com"
+              className="transition hover:text-ink"
+            >
+              {dict.legal.contact}
+            </a>
+          </nav>
           <span className="text-sm text-ink-faint">{L.footer.tagline}</span>
         </div>
       </footer>

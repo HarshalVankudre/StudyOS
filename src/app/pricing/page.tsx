@@ -6,9 +6,9 @@ import { isPro } from "@/lib/billing";
 import {
   CREDIT_PACK_PRICE_USD,
   CREDIT_PACK_SIZE,
-  FREE_SIGNUP_CREDITS,
+  FREE_MONTHLY_CREDITS,
   getCreditBalance,
-  PRO_SIGNUP_CREDITS,
+  PRO_MONTHLY_CREDITS,
 } from "@/lib/credits";
 import {
   buyCreditsAction,
@@ -34,7 +34,7 @@ export default async function PricingPage() {
   const credits = userId ? await getCreditBalance(userId) : 0;
 
   const FREE_BULLETS = [
-    t(dict.pricing.free.bulletCredits, { count: FREE_SIGNUP_CREDITS }),
+    t(dict.pricing.free.bulletCredits, { count: FREE_MONTHLY_CREDITS }),
     dict.pricing.free.bullets[0],
     dict.pricing.free.bullets[1],
     dict.pricing.free.bullets[2],
@@ -44,7 +44,7 @@ export default async function PricingPage() {
   const PRO_BULLETS = [
     dict.pricing.pro.bullets[0],
     t(dict.pricing.pro.bulletCredits, {
-      count: PRO_SIGNUP_CREDITS.toLocaleString(locale),
+      count: PRO_MONTHLY_CREDITS.toLocaleString(locale),
     }),
     dict.pricing.pro.bullets[2],
     dict.pricing.pro.bullets[3],
@@ -64,8 +64,8 @@ export default async function PricingPage() {
     },
     {
       feature: dict.pricing.comparison.features.credits,
-      free: String(FREE_SIGNUP_CREDITS),
-      pro: PRO_SIGNUP_CREDITS.toLocaleString(locale),
+      free: String(FREE_MONTHLY_CREDITS),
+      pro: PRO_MONTHLY_CREDITS.toLocaleString(locale),
     },
     {
       feature: dict.pricing.comparison.features.buyMore,
@@ -252,12 +252,12 @@ export default async function PricingPage() {
                 <ul className="mt-4 space-y-2 text-sm">
                   <Feature>
                     {t(dict.pricing.credits.freeIncludes, {
-                      count: FREE_SIGNUP_CREDITS,
+                      count: FREE_MONTHLY_CREDITS,
                     })}
                   </Feature>
                   <Feature>
                     {t(dict.pricing.credits.proIncludes, {
-                      count: PRO_SIGNUP_CREDITS.toLocaleString(locale),
+                      count: PRO_MONTHLY_CREDITS.toLocaleString(locale),
                     })}
                   </Feature>
                   <Feature>{dict.pricing.credits.neverExpire}</Feature>
@@ -415,6 +415,14 @@ export default async function PricingPage() {
             StudyOS
             <span className="mb-2 h-1 w-1 rounded-full bg-lime" aria-hidden />
           </Link>
+          <nav className="flex items-center gap-5 text-sm text-ink-faint">
+            <Link href="/terms" className="transition hover:text-ink">
+              {dict.legal.terms}
+            </Link>
+            <Link href="/privacy" className="transition hover:text-ink">
+              {dict.legal.privacy}
+            </Link>
+          </nav>
           <span className="text-sm text-ink-soft">
             {dict.pricing.footerTagline}
           </span>

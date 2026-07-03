@@ -15,6 +15,7 @@ function fakes() {
   const store: AssetStore = {
     async put(key, bytes, mime) { puts.push({ key, mime, size: bytes.byteLength }); },
     async signedReadUrl(key) { return `https://signed.example/${key}`; },
+    async delete() {},
   };
   return { repo, store, rows, puts };
 }

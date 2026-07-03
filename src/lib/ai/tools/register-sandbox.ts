@@ -7,6 +7,8 @@ import { createAssetService } from "@/lib/assets/service";
 import { gcsAssetStore } from "@/lib/assets/storage";
 import { prismaAssetRepo } from "@/lib/assets/repo";
 import { agentSandboxEnabled } from "@/lib/flags";
+import { checkUsageLimit } from "@/lib/usage-limits";
+import { chargeCredits, SANDBOX_RUN_CREDITS } from "@/lib/credits";
 
 // All imports are static (ES2017 target forbids top-level await).
 // Construction of the Daytona client and asset service is guarded behind the
@@ -19,6 +21,14 @@ if (agentSandboxEnabled()) {
       runner: new DaytonaSandboxRunner(),
       createAsset: assets.createAsset,
       enabled: true,
+      quota: {
+        // Every run spins a paid Daytona container: cap per day and charge a
+        // flat credit fee per run.
+        check: (ownerId) => checkUsageLimit(ownerId, "sandbox_run"),
+        settle: async (ownerId) => {
+          await chargeCredits(ownerId, SANDBOX_RUN_CREDITS, "sandbox_run");
+        },
+      },
     }),
   );
 }

@@ -13,6 +13,7 @@ import { modelForPlan } from "@/lib/ai/plans";
 import { addUsage, withUsageMeter } from "@/lib/ai/usage-meter";
 import { getUserPlan } from "@/lib/billing";
 import { chargeCredits, hasCredits, usageToCredits } from "@/lib/credits";
+import { checkUsageLimit, recordFunnelEvent } from "@/lib/usage-limits";
 import { getLocale } from "@/lib/i18n/server";
 import { getDictionary, type Dictionary } from "@/lib/i18n/dictionaries";
 import { fmt } from "@/lib/i18n/interpolate";
@@ -90,6 +91,14 @@ export async function POST(request: Request) {
             type: "error",
             message: T.credits.outGenerate,
           });
+          finish();
+          return;
+        }
+
+        // Throttle after the credit gate: credits bound total spend, this
+        // bounds burst rate (abuse, runaway clients).
+        if (!(await checkUsageLimit(userId, "generate")).allowed) {
+          send({ type: "error", message: T.limits.rateLimited });
           finish();
           return;
         }
@@ -191,6 +200,7 @@ export async function POST(request: Request) {
           progress: 97,
         });
         const workspaceId = await saveNewWorkspace(workspace);
+        recordFunnelEvent(userId, "generate_complete");
         send({ type: "complete", workspaceId });
         finish();
       } catch (error) {

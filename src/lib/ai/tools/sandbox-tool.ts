@@ -47,6 +47,14 @@ export function createSandboxTool(deps: {
   runner: SandboxRunner;
   createAsset: CreateAssetFn;
   enabled: boolean;
+  /**
+   * Optional cost guard: `check` throws/refuses before a run (daily quota),
+   * `settle` charges after a run started (each run costs real compute).
+   */
+  quota?: {
+    check: (ownerId: string) => Promise<{ allowed: boolean }>;
+    settle: (ownerId: string) => Promise<void>;
+  };
 }): ToolDefinition<typeof sandboxInput, typeof sandboxOutput> {
   return {
     id: "run_in_sandbox",
@@ -60,6 +68,12 @@ export function createSandboxTool(deps: {
     handler: async (input, ctx) => {
       if (!ctx.ownerId) throw new Error("run_in_sandbox requires an owner");
 
+      if (deps.quota && !(await deps.quota.check(ctx.ownerId)).allowed) {
+        throw new Error(
+          "Daily rendering limit reached — this resets tomorrow. Let the user know instead of retrying.",
+        );
+      }
+
       const spec: SandboxRunSpec = {
         inputs: input.inputs,
         setup: input.setup,
@@ -68,6 +82,8 @@ export function createSandboxTool(deps: {
         timeoutSec: input.timeoutSec,
       };
       const result = await deps.runner.run(spec, ctx.signal);
+      // Charge once the run consumed compute, success or not.
+      await deps.quota?.settle(ctx.ownerId).catch(() => {});
 
       const artifacts: { assetId: string; mime: string; filename: string }[] = [];
       for (const artifact of result.artifacts) {

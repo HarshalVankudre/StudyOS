@@ -82,6 +82,22 @@ model Subscription {
   status               String    @default("free")
   currentPeriodEnd     DateTime?
   updatedAt            DateTime  @updatedAt
+
+  // The webhook resolves invoices/subscription events back to a user by
+  // subscription id when metadata is missing.
+  @@index([stripeSubscriptionId])
+}
+
+// One row per rate-limited action (AI request, sandbox run) and per funnel
+// milestone. Counted over sliding windows to enforce per-user limits that are
+// correct across instances; also doubles as first-party funnel analytics.
+model UsageEvent {
+  id        String   @id @default(cuid())
+  userId    String
+  kind      String
+  createdAt DateTime @default(now())
+
+  @@index([userId, kind, createdAt])
 }
 
 // A user's AI credit balance. Credits are spent per AI request based on the

@@ -11,7 +11,7 @@ export const pt = {
     generateTitle: "Crie seu espaço de trabalho · StudyOS",
     pricingTitle: "Preços · StudyOS",
     pricingDescription:
-      "Compare o StudyOS Grátis e Pro. Comece de graça e faça upgrade quando quiser o modelo mais avançado, gerações ilimitadas e suporte prioritário.",
+      "Compare o StudyOS Grátis e Pro. Comece de graça e faça upgrade quando quiser o modelo mais avançado, uma cota mensal de créditos maior e suporte prioritário.",
     workspaceTitle: "{name} · StudyOS",
     brandFallback: "StudyOS",
   },
@@ -168,7 +168,7 @@ export const pt = {
     badge: "Preços simples e acessíveis para estudantes",
     title: "Comece grátis. Faça upgrade quando estiver pronto.",
     subtitle:
-      "Tudo o que você precisa para organizar seu semestre é grátis. O Pro adiciona o modelo mais avançado, gerações ilimitadas e suporte prioritário.",
+      "Tudo o que você precisa para organizar seu semestre é grátis. O Pro adiciona o modelo mais avançado, uma cota mensal de créditos maior e suporte prioritário.",
     free: {
       name: "Grátis",
       price: "$0",
@@ -181,7 +181,7 @@ export const pt = {
       ],
       ctaSignedOut: "Comece grátis",
       ctaSignedIn: "Abrir seus espaços de trabalho",
-      bulletCredits: "{count} créditos de IA iniciais",
+      bulletCredits: "{count} créditos de IA grátis todo mês",
     },
     pro: {
       badge: "Mais popular",
@@ -191,7 +191,7 @@ export const pt = {
       billed: "Cobrado mensalmente · cancele quando quiser.",
       bullets: [
         "Tudo do Grátis",
-        "Gerações ilimitadas de espaços de trabalho",
+        "Uma cota mensal para uso intenso",
         "O modelo mais avançado e detalhado",
         "Suporte prioritário e acesso antecipado",
       ],
@@ -199,7 +199,7 @@ export const pt = {
       manageBilling: "Gerenciar cobrança",
       upgrade: "Fazer upgrade para o Pro",
       ctaSignedOut: "Começar com o Pro",
-      bulletCredits: "{count} créditos de IA inclusos",
+      bulletCredits: "{count} créditos de IA todo mês",
     },
     comparison: {
       title: "Comparar planos",
@@ -235,9 +235,9 @@ export const pt = {
       heading: "A IA funciona com créditos",
       intro:
         "Cada solicitação de IA gasta créditos conforme o quanto ela faz — um ajuste rápido custa pouco, criar um espaço de trabalho inteiro custa mais. O Pro vem carregado de créditos, e você pode recarregar quando quiser.",
-      freeIncludes: "O Grátis inclui {count} créditos iniciais",
-      proIncludes: "O Pro inclui {count} créditos",
-      neverExpire: "Recarregue quando quiser — os créditos nunca expiram",
+      freeIncludes: "O Grátis inclui {count} créditos todo mês",
+      proIncludes: "O Pro inclui {count} créditos todo mês",
+      neverExpire: "Recarregue quando quiser — os pacotes comprados nunca expiram",
       balance: "Seu saldo: {count} créditos",
       pack: "Pacote de créditos",
       unit: "créditos",
@@ -253,7 +253,7 @@ export const pt = {
       },
       {
         q: "O que ganho com o Pro?",
-        a: "Gerações ilimitadas, o modelo mais avançado para espaços de trabalho mais ricos e precisos, suporte prioritário e acesso antecipado a novos recursos.",
+        a: "Uma generosa cota mensal de créditos, o modelo mais avançado para espaços de trabalho mais ricos e precisos, suporte prioritário e acesso antecipado a novos recursos.",
       },
       {
         q: "Posso cancelar quando quiser?",
@@ -676,10 +676,18 @@ export const pt = {
     upgrade: "Fazer upgrade para o Pro",
     comparePlans: "Comparar planos",
     creditsDesc:
-      "Os créditos alimentam cada solicitação de IA. Recarregue quando quiser — os créditos nunca expiram.",
+      "Os créditos alimentam cada solicitação de IA. Seu plano os renova todo mês, e os pacotes comprados nunca expiram.",
     buyPack: "Comprar {count} créditos · ${price}",
     viewPricing: "Ver preços",
     signOut: "Sair",
+    dangerZone: "Zona de perigo",
+    deleteAccount: "Excluir conta",
+    deleteAccountDesc:
+      "Exclua permanentemente sua conta, seus espaços de trabalho, seus créditos e sua assinatura. Isso não pode ser desfeito.",
+    deleteAccountConfirm:
+      "Excluir sua conta permanentemente?\n\nTodos os espaços de trabalho, créditos e sua assinatura serão removidos. Isso não pode ser desfeito.",
+    deleteAccountButton: "Excluir minha conta",
+    deleting: "Excluindo…",
   },
 
   // ---- Workspace card (delete control) ----------------------------------
@@ -688,6 +696,31 @@ export const pt = {
     deleteAria: "Excluir {name}",
     deleteConfirm:
       "Excluir “{name}”?\n\nIsso remove permanentemente o espaço de trabalho e tudo o que há nele. Isso não pode ser desfeito.",
+  },
+
+  // ---- Error & not-found pages -------------------------------------------
+  errors: {
+    notFoundTitle: "Página não encontrada",
+    notFoundBody: "Esta página não existe — ela pode ter sido movida ou excluída.",
+    errorTitle: "Algo deu errado",
+    errorBody:
+      "Ocorreu um erro inesperado. Seu trabalho está salvo automaticamente — tente novamente.",
+    tryAgain: "Tentar novamente",
+    backHome: "Voltar ao início",
+  },
+
+  // ---- Legal & footer -----------------------------------------------------
+  legal: {
+    terms: "Termos de Serviço",
+    privacy: "Política de Privacidade",
+    contact: "Contato",
+  },
+
+  // ---- Usage limits --------------------------------------------------------
+  limits: {
+    rateLimited:
+      "Você atingiu o limite de solicitações por enquanto. Aguarde um momento e tente novamente.",
+    sandboxQuota: "Você atingiu o limite de renderização de hoje. Ele reinicia amanhã.",
   },
 
   // ---- Mock generator scaffolding (no-API-key fallback) ------------------

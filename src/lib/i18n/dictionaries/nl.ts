@@ -11,7 +11,7 @@ export const nl = {
     generateTitle: "Genereer je werkruimte · StudyOS",
     pricingTitle: "Prijzen · StudyOS",
     pricingDescription:
-      "Vergelijk StudyOS Gratis en Pro. Begin gratis en upgrade wanneer je het krachtigste model, onbeperkte generaties en prioriteitssupport wilt.",
+      "Vergelijk StudyOS Gratis en Pro. Begin gratis en upgrade wanneer je het krachtigste model, een ruimer maandelijks credittegoed en prioriteitssupport wilt.",
     workspaceTitle: "{name} · StudyOS",
     brandFallback: "StudyOS",
   },
@@ -168,7 +168,7 @@ export const nl = {
     badge: "Eenvoudige, studentvriendelijke prijzen",
     title: "Begin gratis. Upgrade wanneer je er klaar voor bent.",
     subtitle:
-      "Alles wat je nodig hebt om je semester te organiseren is gratis. Pro voegt het krachtigste model, onbeperkte generaties en prioriteitssupport toe.",
+      "Alles wat je nodig hebt om je semester te organiseren is gratis. Pro voegt het krachtigste model, een ruimer maandelijks credittegoed en prioriteitssupport toe.",
     free: {
       name: "Gratis",
       price: "$0",
@@ -181,7 +181,7 @@ export const nl = {
       ],
       ctaSignedOut: "Begin gratis",
       ctaSignedIn: "Open je werkruimtes",
-      bulletCredits: "{count} AI-startcredits",
+      bulletCredits: "{count} gratis AI-credits per maand",
     },
     pro: {
       badge: "Meest gekozen",
@@ -191,7 +191,7 @@ export const nl = {
       billed: "Maandelijks gefactureerd · altijd opzegbaar.",
       bullets: [
         "Alles uit Gratis",
-        "Onbeperkte werkruimtegeneraties",
+        "Een maandelijks tegoed voor intensief gebruik",
         "Het krachtigste, meest gedetailleerde model",
         "Prioriteitssupport & vroege toegang",
       ],
@@ -199,7 +199,7 @@ export const nl = {
       manageBilling: "Facturatie beheren",
       upgrade: "Upgraden naar Pro",
       ctaSignedOut: "Aan de slag met Pro",
-      bulletCredits: "{count} AI-credits inbegrepen",
+      bulletCredits: "{count} AI-credits per maand",
     },
     comparison: {
       title: "Vergelijk abonnementen",
@@ -235,9 +235,9 @@ export const nl = {
       heading: "AI draait op credits",
       intro:
         "Elke AI-aanvraag kost credits op basis van hoeveel werk hij doet — een snelle aanpassing kost weinig, een hele werkruimte bouwen kost meer. Pro komt boordevol credits, en je kunt altijd bijvullen.",
-      freeIncludes: "Gratis bevat {count} startcredits",
-      proIncludes: "Pro bevat {count} credits",
-      neverExpire: "Vul altijd bij — credits verlopen nooit",
+      freeIncludes: "Gratis bevat {count} credits per maand",
+      proIncludes: "Pro bevat {count} credits per maand",
+      neverExpire: "Vul altijd bij — gekochte pakketten verlopen nooit",
       balance: "Je saldo: {count} credits",
       pack: "Creditpakket",
       unit: "credits",
@@ -253,7 +253,7 @@ export const nl = {
       },
       {
         q: "Wat krijg ik met Pro?",
-        a: "Onbeperkte generaties, het krachtigste model voor rijkere en nauwkeurigere werkruimtes, prioriteitssupport en vroege toegang tot nieuwe functies.",
+        a: "Een royaal maandelijks credittegoed, het krachtigste model voor rijkere en nauwkeurigere werkruimtes, prioriteitssupport en vroege toegang tot nieuwe functies.",
       },
       {
         q: "Kan ik altijd opzeggen?",
@@ -676,10 +676,18 @@ export const nl = {
     upgrade: "Upgraden naar Pro",
     comparePlans: "Abonnementen vergelijken",
     creditsDesc:
-      "Credits voeden elke AI-aanvraag. Vul altijd bij — credits verlopen nooit.",
+      "Credits voeden elke AI-aanvraag. Je abonnement vult ze maandelijks aan, en gekochte pakketten verlopen nooit.",
     buyPack: "Koop {count} credits · ${price}",
     viewPricing: "Prijzen bekijken",
     signOut: "Uitloggen",
+    dangerZone: "Gevarenzone",
+    deleteAccount: "Account verwijderen",
+    deleteAccountDesc:
+      "Verwijder je account, werkruimtes, credits en abonnement definitief. Dit kan niet ongedaan worden gemaakt.",
+    deleteAccountConfirm:
+      "Je account definitief verwijderen?\n\nAl je werkruimtes, credits en je abonnement worden verwijderd. Dit kan niet ongedaan worden gemaakt.",
+    deleteAccountButton: "Mijn account verwijderen",
+    deleting: "Verwijderen…",
   },
 
   // ---- Workspace card (delete control) ----------------------------------
@@ -688,6 +696,31 @@ export const nl = {
     deleteAria: "{name} verwijderen",
     deleteConfirm:
       "“{name}” verwijderen?\n\nHiermee verwijder je de werkruimte en alles erin definitief. Dit kan niet ongedaan worden gemaakt.",
+  },
+
+  // ---- Error & not-found pages -------------------------------------------
+  errors: {
+    notFoundTitle: "Pagina niet gevonden",
+    notFoundBody: "Deze pagina bestaat niet — misschien is deze verplaatst of verwijderd.",
+    errorTitle: "Er ging iets mis",
+    errorBody:
+      "Er is een onverwachte fout opgetreden. Je werk is automatisch opgeslagen — probeer het opnieuw.",
+    tryAgain: "Opnieuw proberen",
+    backHome: "Terug naar de startpagina",
+  },
+
+  // ---- Legal & footer -----------------------------------------------------
+  legal: {
+    terms: "Servicevoorwaarden",
+    privacy: "Privacybeleid",
+    contact: "Contact",
+  },
+
+  // ---- Usage limits --------------------------------------------------------
+  limits: {
+    rateLimited:
+      "Je hebt voorlopig de aanvraaglimiet bereikt. Wacht even en probeer het opnieuw.",
+    sandboxQuota: "Je hebt de renderlimiet van vandaag bereikt. Deze wordt morgen gereset.",
   },
 
   // ---- Mock generator scaffolding (no-API-key fallback) ------------------
