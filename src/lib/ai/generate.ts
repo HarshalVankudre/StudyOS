@@ -19,6 +19,7 @@ import type {
 } from "@/lib/workspace/types";
 import { safeParseWorkspace } from "@/lib/workspace/schema";
 import { sampleWorkspace } from "@/lib/workspace/sample";
+import { sourceTextBlock } from "@/lib/import/syllabus";
 import { modelForPlan } from "./plans";
 import { recordUsage } from "./usage-meter";
 import { defaultQuestions, type GenQuestion } from "./onboarding";
@@ -62,13 +63,14 @@ export async function generateWorkspace(
   preferences = "",
   plan?: WorkspaceGenerationPlan,
   locale: Locale = DEFAULT_LOCALE,
+  sourceText = "",
 ): Promise<Workspace> {
   // Use the real model when an API key is configured; otherwise the local mock.
   // If the real call fails for any reason (bad key, rate limit, malformed
   // output), fall back to the mock so the user always gets a usable workspace.
   if (process.env.OPENROUTER_API_KEY) {
     try {
-      return await openRouterGenerate(prompt, model, preferences, plan, locale);
+      return await openRouterGenerate(prompt, model, preferences, plan, locale, sourceText);
     } catch (err) {
       console.error("[StudyOS] OpenRouter generation failed; using mock:", err);
       return mockGenerate(prompt, plan, preferences);
@@ -104,6 +106,7 @@ export async function planWorkspace(
   model: string = DEFAULT_MODEL,
   preferences = "",
   locale: Locale = DEFAULT_LOCALE,
+  sourceText = "",
 ): Promise<WorkspaceGenerationPlan> {
   if (!process.env.OPENROUTER_API_KEY) {
     return mockWorkspacePlan(prompt, preferences);
@@ -116,6 +119,7 @@ export async function planWorkspace(
       [
         `Student description:\n"""${prompt}"""`,
         preferences,
+        sourceTextBlock(sourceText),
         "Return only the JSON workspace plan.",
       ]
         .filter(Boolean)
@@ -344,6 +348,7 @@ export async function planQuestions(
   prompt: string,
   model: string = DEFAULT_MODEL,
   locale: Locale = DEFAULT_LOCALE,
+  sourceText = "",
 ): Promise<GenQuestion[]> {
   const fallback = () => defaultQuestions(getDictionary(locale).onboarding);
   if (!process.env.OPENROUTER_API_KEY) return fallback();
@@ -351,7 +356,13 @@ export async function planQuestions(
     const raw = await callOpenRouter(
       model,
       buildQuestionsSystemPrompt(locale),
-      `Student description:\n\n"""${prompt}"""\n\nReturn ONLY the JSON object of questions.`,
+      [
+        `Student description:\n\n"""${prompt}"""`,
+        sourceTextBlock(sourceText),
+        "Return ONLY the JSON object of questions.",
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
     );
     const parsed = genQuestionsSchema.safeParse(extractJson(raw));
     if (!parsed.success || parsed.data.questions.length === 0) {
@@ -449,8 +460,10 @@ async function openRouterGenerate(
   preferences = "",
   plan?: WorkspaceGenerationPlan,
   locale: Locale = DEFAULT_LOCALE,
+  sourceText = "",
 ): Promise<Workspace> {
   const prefBlock = preferences ? `${preferences}\n\n` : "";
+  const sourceBlock = sourceTextBlock(sourceText);
   const planBlock = plan
     ? [
         "The workspace architect selected this exact component plan:",
@@ -462,7 +475,7 @@ async function openRouterGenerate(
   const raw = await callOpenRouter(
     model,
     buildSystemPrompt(locale),
-    `Design a study workspace for this student:\n\n"""${prompt}"""\n\n${prefBlock}${planBlock}Honor the preferences and component plan above. Return ONLY the JSON workspace object — no prose, no markdown fences.`,
+    `Design a study workspace for this student:\n\n"""${prompt}"""\n\n${prefBlock}${sourceBlock}${planBlock}Honor the preferences, the provided course material, and the component plan above. Return ONLY the JSON workspace object — no prose, no markdown fences.`,
   );
 
   const parsed = safeParseWorkspace(extractJson(raw));

@@ -325,6 +325,16 @@ export const de = {
       examplesLabel: "Unsicher? Starte mit einem Beispiel",
       finePrint: "Kostenlos · keine Kreditkarte · in Sekunden bereit",
     },
+    syllabus: {
+      toggle: "📄 Deinen Lehrplan hinzufügen",
+      optional: "optional",
+      hint: "Füge deinen Lehrplan oder deine Kursliste ein – oder lade eine .txt-Datei hoch – und StudyOS baut auf deinen echten Kursen, Fristen und Themen auf.",
+      placeholder:
+        "Füge hier deinen Lehrplan, deine Kursliste oder deinen Semesterplan ein…",
+      upload: ".txt hochladen",
+      attached: "{chars} Zeichen hinzugefügt",
+      clear: "Löschen",
+    },
     questions: {
       back: "← Beschreibung bearbeiten",
       step: "Schritt 2 von 2",

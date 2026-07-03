@@ -325,6 +325,16 @@ export const pt = {
       examplesLabel: "Em dúvida? Comece a partir de um exemplo",
       finePrint: "Grátis · sem cartão de crédito · pronto em segundos",
     },
+    syllabus: {
+      toggle: "📄 Adicione sua ementa",
+      optional: "opcional",
+      hint: "Cole sua ementa ou lista de disciplinas — ou envie um arquivo .txt — e o StudyOS constrói a partir dos seus cursos, prazos e tópicos reais.",
+      placeholder:
+        "Cole aqui sua ementa, lista de disciplinas ou o cronograma do semestre…",
+      upload: "Enviar .txt",
+      attached: "{chars} caracteres adicionados",
+      clear: "Limpar",
+    },
     questions: {
       back: "← Editar descrição",
       step: "Passo 2 de 2",

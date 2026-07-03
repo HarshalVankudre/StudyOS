@@ -325,6 +325,16 @@ export const zh = {
       examplesLabel: "拿不准？从示例开始",
       finePrint: "免费 · 无需信用卡 · 几秒即成",
     },
+    syllabus: {
+      toggle: "📄 添加你的课程大纲",
+      optional: "可选",
+      hint: "粘贴你的课程大纲或课程列表，或上传 .txt 文件，StudyOS 就会根据你真实的课程、截止日期和主题来构建。",
+      placeholder:
+        "在此粘贴你的课程大纲、课程列表或学期课表…",
+      upload: "上传 .txt",
+      attached: "已添加 {chars} 个字符",
+      clear: "清除",
+    },
     questions: {
       back: "← 编辑描述",
       step: "第 2 步，共 2 步",

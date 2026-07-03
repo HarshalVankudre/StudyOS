@@ -337,6 +337,16 @@ export const en = {
       examplesLabel: "Not sure? Start from an example",
       finePrint: "Free · no credit card · ready in seconds",
     },
+    syllabus: {
+      toggle: "📄 Add your syllabus",
+      optional: "optional",
+      hint: "Paste your syllabus or course list — or upload a .txt file — and StudyOS builds from your real courses, deadlines, and topics.",
+      placeholder:
+        "Paste your syllabus, course list, or semester schedule here…",
+      upload: "Upload .txt",
+      attached: "{chars} characters added",
+      clear: "Clear",
+    },
     questions: {
       back: "← Edit description",
       step: "Step 2 of 2",

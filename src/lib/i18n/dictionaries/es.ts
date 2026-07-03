@@ -324,6 +324,16 @@ export const es = {
       examplesLabel: "¿No sabes por dónde empezar? Parte de un ejemplo",
       finePrint: "Gratis · sin tarjeta de crédito · listo en segundos",
     },
+    syllabus: {
+      toggle: "📄 Añade tu temario",
+      optional: "opcional",
+      hint: "Pega tu temario o lista de asignaturas —o sube un archivo .txt— y StudyOS parte de tus asignaturas, fechas límite y temas reales.",
+      placeholder:
+        "Pega aquí tu temario, lista de asignaturas u horario del semestre…",
+      upload: "Subir .txt",
+      attached: "{chars} caracteres añadidos",
+      clear: "Borrar",
+    },
     questions: {
       back: "← Editar descripción",
       step: "Paso 2 de 2",

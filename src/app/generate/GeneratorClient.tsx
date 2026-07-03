@@ -13,6 +13,7 @@ import type {
   WorkspaceGenerationPlan,
 } from "@/lib/ai/generation-progress";
 import type { GenQuestion, QuestionAnswer } from "@/lib/ai/onboarding";
+import { MAX_SOURCE_TEXT } from "@/lib/import/syllabus";
 import { useI18n } from "@/lib/i18n/client";
 import { planQuestionsAction } from "./actions";
 
@@ -22,6 +23,7 @@ export function GeneratorClient() {
   const router = useRouter();
   const { dict } = useI18n();
   const [prompt, setPrompt] = useState("");
+  const [sourceText, setSourceText] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const [stage, setStage] = useState<Stage>("describe");
@@ -59,7 +61,7 @@ export function GeneratorClient() {
     setError(null);
     setPlanning(true);
     try {
-      const qs = await planQuestionsAction(value);
+      const qs = await planQuestionsAction(value, sourceText);
       setQuestions(qs);
       setSelected({});
       setCustomAnswers({});
@@ -143,7 +145,7 @@ export function GeneratorClient() {
       const response = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, answers }),
+        body: JSON.stringify({ prompt, answers, sourceText }),
         signal: controller.signal,
       });
       if (!response.ok || !response.body) {
@@ -289,6 +291,8 @@ export function GeneratorClient() {
           <DescribeStage
             prompt={prompt}
             setPrompt={setPrompt}
+            sourceText={sourceText}
+            setSourceText={setSourceText}
             busy={planning}
             onContinue={() => askQuestions(prompt)}
             onExample={askQuestions}
@@ -323,12 +327,16 @@ export function GeneratorClient() {
 function DescribeStage({
   prompt,
   setPrompt,
+  sourceText,
+  setSourceText,
   busy,
   onContinue,
   onExample,
 }: {
   prompt: string;
   setPrompt: (v: string) => void;
+  sourceText: string;
+  setSourceText: (v: string) => void;
   busy: boolean;
   onContinue: () => void;
   onExample: (text: string) => void;
@@ -368,6 +376,12 @@ function DescribeStage({
         </div>
       </div>
 
+      <SyllabusImport
+        sourceText={sourceText}
+        setSourceText={setSourceText}
+        busy={busy}
+      />
+
       <div className="mt-8">
         <p className="mb-3 text-sm text-ink-soft">{dict.generate.describe.examplesLabel}</p>
         <div className="flex flex-wrap gap-2">
@@ -391,6 +405,98 @@ function DescribeStage({
         {dict.generate.describe.finePrint}
       </p>
     </>
+  );
+}
+
+// Optional syllabus grounding: paste text or upload a .txt file so the
+// generator builds from the student's REAL courses and deadlines.
+function SyllabusImport({
+  sourceText,
+  setSourceText,
+  busy,
+}: {
+  sourceText: string;
+  setSourceText: (v: string) => void;
+  busy: boolean;
+}) {
+  const { dict, t } = useI18n();
+  const S = dict.generate.syllabus;
+  const [open, setOpen] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const CAP = MAX_SOURCE_TEXT * 3;
+
+  const onFile = (file: File | undefined) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () =>
+      setSourceText(String(reader.result ?? "").slice(0, CAP));
+    reader.readAsText(file);
+  };
+
+  const has = sourceText.trim().length > 0;
+
+  return (
+    <div className="mt-4">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex items-center gap-2 rounded-lg border border-line bg-card px-3.5 py-2 text-sm text-ink-soft transition hover:border-lime/40 hover:text-ink"
+      >
+        <span>{S.toggle}</span>
+        <span className="text-xs text-ink-soft/60">· {S.optional}</span>
+        {has && !open && (
+          <span className="rounded-full bg-lime-faint px-2 py-0.5 text-[10px] font-semibold text-lime-deep">
+            {t(S.attached, { chars: sourceText.trim().length.toLocaleString() })}
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div className="mt-3 rounded-xl border border-line bg-card p-4 shadow-card">
+          <p className="mb-3 text-sm text-ink-soft">{S.hint}</p>
+          <textarea
+            value={sourceText}
+            onChange={(e) => setSourceText(e.target.value.slice(0, CAP))}
+            placeholder={S.placeholder}
+            rows={5}
+            disabled={busy}
+            className="w-full resize-y rounded-lg border border-line bg-paper px-3 py-2 text-sm leading-relaxed text-ink placeholder:text-ink-soft/50 outline-none focus:border-lime/50 disabled:opacity-60"
+          />
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".txt,.md,text/plain,text/markdown"
+              className="hidden"
+              onChange={(e) => onFile(e.target.files?.[0] ?? undefined)}
+            />
+            <button
+              onClick={() => fileRef.current?.click()}
+              disabled={busy}
+              className="rounded-lg border border-line-strong bg-card px-3 py-1.5 text-sm font-medium text-ink transition hover:bg-hover disabled:opacity-50"
+            >
+              {S.upload}
+            </button>
+            {has && (
+              <>
+                <span className="text-xs text-ink-soft">
+                  {t(S.attached, {
+                    chars: sourceText.trim().length.toLocaleString(),
+                  })}
+                </span>
+                <button
+                  onClick={() => setSourceText("")}
+                  disabled={busy}
+                  className="text-xs text-ink-soft transition hover:text-rose-600 disabled:opacity-50"
+                >
+                  {S.clear}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -325,6 +325,16 @@ export const it = {
       examplesLabel: "Non sai da dove iniziare? Parti da un esempio",
       finePrint: "Gratis · nessuna carta di credito · pronto in pochi secondi",
     },
+    syllabus: {
+      toggle: "📄 Aggiungi il tuo programma",
+      optional: "facoltativo",
+      hint: "Incolla il tuo programma o l’elenco dei corsi — oppure carica un file .txt — e StudyOS costruisce a partire dai tuoi corsi, scadenze e argomenti reali.",
+      placeholder:
+        "Incolla qui il tuo programma, l’elenco dei corsi o l’orario del semestre…",
+      upload: "Carica .txt",
+      attached: "{chars} caratteri aggiunti",
+      clear: "Cancella",
+    },
     questions: {
       back: "← Modifica descrizione",
       step: "Passaggio 2 di 2",
