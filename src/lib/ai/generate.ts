@@ -525,7 +525,8 @@ Block = one of:
   { id; type:"quote"; text }
   { id; type:"callout"; text; emoji? }
   { id; type:"divider" }
-  { id; type:"database_view"; databaseId; viewId }`;
+  { id; type:"database_view"; databaseId; viewId }
+  { id; type:"flashcards"; title?; cards: { id; front; back }[] }  // spaced-repetition deck; omit scheduling fields on new cards`;
 
 /**
  * Pull the JSON object out of the model's reply, tolerating fences or stray

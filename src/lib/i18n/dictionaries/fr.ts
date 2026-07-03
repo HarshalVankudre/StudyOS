@@ -212,6 +212,7 @@ export const fr = {
         onboarding: "Questions d’accueil guidées",
         editing: "Édition en ligne complète et enregistrement auto",
         databases: "Bases de données — tableau, tableau Kanban et calendrier",
+        flashcards: "Cartes mémo avec répétition espacée",
         dragDrop: "Édition par glisser-déposer",
         agentChat: "Chat avec l’agent IA qui modifie votre espace de travail",
         model: "Modèle de génération",
@@ -461,6 +462,7 @@ export const fr = {
       divider: "Séparateur",
       database: "Tableau",
       media: "Image",
+      flashcards: "Cartes mémo",
     },
     placeholders: {
       paragraph: "Saisissez quelque chose…",
@@ -479,6 +481,45 @@ export const fr = {
       statusDone: "Terminé",
       viewTable: "Tableau",
     },
+  },
+
+  // ---- Flashcards & spaced-repetition study -----------------------------
+  study: {
+    newDeckTitle: "Nouveau paquet",
+    untitledDeck: "Cartes mémo",
+    deckTitlePlaceholder: "Titre du paquet…",
+    stats: {
+      cards: "{count} cartes",
+      due: "{count} à réviser",
+      mature: "{count} apprises",
+    },
+    studyDue: "Réviser {count} cartes",
+    allCaughtUp: "Tout est à jour 🎉",
+    editCards: "Modifier les cartes",
+    doneEditing: "Terminé",
+    addCard: "+ Ajouter une carte",
+    deleteCard: "Supprimer la carte",
+    emptyDeck: "Pas encore de cartes. Ajoutez-en une, ou demandez à l’IA de créer un paquet.",
+    frontPlaceholder: "Recto (question)",
+    backPlaceholder: "Verso (réponse)",
+    showAnswer: "Afficher la réponse",
+    tapToReveal: "Touchez pour révéler la réponse",
+    spaceKey: "Espace",
+    grades: {
+      again: "Encore",
+      hard: "Difficile",
+      good: "Bien",
+      easy: "Facile",
+    },
+    doneTitle: "Session terminée",
+    doneSummary: "Vous avez révisé {count} cartes.",
+    doneAgain: "{count} à revoir bientôt.",
+    finish: "Terminé",
+    // Workspace-level study launcher
+    dueAcrossWorkspace: "Réviser {count} cartes",
+    noneDue: "Rien à réviser",
+    streak: "Série de {count} jours",
+    reviewAll: "Réviser",
   },
 
   // ---- Database views (table / board / calendar) ------------------------

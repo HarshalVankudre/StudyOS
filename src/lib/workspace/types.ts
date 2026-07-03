@@ -113,7 +113,8 @@ export type BlockType =
   | "divider"
   | "database_view"
   | "media"
-  | "react_artifact";
+  | "react_artifact"
+  | "flashcards";
 
 interface BaseBlock {
   id: string;
@@ -191,6 +192,35 @@ export interface ReactArtifactBlock extends BaseBlock {
   source: string;
 }
 
+/**
+ * One flashcard. `front`/`back` are the content; the remaining fields are the
+ * SM-2 spaced-repetition scheduling state, all optional so an AI or a user can
+ * author a card with just front+back (absent state = a brand-new card). The
+ * review UI fills them in over time — see lib/study/srs.ts.
+ */
+export interface Flashcard {
+  id: string;
+  front: string;
+  back: string;
+  /** SM-2 ease factor (≥1.3); higher = easier = longer intervals. */
+  ease?: number;
+  /** Current interval in days between reviews. */
+  intervalDays?: number;
+  /** Count of consecutive successful reviews. */
+  reps?: number;
+  /** ISO date (YYYY-MM-DD) this card is next due for review. */
+  dueAt?: string;
+  /** ISO datetime of the last review. */
+  lastReviewedAt?: string;
+}
+
+/** A spaced-repetition flashcard deck embedded in a page. */
+export interface FlashcardsBlock extends BaseBlock {
+  type: "flashcards";
+  title?: string;
+  cards: Flashcard[];
+}
+
 /** Discriminated union of every block kind (switch on `block.type`). */
 export type Block =
   | HeadingBlock
@@ -203,7 +233,8 @@ export type Block =
   | DividerBlock
   | MediaBlock
   | DatabaseViewBlock
-  | ReactArtifactBlock;
+  | ReactArtifactBlock
+  | FlashcardsBlock;
 
 export interface Page {
   id: string;

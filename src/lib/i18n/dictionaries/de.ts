@@ -213,6 +213,7 @@ export const de = {
         onboarding: "Geführte Onboarding-Fragen",
         editing: "Vollständiges Inline-Bearbeiten & Autosave",
         databases: "Datenbanken — Tabelle, Board & Kalender",
+        flashcards: "Karteikarten mit verteilter Wiederholung",
         dragDrop: "Bearbeiten per Drag-and-drop",
         agentChat: "KI-Agent-Chat, der deinen Workspace bearbeitet",
         model: "Generierungsmodell",
@@ -462,6 +463,7 @@ export const de = {
       divider: "Trennlinie",
       database: "Tabelle",
       media: "Bild",
+      flashcards: "Karteikarten",
     },
     placeholders: {
       paragraph: "Schreib etwas…",
@@ -480,6 +482,45 @@ export const de = {
       statusDone: "Erledigt",
       viewTable: "Tabelle",
     },
+  },
+
+  // ---- Flashcards & spaced-repetition study -----------------------------
+  study: {
+    newDeckTitle: "Neuer Stapel",
+    untitledDeck: "Karteikarten",
+    deckTitlePlaceholder: "Titel des Stapels…",
+    stats: {
+      cards: "{count} Karten",
+      due: "{count} fällig",
+      mature: "{count} gelernt",
+    },
+    studyDue: "{count} fällige lernen",
+    allCaughtUp: "Alles erledigt 🎉",
+    editCards: "Karten bearbeiten",
+    doneEditing: "Fertig",
+    addCard: "+ Karte hinzufügen",
+    deleteCard: "Karte löschen",
+    emptyDeck: "Noch keine Karten. Füge eine hinzu oder bitte die KI, einen Stapel zu erstellen.",
+    frontPlaceholder: "Vorderseite (Frage)",
+    backPlaceholder: "Rückseite (Antwort)",
+    showAnswer: "Antwort anzeigen",
+    tapToReveal: "Tippe, um die Antwort zu zeigen",
+    spaceKey: "Leertaste",
+    grades: {
+      again: "Nochmal",
+      hard: "Schwer",
+      good: "Gut",
+      easy: "Einfach",
+    },
+    doneTitle: "Sitzung abgeschlossen",
+    doneSummary: "Du hast {count} Karten wiederholt.",
+    doneAgain: "{count} brauchen bald noch eine Wiederholung.",
+    finish: "Fertig",
+    // Workspace-level study launcher
+    dueAcrossWorkspace: "{count} fällige lernen",
+    noneDue: "Nichts fällig",
+    streak: "{count} Tage in Folge",
+    reviewAll: "Wiederholen",
   },
 
   // ---- Database views (table / board / calendar) ------------------------

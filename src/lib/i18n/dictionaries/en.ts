@@ -225,6 +225,7 @@ export const en = {
         onboarding: "Guided onboarding questions",
         editing: "Full inline editing & autosave",
         databases: "Databases — table, board & calendar",
+        flashcards: "Flashcards with spaced repetition",
         dragDrop: "Drag-and-drop editing",
         agentChat: "AI agent chat that edits your workspace",
         model: "Generation model",
@@ -475,6 +476,7 @@ export const en = {
       divider: "Divider",
       database: "Table",
       media: "Image",
+      flashcards: "Flashcards",
     },
     placeholders: {
       paragraph: "Type something…",
@@ -493,6 +495,45 @@ export const en = {
       statusDone: "Done",
       viewTable: "Table",
     },
+  },
+
+  // ---- Flashcards & spaced-repetition study -----------------------------
+  study: {
+    newDeckTitle: "New deck",
+    untitledDeck: "Flashcards",
+    deckTitlePlaceholder: "Deck title…",
+    stats: {
+      cards: "{count} cards",
+      due: "{count} due",
+      mature: "{count} learned",
+    },
+    studyDue: "Study {count} due",
+    allCaughtUp: "All caught up 🎉",
+    editCards: "Edit cards",
+    doneEditing: "Done",
+    addCard: "+ Add card",
+    deleteCard: "Delete card",
+    emptyDeck: "No cards yet. Add one, or ask the AI to make a deck.",
+    frontPlaceholder: "Front (question)",
+    backPlaceholder: "Back (answer)",
+    showAnswer: "Show answer",
+    tapToReveal: "Tap to reveal the answer",
+    spaceKey: "Space",
+    grades: {
+      again: "Again",
+      hard: "Hard",
+      good: "Good",
+      easy: "Easy",
+    },
+    doneTitle: "Session complete",
+    doneSummary: "You reviewed {count} cards.",
+    doneAgain: "{count} need another look soon.",
+    finish: "Done",
+    // Workspace-level study launcher
+    dueAcrossWorkspace: "Study {count} due",
+    noneDue: "Nothing due",
+    streak: "{count}-day streak",
+    reviewAll: "Review",
   },
 
   // ---- Database views (table / board / calendar) ------------------------

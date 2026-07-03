@@ -40,6 +40,14 @@ export function registerStage1Skills(registry: SkillRegistry = skillRegistry): v
     toolIds: [...INSPECT, "check_component", "apply_ops"],
   });
 
+  registry.register({
+    id: "flashcard-maker",
+    version: "1.0.0",
+    instructions:
+      "Create or extend a spaced-repetition flashcard deck. If the user points at existing material (a page, notes, a course, a topic in the workspace), inspect it first with find_entities/read_area and ground the cards in that content; otherwise generate from your own knowledge of the topic. Then apply_ops with set_page_blocks appending (or updating) a block of shape { id, type:'flashcards', title:<short topic>, cards:[{ id:<uuid>, front:<question/term>, back:<answer/definition> }, ...] }. Write clear, atomic Q&A pairs — one fact per card, question on the front, concise answer on the back. Default to 10-20 cards unless the user asks for a specific count. NEVER set the scheduling fields (ease, intervalDays, reps, dueAt, lastReviewedAt) — new cards omit them. Reuse existing ids exactly; generate a fresh uuid for each new card.",
+    toolIds: [...INSPECT, "apply_ops"],
+  });
+
   // This guard MUST stay in sync with the same `agentSandboxEnabled()` guard in
   // ../tools/register-sandbox.ts: when the flag is off the tool is not registered,
   // and the skill registry rejects a skill that references an absent toolId.
