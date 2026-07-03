@@ -569,6 +569,8 @@ export const en = {
     addOnDay: "Add on this day",
     clickToRename: "Click to rename",
     delete: "Delete",
+    addTag: "Add",
+    addLink: "Link",
   },
 
   // ---- Database settings panel ------------------------------------------

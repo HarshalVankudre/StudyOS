@@ -556,6 +556,8 @@ export const it = {
     addOnDay: "Aggiungi in questo giorno",
     clickToRename: "Clicca per rinominare",
     delete: "Elimina",
+    addTag: "Aggiungi",
+    addLink: "Collega",
   },
 
   // ---- Database settings panel ------------------------------------------

@@ -556,6 +556,8 @@ export const nl = {
     addOnDay: "Toevoegen op deze dag",
     clickToRename: "Klik om te hernoemen",
     delete: "Verwijderen",
+    addTag: "Toevoegen",
+    addLink: "Koppelen",
   },
 
   // ---- Database settings panel ------------------------------------------

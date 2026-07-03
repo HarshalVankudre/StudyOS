@@ -556,6 +556,8 @@ export const zh = {
     addOnDay: "在这一天添加",
     clickToRename: "点击重命名",
     delete: "删除",
+    addTag: "添加",
+    addLink: "关联",
   },
 
   // ---- Database settings panel ------------------------------------------
