@@ -213,6 +213,7 @@ export const it = {
         onboarding: "Domande guidate di configurazione",
         editing: "Modifica inline completa e salvataggio automatico",
         databases: "Database — tabella, bacheca e calendario",
+        flashcards: "Flashcard con ripetizione dilazionata",
         dragDrop: "Modifica con trascinamento",
         agentChat: "Chat con l’agente IA che modifica il tuo spazio",
         model: "Modello di generazione",
@@ -462,6 +463,7 @@ export const it = {
       divider: "Separatore",
       database: "Tabella",
       media: "Immagine",
+      flashcards: "Flashcard",
     },
     placeholders: {
       paragraph: "Scrivi qualcosa…",
@@ -480,6 +482,45 @@ export const it = {
       statusDone: "Fatto",
       viewTable: "Tabella",
     },
+  },
+
+  // ---- Flashcards & spaced-repetition study -----------------------------
+  study: {
+    newDeckTitle: "Nuovo mazzo",
+    untitledDeck: "Flashcard",
+    deckTitlePlaceholder: "Titolo del mazzo…",
+    stats: {
+      cards: "{count} carte",
+      due: "{count} da ripassare",
+      mature: "{count} imparate",
+    },
+    studyDue: "Studia {count} carte",
+    allCaughtUp: "Tutto in pari 🎉",
+    editCards: "Modifica le carte",
+    doneEditing: "Fatto",
+    addCard: "+ Aggiungi carta",
+    deleteCard: "Elimina carta",
+    emptyDeck: "Ancora nessuna carta. Aggiungine una oppure chiedi all’IA di creare un mazzo.",
+    frontPlaceholder: "Fronte (domanda)",
+    backPlaceholder: "Retro (risposta)",
+    showAnswer: "Mostra la risposta",
+    tapToReveal: "Tocca per rivelare la risposta",
+    spaceKey: "Spazio",
+    grades: {
+      again: "Di nuovo",
+      hard: "Difficile",
+      good: "Buono",
+      easy: "Facile",
+    },
+    doneTitle: "Sessione completata",
+    doneSummary: "Hai ripassato {count} carte.",
+    doneAgain: "{count} da rivedere presto.",
+    finish: "Fatto",
+    // Workspace-level study launcher
+    dueAcrossWorkspace: "Studia {count} carte",
+    noneDue: "Niente da ripassare",
+    streak: "Serie di {count} giorni",
+    reviewAll: "Ripassa",
   },
 
   // ---- Database views (table / board / calendar) ------------------------

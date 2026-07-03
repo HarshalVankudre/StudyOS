@@ -212,6 +212,7 @@ export const es = {
         onboarding: "Preguntas guiadas de incorporación",
         editing: "Edición en línea completa y autoguardado",
         databases: "Bases de datos — tabla, tablero y calendario",
+        flashcards: "Tarjetas con repetición espaciada",
         dragDrop: "Edición con arrastrar y soltar",
         agentChat: "Chat con agente de IA que edita tu espacio de trabajo",
         model: "Modelo de generación",
@@ -461,6 +462,7 @@ export const es = {
       divider: "Separador",
       database: "Tabla",
       media: "Imagen",
+      flashcards: "Tarjetas",
     },
     placeholders: {
       paragraph: "Escribe algo…",
@@ -479,6 +481,45 @@ export const es = {
       statusDone: "Hecho",
       viewTable: "Tabla",
     },
+  },
+
+  // ---- Flashcards & spaced-repetition study -----------------------------
+  study: {
+    newDeckTitle: "Nuevo mazo",
+    untitledDeck: "Tarjetas",
+    deckTitlePlaceholder: "Título del mazo…",
+    stats: {
+      cards: "{count} tarjetas",
+      due: "{count} pendientes",
+      mature: "{count} aprendidas",
+    },
+    studyDue: "Estudiar {count} pendientes",
+    allCaughtUp: "Todo al día 🎉",
+    editCards: "Editar tarjetas",
+    doneEditing: "Hecho",
+    addCard: "+ Añadir tarjeta",
+    deleteCard: "Eliminar tarjeta",
+    emptyDeck: "Aún no hay tarjetas. Añade una o pide a la IA que cree un mazo.",
+    frontPlaceholder: "Anverso (pregunta)",
+    backPlaceholder: "Reverso (respuesta)",
+    showAnswer: "Mostrar respuesta",
+    tapToReveal: "Toca para ver la respuesta",
+    spaceKey: "Espacio",
+    grades: {
+      again: "Otra vez",
+      hard: "Difícil",
+      good: "Bien",
+      easy: "Fácil",
+    },
+    doneTitle: "Sesión completada",
+    doneSummary: "Has repasado {count} tarjetas.",
+    doneAgain: "{count} necesitan otro repaso pronto.",
+    finish: "Hecho",
+    // Workspace-level study launcher
+    dueAcrossWorkspace: "Estudiar {count} pendientes",
+    noneDue: "Nada pendiente",
+    streak: "Racha de {count} días",
+    reviewAll: "Repasar",
   },
 
   // ---- Database views (table / board / calendar) ------------------------

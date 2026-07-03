@@ -10,6 +10,7 @@ import type { Workspace } from "@/lib/workspace/types";
 import { AccountMenu } from "@/components/account/AccountMenu";
 import { AgentChat } from "./AgentChat";
 import { PageView } from "./PageView";
+import { StudyLauncher } from "./StudyLauncher";
 import { WorkspaceProvider, type SaveStatus } from "./WorkspaceContext";
 
 export function WorkspaceEditor({
@@ -223,6 +224,7 @@ export function WorkspaceEditor({
               </span>
             </div>
             <div className="flex items-center gap-3">
+              <StudyLauncher />
               <ThemeToggle />
               <LanguageSwitcher compact />
               <button

@@ -213,6 +213,7 @@ export const nl = {
         onboarding: "Begeleide instapvragen",
         editing: "Volledige inline bewerking & automatisch opslaan",
         databases: "Databases — tabel, bord & agenda",
+        flashcards: "Flashcards met gespreide herhaling",
         dragDrop: "Bewerken met slepen en neerzetten",
         agentChat: "AI-agentchat die je werkruimte bewerkt",
         model: "Generatiemodel",
@@ -462,6 +463,7 @@ export const nl = {
       divider: "Scheidingslijn",
       database: "Tabel",
       media: "Afbeelding",
+      flashcards: "Flashcards",
     },
     placeholders: {
       paragraph: "Typ iets…",
@@ -480,6 +482,45 @@ export const nl = {
       statusDone: "Klaar",
       viewTable: "Tabel",
     },
+  },
+
+  // ---- Flashcards & spaced-repetition study -----------------------------
+  study: {
+    newDeckTitle: "Nieuwe stapel",
+    untitledDeck: "Flashcards",
+    deckTitlePlaceholder: "Stapeltitel…",
+    stats: {
+      cards: "{count} kaarten",
+      due: "{count} te herhalen",
+      mature: "{count} geleerd",
+    },
+    studyDue: "Herhaal {count} kaarten",
+    allCaughtUp: "Helemaal bij 🎉",
+    editCards: "Kaarten bewerken",
+    doneEditing: "Klaar",
+    addCard: "+ Kaart toevoegen",
+    deleteCard: "Kaart verwijderen",
+    emptyDeck: "Nog geen kaarten. Voeg er een toe, of vraag de AI om een stapel te maken.",
+    frontPlaceholder: "Voorkant (vraag)",
+    backPlaceholder: "Achterkant (antwoord)",
+    showAnswer: "Antwoord tonen",
+    tapToReveal: "Tik om het antwoord te tonen",
+    spaceKey: "Spatie",
+    grades: {
+      again: "Opnieuw",
+      hard: "Moeilijk",
+      good: "Goed",
+      easy: "Makkelijk",
+    },
+    doneTitle: "Sessie voltooid",
+    doneSummary: "Je hebt {count} kaarten herhaald.",
+    doneAgain: "{count} moet je binnenkort opnieuw bekijken.",
+    finish: "Klaar",
+    // Workspace-level study launcher
+    dueAcrossWorkspace: "Herhaal {count} kaarten",
+    noneDue: "Niets te herhalen",
+    streak: "Reeks van {count} dagen",
+    reviewAll: "Herhalen",
   },
 
   // ---- Database views (table / board / calendar) ------------------------

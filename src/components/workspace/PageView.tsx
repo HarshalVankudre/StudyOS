@@ -6,6 +6,7 @@ import { useI18n } from "@/lib/i18n/client";
 import type { Dictionary } from "@/lib/i18n/dictionaries/en";
 import { BlockText } from "./BlockText";
 import { DatabaseView } from "./DatabaseView";
+import { FlashcardsBlock } from "./FlashcardsBlock";
 import { ReactArtifact } from "./ReactArtifact";
 import { useWorkspace } from "./WorkspaceContext";
 
@@ -24,6 +25,7 @@ const BLOCK_TYPES = [
   { type: "callout", icon: "★" },
   { type: "divider", icon: "—" },
   { type: "database", icon: "▦" },
+  { type: "flashcards", icon: "🗂" },
 ];
 
 export function PageView({ page }: { page: Page }) {
@@ -149,6 +151,13 @@ function newBlock(type: string, dict: Dictionary): Block {
       return { id, type: "quote", text: "" };
     case "callout":
       return { id, type: "callout", text: "", emoji: "💡" };
+    case "flashcards":
+      return {
+        id,
+        type: "flashcards",
+        title: dict.study.newDeckTitle,
+        cards: [{ id: crypto.randomUUID(), front: "", back: "" }],
+      };
     case "divider":
       return { id, type: "divider" };
     case "paragraph":
@@ -357,6 +366,8 @@ function BlockView({ pageId, block }: { pageId: string; block: Block }) {
       );
     case "react_artifact":
       return <ReactArtifact source={block.source} title={block.title} />;
+    case "flashcards":
+      return <FlashcardsBlock pageId={pageId} block={block} />;
     default:
       return null;
   }

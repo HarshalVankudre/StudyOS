@@ -212,6 +212,7 @@ export const ja = {
         onboarding: "ガイド付きのオンボーディング質問",
         editing: "完全なインライン編集と自動保存",
         databases: "データベース — テーブル、ボード、カレンダー",
+        flashcards: "間隔反復付きフラッシュカード",
         dragDrop: "ドラッグ＆ドロップ編集",
         agentChat: "ワークスペースを編集するAIエージェントチャット",
         model: "生成モデル",
@@ -461,6 +462,7 @@ export const ja = {
       divider: "区切り線",
       database: "テーブル",
       media: "画像",
+      flashcards: "フラッシュカード",
     },
     placeholders: {
       paragraph: "入力してください…",
@@ -479,6 +481,45 @@ export const ja = {
       statusDone: "完了",
       viewTable: "テーブル",
     },
+  },
+
+  // ---- Flashcards & spaced-repetition study -----------------------------
+  study: {
+    newDeckTitle: "新しいデッキ",
+    untitledDeck: "フラッシュカード",
+    deckTitlePlaceholder: "デッキのタイトル…",
+    stats: {
+      cards: "カード {count} 枚",
+      due: "復習待ち {count} 枚",
+      mature: "習得済み {count} 枚",
+    },
+    studyDue: "{count} 枚を復習",
+    allCaughtUp: "すべて完了 🎉",
+    editCards: "カードを編集",
+    doneEditing: "完了",
+    addCard: "+ カードを追加",
+    deleteCard: "カードを削除",
+    emptyDeck: "まだカードがありません。追加するか、AI にデッキの作成を頼みましょう。",
+    frontPlaceholder: "表（問題）",
+    backPlaceholder: "裏（答え）",
+    showAnswer: "答えを表示",
+    tapToReveal: "タップして答えを表示",
+    spaceKey: "スペース",
+    grades: {
+      again: "もう一度",
+      hard: "難しい",
+      good: "普通",
+      easy: "簡単",
+    },
+    doneTitle: "セッション完了",
+    doneSummary: "{count} 枚のカードを復習しました。",
+    doneAgain: "{count} 枚は近いうちにもう一度確認しましょう。",
+    finish: "完了",
+    // Workspace-level study launcher
+    dueAcrossWorkspace: "{count} 枚を復習",
+    noneDue: "復習なし",
+    streak: "{count} 日連続",
+    reviewAll: "復習",
   },
 
   // ---- Database views (table / board / calendar) ------------------------

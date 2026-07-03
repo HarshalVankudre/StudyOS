@@ -213,6 +213,7 @@ export const pt = {
         onboarding: "Perguntas de configuração guiada",
         editing: "Edição inline completa e salvamento automático",
         databases: "Bancos de dados — tabela, quadro e calendário",
+        flashcards: "Flashcards com repetição espaçada",
         dragDrop: "Edição com arrastar e soltar",
         agentChat: "Chat com agente de IA que edita seu espaço de trabalho",
         model: "Modelo de geração",
@@ -462,6 +463,7 @@ export const pt = {
       divider: "Divisor",
       database: "Tabela",
       media: "Imagem",
+      flashcards: "Flashcards",
     },
     placeholders: {
       paragraph: "Digite algo…",
@@ -480,6 +482,45 @@ export const pt = {
       statusDone: "Concluído",
       viewTable: "Tabela",
     },
+  },
+
+  // ---- Flashcards & spaced-repetition study -----------------------------
+  study: {
+    newDeckTitle: "Novo baralho",
+    untitledDeck: "Flashcards",
+    deckTitlePlaceholder: "Título do baralho…",
+    stats: {
+      cards: "{count} cartões",
+      due: "{count} pendentes",
+      mature: "{count} aprendidos",
+    },
+    studyDue: "Estudar {count} pendentes",
+    allCaughtUp: "Tudo em dia 🎉",
+    editCards: "Editar cartões",
+    doneEditing: "Concluído",
+    addCard: "+ Adicionar cartão",
+    deleteCard: "Excluir cartão",
+    emptyDeck: "Ainda não há cartões. Adicione um ou peça à IA para criar um baralho.",
+    frontPlaceholder: "Frente (pergunta)",
+    backPlaceholder: "Verso (resposta)",
+    showAnswer: "Mostrar resposta",
+    tapToReveal: "Toque para revelar a resposta",
+    spaceKey: "Espaço",
+    grades: {
+      again: "De novo",
+      hard: "Difícil",
+      good: "Bom",
+      easy: "Fácil",
+    },
+    doneTitle: "Sessão concluída",
+    doneSummary: "Você revisou {count} cartões.",
+    doneAgain: "{count} precisam de outra revisão em breve.",
+    finish: "Concluído",
+    // Workspace-level study launcher
+    dueAcrossWorkspace: "Estudar {count} pendentes",
+    noneDue: "Nada pendente",
+    streak: "Sequência de {count} dias",
+    reviewAll: "Revisar",
   },
 
   // ---- Database views (table / board / calendar) ------------------------

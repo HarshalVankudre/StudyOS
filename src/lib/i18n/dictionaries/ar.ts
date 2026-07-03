@@ -213,6 +213,7 @@ export const ar = {
         onboarding: "أسئلة إعداد موجَّهة",
         editing: "تحرير ضمني كامل وحفظ تلقائي",
         databases: "قواعد بيانات — جدول ولوحة وتقويم",
+        flashcards: "بطاقات تعليمية مع التكرار المتباعد",
         dragDrop: "تحرير بالسحب والإفلات",
         agentChat: "محادثة وكيل ذكاء اصطناعي يحرّر مساحة عملك",
         model: "نموذج الإنشاء",
@@ -462,6 +463,7 @@ export const ar = {
       divider: "فاصل",
       database: "جدول",
       media: "صورة",
+      flashcards: "بطاقات تعليمية",
     },
     placeholders: {
       paragraph: "اكتب شيئًا…",
@@ -480,6 +482,45 @@ export const ar = {
       statusDone: "منجز",
       viewTable: "جدول",
     },
+  },
+
+  // ---- Flashcards & spaced-repetition study -----------------------------
+  study: {
+    newDeckTitle: "مجموعة جديدة",
+    untitledDeck: "بطاقات تعليمية",
+    deckTitlePlaceholder: "عنوان المجموعة…",
+    stats: {
+      cards: "{count} بطاقة",
+      due: "{count} للمراجعة",
+      mature: "{count} محفوظة",
+    },
+    studyDue: "ادرس {count} مستحقة",
+    allCaughtUp: "انتهت كل المراجعات 🎉",
+    editCards: "تحرير البطاقات",
+    doneEditing: "تم",
+    addCard: "+ إضافة بطاقة",
+    deleteCard: "حذف البطاقة",
+    emptyDeck: "لا توجد بطاقات بعد. أضِف واحدة، أو اطلب من الذكاء الاصطناعي إنشاء مجموعة.",
+    frontPlaceholder: "الأمام (سؤال)",
+    backPlaceholder: "الخلف (إجابة)",
+    showAnswer: "إظهار الإجابة",
+    tapToReveal: "انقر لإظهار الإجابة",
+    spaceKey: "المسافة",
+    grades: {
+      again: "من جديد",
+      hard: "صعب",
+      good: "جيد",
+      easy: "سهل",
+    },
+    doneTitle: "اكتملت الجلسة",
+    doneSummary: "راجعت {count} بطاقة.",
+    doneAgain: "{count} تحتاج إلى مراجعة أخرى قريبًا.",
+    finish: "تم",
+    // Workspace-level study launcher
+    dueAcrossWorkspace: "ادرس {count} مستحقة",
+    noneDue: "لا شيء للمراجعة",
+    streak: "سلسلة {count} يوم",
+    reviewAll: "مراجعة",
   },
 
   // ---- Database views (table / board / calendar) ------------------------

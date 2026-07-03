@@ -213,6 +213,7 @@ export const zh = {
         onboarding: "引导式上手问题",
         editing: "完整的行内编辑与自动保存",
         databases: "数据库 —— 表格、看板和日历",
+        flashcards: "支持间隔重复的记忆卡片",
         dragDrop: "拖放式编辑",
         agentChat: "可编辑工作空间的 AI 智能体对话",
         model: "生成模型",
@@ -462,6 +463,7 @@ export const zh = {
       divider: "分隔线",
       database: "表格",
       media: "图片",
+      flashcards: "记忆卡片",
     },
     placeholders: {
       paragraph: "输入点什么…",
@@ -480,6 +482,45 @@ export const zh = {
       statusDone: "已完成",
       viewTable: "表格",
     },
+  },
+
+  // ---- Flashcards & spaced-repetition study -----------------------------
+  study: {
+    newDeckTitle: "新建卡组",
+    untitledDeck: "记忆卡片",
+    deckTitlePlaceholder: "卡组标题…",
+    stats: {
+      cards: "{count} 张卡片",
+      due: "{count} 张待复习",
+      mature: "{count} 张已掌握",
+    },
+    studyDue: "复习 {count} 张",
+    allCaughtUp: "全部搞定 🎉",
+    editCards: "编辑卡片",
+    doneEditing: "完成",
+    addCard: "+ 添加卡片",
+    deleteCard: "删除卡片",
+    emptyDeck: "还没有卡片。添加一张，或让 AI 生成一套卡组。",
+    frontPlaceholder: "正面（问题）",
+    backPlaceholder: "背面（答案）",
+    showAnswer: "显示答案",
+    tapToReveal: "点按显示答案",
+    spaceKey: "空格键",
+    grades: {
+      again: "重来",
+      hard: "困难",
+      good: "良好",
+      easy: "简单",
+    },
+    doneTitle: "本次复习完成",
+    doneSummary: "你复习了 {count} 张卡片。",
+    doneAgain: "{count} 张需要尽快再看一遍。",
+    finish: "完成",
+    // Workspace-level study launcher
+    dueAcrossWorkspace: "复习 {count} 张",
+    noneDue: "没有待复习",
+    streak: "连续 {count} 天",
+    reviewAll: "复习",
   },
 
   // ---- Database views (table / board / calendar) ------------------------
