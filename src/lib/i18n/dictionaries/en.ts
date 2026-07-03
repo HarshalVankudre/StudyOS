@@ -767,6 +767,8 @@ export const en = {
       "Delete your account permanently?\n\nAll workspaces, credits, and your subscription will be removed. This can’t be undone.",
     deleteAccountButton: "Delete my account",
     deleting: "Deleting…",
+    deleteAccountError:
+      "We couldn’t cancel your subscription just now, so nothing was deleted. Please try again in a moment.",
   },
 
   // ---- Workspace card (delete control) ----------------------------------

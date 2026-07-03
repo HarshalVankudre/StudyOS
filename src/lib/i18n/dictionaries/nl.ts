@@ -752,6 +752,8 @@ export const nl = {
       "Je account definitief verwijderen?\n\nAl je werkruimtes, credits en je abonnement worden verwijderd. Dit kan niet ongedaan worden gemaakt.",
     deleteAccountButton: "Mijn account verwijderen",
     deleting: "Verwijderen…",
+    deleteAccountError:
+      "We konden je abonnement op dit moment niet opzeggen, dus er is niets verwijderd. Probeer het over een moment opnieuw.",
   },
 
   // ---- Workspace card (delete control) ----------------------------------

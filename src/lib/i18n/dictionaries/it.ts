@@ -752,6 +752,8 @@ export const it = {
       "Eliminare definitivamente il tuo account?\n\nTutti gli spazi, i crediti e l’abbonamento verranno rimossi. L’operazione non può essere annullata.",
     deleteAccountButton: "Elimina il mio account",
     deleting: "Eliminazione…",
+    deleteAccountError:
+      "Non siamo riusciti a disdire il tuo abbonamento in questo momento, quindi non è stato eliminato nulla. Riprova tra un momento.",
   },
 
   // ---- Workspace card (delete control) ----------------------------------

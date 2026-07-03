@@ -24,7 +24,8 @@ export function StudyLauncher() {
 
   useEffect(() => {
     let active = true;
-    getStudyStatsAction()
+    // Pass the browser's UTC offset so the streak is bucketed by local day.
+    getStudyStatsAction(new Date().getTimezoneOffset())
       .then((s) => {
         if (active) setStreak(s.streak);
       })
@@ -80,7 +81,10 @@ export function StudyLauncher() {
         </button>
       )}
 
-      {studying && dueCount > 0 && (
+      {/* No live-count guard: `items` empties as cards are graded; gating the
+          render on dueCount would unmount the session before its completion
+          screen. StudySession snapshots its queue; the button gates opening. */}
+      {studying && (
         <StudySession
           items={items}
           title={workspace.name}

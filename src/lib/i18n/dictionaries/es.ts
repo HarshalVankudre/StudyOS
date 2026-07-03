@@ -751,6 +751,8 @@ export const es = {
       "¿Eliminar tu cuenta permanentemente?\n\nSe eliminarán todos tus espacios de trabajo, tus créditos y tu suscripción. No se puede deshacer.",
     deleteAccountButton: "Eliminar mi cuenta",
     deleting: "Eliminando…",
+    deleteAccountError:
+      "No hemos podido cancelar tu suscripción en este momento, así que no se ha eliminado nada. Inténtalo de nuevo en un momento.",
   },
 
   // ---- Workspace card (delete control) ----------------------------------

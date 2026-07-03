@@ -23,6 +23,10 @@ export function normalizeSourceText(raw: string): string {
     .replace(/\r\n?/g, "\n")
     .replace(/[ \t]+\n/g, "\n") // trailing spaces
     .replace(/\n{3,}/g, "\n\n") // collapse blank-line runs
+    // Neutralize triple-quotes so pasted content (a Python """docstring""" in a
+    // CS syllabus, or an injection attempt) can't close the grounding fence in
+    // sourceTextBlock and leak into top-level prompt instructions.
+    .replace(/"{3,}/g, '""')
     .trim();
   return cleaned.length > MAX_SOURCE_TEXT
     ? cleaned.slice(0, MAX_SOURCE_TEXT)

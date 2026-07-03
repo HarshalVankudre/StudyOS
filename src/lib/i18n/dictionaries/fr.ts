@@ -751,6 +751,8 @@ export const fr = {
       "Supprimer définitivement votre compte ?\n\nTous vos espaces de travail, vos crédits et votre abonnement seront supprimés. Cette action est irréversible.",
     deleteAccountButton: "Supprimer mon compte",
     deleting: "Suppression…",
+    deleteAccountError:
+      "Nous n’avons pas pu annuler votre abonnement pour le moment, donc rien n’a été supprimé. Veuillez réessayer dans un instant.",
   },
 
   // ---- Workspace card (delete control) ----------------------------------

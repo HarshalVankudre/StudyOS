@@ -114,6 +114,24 @@ describe("FlashcardsBlock", () => {
     expect(screen.getByText("Session complete")).toBeInTheDocument();
   });
 
+  it("keeps the session mounted through completion after the last card leaves the due queue", async () => {
+    // Regression: the render guard used to be `studying && items.length > 0`,
+    // which unmounted the session the moment the last card was graded (items
+    // recomputes to empty), so the "Session complete" screen never showed.
+    const user = userEvent.setup();
+    const block = withWorkspace(deckWith([{ id: "c1", front: "Q", back: "A" }]));
+    const { rerender } = render(<FlashcardsBlock pageId="p1" block={block} />);
+    await user.click(screen.getByRole("button", { name: "Study 1 due" }));
+    await user.click(screen.getByRole("button", { name: /Show answer/ }));
+    await user.click(screen.getByRole("button", { name: /Good/ }));
+    // Grading scheduled the card into the future; reflect the parent re-render
+    // that production performs (the deck now has 0 due cards).
+    rerender(
+      <FlashcardsBlock pageId="p1" block={workspace.pages[0].blocks[0] as Deck} />,
+    );
+    expect(screen.getByText("Session complete")).toBeInTheDocument();
+  });
+
   it("disables study when nothing is due", () => {
     const future = "2999-01-01";
     const block = withWorkspace(

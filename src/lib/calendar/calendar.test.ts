@@ -70,6 +70,33 @@ describe("workspaceEvents", () => {
     expect(new Set(uids).size).toBe(uids.length);
     expect(workspaceEvents(workspace())[0].uid).toBe(events[0].uid); // stable
   });
+
+  it("skips malformed dates instead of emitting an invalid event", () => {
+    const ws: Workspace = {
+      id: "w",
+      name: "w",
+      databases: [
+        {
+          id: "d",
+          name: "Assignments",
+          properties: [
+            { id: "t", name: "T", type: "text" },
+            { id: "due", name: "Due", type: "date" },
+          ],
+          rows: [
+            { id: "r1", cells: { t: "Bad", due: "2026-99-99" } },
+            { id: "r2", cells: { t: "Rollover", due: "2026-13-40" } },
+            { id: "r3", cells: { t: "Good", due: "2026-09-14" } },
+          ],
+          views: [],
+        },
+      ],
+      pages: [],
+    };
+    const events = workspaceEvents(ws);
+    expect(events).toHaveLength(1);
+    expect(events[0].summary).toBe("Good");
+  });
 });
 
 describe("escapeText", () => {
@@ -89,6 +116,20 @@ describe("foldLine", () => {
     }
     // Unfolding (drop CRLF+space) restores the original.
     expect(folded.replace(/\r\n /g, "")).toBe("X:" + "a".repeat(200));
+  });
+
+  it("folds by OCTETS and never splits a multibyte code point", () => {
+    const enc = new TextEncoder();
+    // Mix of 3-byte CJK and 4-byte emoji so byte length != code-unit length.
+    const line = "SUMMARY:" + "课".repeat(40) + "📚".repeat(20);
+    const folded = foldLine(line);
+    for (const physical of folded.split("\r\n")) {
+      expect(enc.encode(physical).length).toBeLessThanOrEqual(75);
+    }
+    // Unfolds losslessly — no replacement chars from a split surrogate.
+    const unfolded = folded.replace(/\r\n /g, "");
+    expect(unfolded).toBe(line);
+    expect(unfolded).not.toContain("�");
   });
 });
 

@@ -22,11 +22,16 @@ export async function recordStudyReviewAction(): Promise<void> {
 /**
  * The user's current daily study streak (consecutive days with a review) and
  * whether they've studied today. Reads at most ~400 days of review events.
+ *
+ * Streaks are day-bucketed in the USER's local time — a review at 11pm and one
+ * the next evening are consecutive local days even if they straddle a UTC
+ * boundary. The client passes its `Date.getTimezoneOffset()` (minutes; positive
+ * west of UTC) so the server, which stores UTC timestamps, can shift them to
+ * the user's local day before bucketing.
  */
-export async function getStudyStatsAction(): Promise<{
-  streak: number;
-  studiedToday: boolean;
-}> {
+export async function getStudyStatsAction(
+  offsetMinutes = 0,
+): Promise<{ streak: number; studiedToday: boolean }> {
   const { userId } = await auth();
   if (!userId) return { streak: 0, studiedToday: false };
 
@@ -37,8 +42,10 @@ export async function getStudyStatsAction(): Promise<{
     select: { createdAt: true },
   });
 
-  const days = Array.from(new Set(events.map((e) => isoDay(e.createdAt))));
-  const today = isoDay(new Date());
+  const shift = Number.isFinite(offsetMinutes) ? offsetMinutes * 60_000 : 0;
+  const localDay = (d: Date) => isoDay(new Date(d.getTime() - shift));
+  const days = Array.from(new Set(events.map((e) => localDay(e.createdAt))));
+  const today = localDay(new Date());
   return {
     streak: computeStreak(days, today),
     studiedToday: days.includes(today),

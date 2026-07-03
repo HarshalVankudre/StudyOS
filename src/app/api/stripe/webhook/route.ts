@@ -52,13 +52,23 @@ export async function POST(req: Request) {
     }
   } else if (event.type === "invoice.paid") {
     const inv = event.data.object as Stripe.Invoice;
+    // Basil (2025-03-31)+ nests this under invoice.parent.subscription_details;
+    // older webhook API versions put it at the top level (invoice.subscription
+    // / invoice.subscription_details). Read both so a pre-Basil webhook version
+    // can't silently grant a paying Pro user 0 credits.
+    const legacy = inv as unknown as {
+      subscription?: string | { id: string };
+      subscription_details?: { metadata?: { userId?: string } };
+    };
     const details = inv.parent?.subscription_details;
-    if (details) {
-      const subId =
-        typeof details.subscription === "string"
-          ? details.subscription
-          : details.subscription?.id;
-      let userId = details.metadata?.userId ?? null;
+    const rawSub = details?.subscription ?? legacy.subscription;
+    const metaUserId =
+      details?.metadata?.userId ??
+      legacy.subscription_details?.metadata?.userId ??
+      null;
+    if (rawSub) {
+      const subId = typeof rawSub === "string" ? rawSub : rawSub?.id;
+      let userId = metaUserId;
       if (!userId && subId) {
         const row = await prisma.subscription.findFirst({
           where: { stripeSubscriptionId: subId },

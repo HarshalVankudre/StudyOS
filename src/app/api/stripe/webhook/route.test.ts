@@ -107,6 +107,30 @@ describe("stripe webhook", () => {
     );
   });
 
+  it("grants on the legacy pre-Basil invoice shape (top-level subscription)", async () => {
+    // Older webhook API versions have no invoice.parent; the subscription is
+    // top-level. A paying Pro user must still get credits.
+    mocks.constructEvent.mockReturnValue({
+      type: "invoice.paid",
+      data: {
+        object: {
+          id: "in_legacy",
+          parent: null,
+          subscription: "sub_legacy",
+          subscription_details: { metadata: { userId: "user_5" } },
+        },
+      },
+    });
+    const res = await POST(request());
+    expect(res.status).toBe(200);
+    expect(mocks.grantCredits).toHaveBeenCalledWith(
+      "user_5",
+      PRO_MONTHLY_CREDITS,
+      "pro_monthly",
+      "pro_grant:in_legacy",
+    );
+  });
+
   it("returns 500 (Stripe will retry) when the subscription is unknown", async () => {
     mocks.constructEvent.mockReturnValue({
       type: "invoice.paid",
