@@ -59,3 +59,8 @@ next-env.d.ts
 
 # bundled sandbox-iframe runtime (built by scripts/build-embed-runtime.mjs)
 /public/embed/
+
+# Playwright
+/test-results/
+/playwright-report/
+/e2e-results/

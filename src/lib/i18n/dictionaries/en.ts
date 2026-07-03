@@ -23,7 +23,7 @@ export const en = {
     generateTitle: "Generate your workspace · StudyOS",
     pricingTitle: "Pricing · StudyOS",
     pricingDescription:
-      "Compare StudyOS Free and Pro. Start free and upgrade when you want the most capable model, unlimited generations, and priority support.",
+      "Compare StudyOS Free and Pro. Start free and upgrade when you want the most capable model, a bigger monthly credit allowance, and priority support.",
     workspaceTitle: "{name} · StudyOS",
     brandFallback: "StudyOS",
   },
@@ -180,7 +180,7 @@ export const en = {
     badge: "Simple, student-friendly pricing",
     title: "Start free. Upgrade when you’re ready.",
     subtitle:
-      "Everything you need to organize your semester is free. Pro adds the most capable model, unlimited generations, and priority support.",
+      "Everything you need to organize your semester is free. Pro adds the most capable model, a bigger monthly credit allowance, and priority support.",
     free: {
       name: "Free",
       price: "$0",
@@ -193,7 +193,7 @@ export const en = {
       ],
       ctaSignedOut: "Get started free",
       ctaSignedIn: "Open your workspaces",
-      bulletCredits: "{count} starter AI credits",
+      bulletCredits: "{count} free AI credits every month",
     },
     pro: {
       badge: "Most popular",
@@ -203,7 +203,7 @@ export const en = {
       billed: "Billed monthly · cancel anytime.",
       bullets: [
         "Everything in Free",
-        "Unlimited workspace generations",
+        "A monthly allowance for heavy use",
         "The most capable, most detailed model",
         "Priority support & early access",
       ],
@@ -211,7 +211,7 @@ export const en = {
       manageBilling: "Manage billing",
       upgrade: "Upgrade to Pro",
       ctaSignedOut: "Get started with Pro",
-      bulletCredits: "{count} AI credits included",
+      bulletCredits: "{count} AI credits every month",
     },
     comparison: {
       title: "Compare plans",
@@ -247,9 +247,9 @@ export const en = {
       heading: "AI runs on credits",
       intro:
         "Every AI request spends credits based on how much it does — a quick tweak costs a little, building a whole workspace costs more. Pro comes loaded with credits, and you can top up anytime.",
-      freeIncludes: "Free includes {count} starter credits",
-      proIncludes: "Pro includes {count} credits",
-      neverExpire: "Top up anytime — credits never expire",
+      freeIncludes: "Free includes {count} credits every month",
+      proIncludes: "Pro includes {count} credits every month",
+      neverExpire: "Top up anytime — purchased packs never expire",
       balance: "Your balance: {count} credits",
       pack: "Credit pack",
       unit: "credits",
@@ -265,7 +265,7 @@ export const en = {
       },
       {
         q: "What do I get with Pro?",
-        a: "Unlimited generations, the most capable model for richer and more accurate workspaces, priority support, and early access to new features.",
+        a: "A large monthly credit allowance, the most capable model for richer and more accurate workspaces, priority support, and early access to new features.",
       },
       {
         q: "Can I cancel anytime?",
@@ -691,10 +691,18 @@ export const en = {
     upgrade: "Upgrade to Pro",
     comparePlans: "Compare plans",
     creditsDesc:
-      "Credits power every AI request. Top up anytime — credits never expire.",
+      "Credits power every AI request. Your plan refreshes them monthly, and purchased packs never expire.",
     buyPack: "Buy {count} credits · ${price}",
     viewPricing: "View pricing",
     signOut: "Sign out",
+    dangerZone: "Danger zone",
+    deleteAccount: "Delete account",
+    deleteAccountDesc:
+      "Permanently delete your account, workspaces, credits, and subscription. This can’t be undone.",
+    deleteAccountConfirm:
+      "Delete your account permanently?\n\nAll workspaces, credits, and your subscription will be removed. This can’t be undone.",
+    deleteAccountButton: "Delete my account",
+    deleting: "Deleting…",
   },
 
   // ---- Workspace card (delete control) ----------------------------------
@@ -703,6 +711,31 @@ export const en = {
     deleteAria: "Delete {name}",
     deleteConfirm:
       "Delete “{name}”?\n\nThis permanently removes the workspace and everything in it. This can’t be undone.",
+  },
+
+  // ---- Error & not-found pages -------------------------------------------
+  errors: {
+    notFoundTitle: "Page not found",
+    notFoundBody: "This page doesn’t exist — it may have been moved or deleted.",
+    errorTitle: "Something went wrong",
+    errorBody:
+      "An unexpected error occurred. Your work is autosaved — try again.",
+    tryAgain: "Try again",
+    backHome: "Back to home",
+  },
+
+  // ---- Legal & footer -----------------------------------------------------
+  legal: {
+    terms: "Terms of Service",
+    privacy: "Privacy Policy",
+    contact: "Contact",
+  },
+
+  // ---- Usage limits --------------------------------------------------------
+  limits: {
+    rateLimited:
+      "You’ve hit the request limit for now. Please wait a moment and try again.",
+    sandboxQuota: "You’ve reached today’s rendering limit. It resets tomorrow.",
   },
 
   // ---- Mock generator scaffolding (no-API-key fallback) ------------------

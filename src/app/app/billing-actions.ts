@@ -20,10 +20,14 @@ async function originUrl(): Promise<string> {
 /** Start a Stripe Checkout for the Pro subscription and redirect to it. */
 export async function startCheckoutAction(): Promise<void> {
   const { userId } = await auth();
-  if (!userId) throw new Error("Not authenticated");
+  if (!userId) redirect("/sign-in");
 
   const priceId = process.env.STRIPE_PRICE_PRO;
-  if (!priceId) throw new Error("STRIPE_PRICE_PRO is not set");
+  // Billing not configured in this environment: bounce back gracefully
+  // instead of surfacing a server error to the user.
+  if (!priceId || !process.env.STRIPE_SECRET_KEY) {
+    redirect("/pricing?billing=unavailable");
+  }
 
   const user = await currentUser();
   const email = user?.emailAddresses?.[0]?.emailAddress;

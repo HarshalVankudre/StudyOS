@@ -24,11 +24,19 @@ const USD_PER_CREDIT = USD_PER_1000_CREDITS / 1000; // $0.003
 
 /** Credits granted automatically the first time a user is seen (free tier). */
 export const FREE_SIGNUP_CREDITS = 300;
-/** Credits granted automatically when a user upgrades to Pro. */
-export const PRO_SIGNUP_CREDITS = 1000;
+/**
+ * Free users refresh to at least this many credits each calendar month (only
+ * granted when the balance has dropped below it — no stockpiling). Keeps free
+ * users alive to return at exam season instead of dying at zero forever.
+ */
+export const FREE_MONTHLY_CREDITS = 150;
+/** Credits granted on every paid Pro invoice (signup and each renewal). */
+export const PRO_MONTHLY_CREDITS = 1000;
 /** The buyable credit pack. */
 export const CREDIT_PACK_SIZE = 1000;
 export const CREDIT_PACK_PRICE_USD = 10;
+/** Flat credit price of one sandbox render run (covers Daytona compute). */
+export const SANDBOX_RUN_CREDITS = 2;
 
 /** Dollar cost of a request's tokens at GLM 5.2 list price. */
 export function usageToUsd(usage: TokenUsage): number {
@@ -69,10 +77,35 @@ async function ensureAccount(userId: string): Promise<{ balance: number }> {
   return account ?? { balance: 0 };
 }
 
+/**
+ * Monthly free-tier refresh, applied lazily on any balance read: when a
+ * non-Pro user's balance has fallen below FREE_MONTHLY_CREDITS, grant the
+ * month's refresh once (idempotent per calendar month). Pro users get their
+ * monthly credits from the paid-invoice webhook instead.
+ */
+async function maybeMonthlyRefresh(
+  userId: string,
+  balance: number,
+): Promise<number> {
+  if (balance >= FREE_MONTHLY_CREDITS) return 0;
+  const sub = await prisma.subscription.findUnique({ where: { userId } });
+  if (sub?.status === "active") return 0;
+  const monthKey = new Date().toISOString().slice(0, 7); // YYYY-MM
+  await grantCredits(
+    userId,
+    FREE_MONTHLY_CREDITS,
+    "free_monthly",
+    `free_monthly:${userId}:${monthKey}`,
+  );
+  const account = await prisma.creditAccount.findUnique({ where: { userId } });
+  return account ? account.balance - balance : 0;
+}
+
 /** Current balance (creates + seeds the account on first call). */
 export async function getCreditBalance(userId: string): Promise<number> {
   const account = await ensureAccount(userId);
-  return account.balance;
+  const refreshed = await maybeMonthlyRefresh(userId, account.balance);
+  return account.balance + refreshed;
 }
 
 /** True when the user has at least `min` credits (default 1). */

@@ -6,6 +6,8 @@ import { Storage } from "@google-cloud/storage";
 export interface AssetStore {
   put(key: string, bytes: Uint8Array, mime: string): Promise<void>;
   signedReadUrl(key: string, ttlMs: number): Promise<string>;
+  /** Best-effort removal (account deletion). Missing objects are not errors. */
+  delete(key: string): Promise<void>;
 }
 
 let storage: Storage | undefined;
@@ -35,6 +37,12 @@ export function gcsAssetStore(): AssetStore {
         .file(key)
         .getSignedUrl({ version: "v4", action: "read", expires: Date.now() + ttlMs });
       return url;
+    },
+    async delete(key) {
+      await client()
+        .bucket(bucketName())
+        .file(key)
+        .delete({ ignoreNotFound: true });
     },
   };
 }

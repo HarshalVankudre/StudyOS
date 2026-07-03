@@ -5,7 +5,7 @@ import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/db";
 import { stripe } from "@/lib/stripe";
 import type { Plan } from "@/lib/ai/plans";
-import { CREDIT_PACK_SIZE, grantCredits, PRO_SIGNUP_CREDITS } from "@/lib/credits";
+import { CREDIT_PACK_SIZE, grantCredits } from "@/lib/credits";
 
 /** The current user's plan — "pro" when they have an active subscription. */
 export async function getUserPlan(): Promise<Plan> {
@@ -63,6 +63,8 @@ export async function reconcileCheckoutSession(sessionId: string): Promise<void>
     if (!paid) return;
 
     if (session.mode === "subscription") {
+      // Status only: the Pro credit grant rides on the invoice.paid webhook
+      // (first invoice + every renewal), so it isn't granted here too.
       await setSubscription(userId, {
         status: "active",
         stripeCustomerId:
@@ -70,11 +72,6 @@ export async function reconcileCheckoutSession(sessionId: string): Promise<void>
         stripeSubscriptionId:
           typeof session.subscription === "string" ? session.subscription : null,
       });
-      const key =
-        typeof session.subscription === "string"
-          ? session.subscription
-          : sessionId;
-      await grantCredits(userId, PRO_SIGNUP_CREDITS, "pro_signup", `pro_grant:${key}`);
     } else if (
       session.mode === "payment" &&
       session.metadata?.kind === "credits"

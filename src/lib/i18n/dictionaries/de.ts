@@ -11,7 +11,7 @@ export const de = {
     generateTitle: "Deinen Workspace generieren · StudyOS",
     pricingTitle: "Preise · StudyOS",
     pricingDescription:
-      "Vergleiche StudyOS Kostenlos und Pro. Starte kostenlos und upgrade, wenn du das leistungsfähigste Modell, unbegrenzte Generierungen und priorisierten Support willst.",
+      "Vergleiche StudyOS Kostenlos und Pro. Starte kostenlos und upgrade, wenn du das leistungsfähigste Modell, ein größeres monatliches Credit-Kontingent und priorisierten Support willst.",
     workspaceTitle: "{name} · StudyOS",
     brandFallback: "StudyOS",
   },
@@ -168,7 +168,7 @@ export const de = {
     badge: "Einfache, studierendenfreundliche Preise",
     title: "Kostenlos starten. Upgrade, wenn du bereit bist.",
     subtitle:
-      "Alles, was du brauchst, um dein Semester zu organisieren, ist kostenlos. Pro ergänzt das leistungsfähigste Modell, unbegrenzte Generierungen und priorisierten Support.",
+      "Alles, was du brauchst, um dein Semester zu organisieren, ist kostenlos. Pro ergänzt das leistungsfähigste Modell, ein größeres monatliches Credit-Kontingent und priorisierten Support.",
     free: {
       name: "Kostenlos",
       price: "$0",
@@ -181,7 +181,7 @@ export const de = {
       ],
       ctaSignedOut: "Kostenlos loslegen",
       ctaSignedIn: "Deine Workspaces öffnen",
-      bulletCredits: "{count} KI-Credits zum Start",
+      bulletCredits: "{count} kostenlose KI-Credits jeden Monat",
     },
     pro: {
       badge: "Am beliebtesten",
@@ -191,7 +191,7 @@ export const de = {
       billed: "Monatlich abgerechnet · jederzeit kündbar.",
       bullets: [
         "Alles aus Kostenlos",
-        "Unbegrenzte Workspace-Generierungen",
+        "Ein monatliches Kontingent für intensive Nutzung",
         "Das leistungsfähigste, detaillierteste Modell",
         "Priorisierter Support & früher Zugang",
       ],
@@ -199,7 +199,7 @@ export const de = {
       manageBilling: "Abrechnung verwalten",
       upgrade: "Auf Pro upgraden",
       ctaSignedOut: "Mit Pro loslegen",
-      bulletCredits: "{count} KI-Credits inklusive",
+      bulletCredits: "{count} KI-Credits jeden Monat",
     },
     comparison: {
       title: "Tarife vergleichen",
@@ -235,9 +235,9 @@ export const de = {
       heading: "KI läuft mit Credits",
       intro:
         "Jede KI-Anfrage verbraucht Credits, je nachdem, wie viel sie leistet — eine schnelle Anpassung kostet wenig, einen ganzen Workspace zu bauen kostet mehr. Pro kommt randvoll mit Credits, und du kannst jederzeit aufladen.",
-      freeIncludes: "Kostenlos enthält {count} Start-Credits",
-      proIncludes: "Pro enthält {count} Credits",
-      neverExpire: "Jederzeit aufladen — Credits verfallen nie",
+      freeIncludes: "Kostenlos enthält {count} Credits jeden Monat",
+      proIncludes: "Pro enthält {count} Credits jeden Monat",
+      neverExpire: "Jederzeit aufladen — gekaufte Pakete verfallen nie",
       balance: "Dein Guthaben: {count} Credits",
       pack: "Credit-Paket",
       unit: "Credits",
@@ -253,7 +253,7 @@ export const de = {
       },
       {
         q: "Was bekomme ich mit Pro?",
-        a: "Unbegrenzte Generierungen, das leistungsfähigste Modell für reichhaltigere und genauere Workspaces, priorisierten Support und frühen Zugang zu neuen Funktionen.",
+        a: "Ein großes monatliches Credit-Kontingent, das leistungsfähigste Modell für reichhaltigere und genauere Workspaces, priorisierten Support und frühen Zugang zu neuen Funktionen.",
       },
       {
         q: "Kann ich jederzeit kündigen?",
@@ -676,10 +676,18 @@ export const de = {
     upgrade: "Auf Pro upgraden",
     comparePlans: "Tarife vergleichen",
     creditsDesc:
-      "Credits treiben jede KI-Anfrage an. Lade jederzeit auf — Credits verfallen nie.",
+      "Credits treiben jede KI-Anfrage an. Dein Tarif füllt sie monatlich auf, und gekaufte Pakete verfallen nie.",
     buyPack: "{count} Credits kaufen · ${price}",
     viewPricing: "Preise ansehen",
     signOut: "Abmelden",
+    dangerZone: "Gefahrenzone",
+    deleteAccount: "Konto löschen",
+    deleteAccountDesc:
+      "Lösche dein Konto, deine Workspaces, deine Credits und dein Abo dauerhaft. Das kann nicht rückgängig gemacht werden.",
+    deleteAccountConfirm:
+      "Dein Konto dauerhaft löschen?\n\nAlle Workspaces, Credits und dein Abo werden entfernt. Das kann nicht rückgängig gemacht werden.",
+    deleteAccountButton: "Mein Konto löschen",
+    deleting: "Wird gelöscht…",
   },
 
   // ---- Workspace card (delete control) ----------------------------------
@@ -688,6 +696,31 @@ export const de = {
     deleteAria: "{name} löschen",
     deleteConfirm:
       "„{name}“ löschen?\n\nDadurch werden der Workspace und alles darin dauerhaft entfernt. Das kann nicht rückgängig gemacht werden.",
+  },
+
+  // ---- Error & not-found pages -------------------------------------------
+  errors: {
+    notFoundTitle: "Seite nicht gefunden",
+    notFoundBody: "Diese Seite existiert nicht — vielleicht wurde sie verschoben oder gelöscht.",
+    errorTitle: "Etwas ist schiefgelaufen",
+    errorBody:
+      "Ein unerwarteter Fehler ist aufgetreten. Deine Arbeit ist automatisch gespeichert — versuch es erneut.",
+    tryAgain: "Erneut versuchen",
+    backHome: "Zurück zur Startseite",
+  },
+
+  // ---- Legal & footer -----------------------------------------------------
+  legal: {
+    terms: "Nutzungsbedingungen",
+    privacy: "Datenschutzerklärung",
+    contact: "Kontakt",
+  },
+
+  // ---- Usage limits --------------------------------------------------------
+  limits: {
+    rateLimited:
+      "Du hast vorerst das Anfragelimit erreicht. Bitte warte einen Moment und versuch es erneut.",
+    sandboxQuota: "Du hast das heutige Rendering-Limit erreicht. Es wird morgen zurückgesetzt.",
   },
 
   // ---- Mock generator scaffolding (no-API-key fallback) ------------------

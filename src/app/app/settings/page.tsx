@@ -10,6 +10,7 @@ import {
   getCreditBalance,
 } from "@/lib/credits";
 import { getI18n } from "@/lib/i18n/server";
+import { DeleteAccountButton } from "@/components/account/DeleteAccountButton";
 import { ManageAccountButton } from "@/components/account/ManageAccountButton";
 import {
   buyCreditsAction,
@@ -169,6 +170,17 @@ export default async function SettingsPage() {
             >
               {S.viewPricing}
             </Link>
+          </div>
+        </section>
+
+        {/* Danger zone */}
+        <section className="mt-6 rounded-2xl border border-rose-600/25 bg-card/60 p-6">
+          <h2 className="font-display text-lg font-bold text-rose-600">
+            {S.dangerZone}
+          </h2>
+          <p className="mt-3 text-sm text-ink-soft">{S.deleteAccountDesc}</p>
+          <div className="mt-5">
+            <DeleteAccountButton />
           </div>
         </section>
 
