@@ -10,6 +10,7 @@ import {
   getCreditBalance,
   PRO_MONTHLY_CREDITS,
 } from "@/lib/credits";
+import { estimatedEdits, estimatedGenerations } from "@/lib/credits-info";
 import {
   buyCreditsAction,
   manageBillingAction,
@@ -289,6 +290,12 @@ export default async function PricingPage() {
                 <div className="mt-3 font-display text-2xl font-bold">
                   ${CREDIT_PACK_PRICE_USD}
                 </div>
+                <p className="mt-1 text-xs text-ink-soft">
+                  {t(dict.credits.buysApprox, {
+                    gens: estimatedGenerations(CREDIT_PACK_SIZE),
+                    edits: estimatedEdits(CREDIT_PACK_SIZE),
+                  })}
+                </p>
                 <div className="mt-5">
                   {signedIn ? (
                     <form action={buyCreditsAction}>

@@ -683,6 +683,12 @@ export const pt = {
       "Seus créditos de IA acabaram. Adicione mais na página de Preços para continuar gerando.",
     outAgent:
       "Seus créditos de IA acabaram. Adicione mais na página de Preços para continuar usando o agente.",
+    // Transparency: always-visible meter, per-action cost, low-balance nudge.
+    low: "Baixo",
+    runningLow: "Seus créditos estão acabando.",
+    turnCostTitle: "Créditos deste turno",
+    buysApprox: "≈ {gens} gerações de espaços de trabalho ou {edits} edições do agente",
+    buyMore: "Comprar mais",
   },
 
   // ---- Account menu -----------------------------------------------------

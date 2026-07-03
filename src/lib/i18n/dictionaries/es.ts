@@ -682,6 +682,12 @@ export const es = {
       "Te has quedado sin créditos de IA. Añade más desde la página de Precios para seguir generando.",
     outAgent:
       "Te has quedado sin créditos de IA. Añade más desde la página de Precios para seguir usando el agente.",
+    // Transparency: always-visible meter, per-action cost, low-balance nudge.
+    low: "Bajo",
+    runningLow: "Te estás quedando sin créditos.",
+    turnCostTitle: "Créditos de este turno",
+    buysApprox: "≈ {gens} generaciones de espacios de trabajo o {edits} ediciones del agente",
+    buyMore: "Comprar más",
   },
 
   // ---- Account menu -----------------------------------------------------
