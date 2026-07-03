@@ -88,25 +88,30 @@ export const nl = {
           title: "Werkruimtes, op maat voor jou",
           body: "Eén prompt wordt een complete werkruimte, afgestemd op precies jouw vakken.",
         },
+        flashcards: {
+          k: "Flashcards",
+          title: "Leer met gespreide herhaling",
+          body: "Maak van elk onderwerp een stapel. StudyOS plant elke kaart zo dat je hem herhaalt net voordat je hem zou vergeten.",
+        },
+        calendar: {
+          k: "Agendasynchronisatie",
+          title: "Je deadlines, overal",
+          body: "Abonneer je in Google, Apple of Outlook Calendar — elke opdracht en elk tentamen blijft automatisch gesynchroniseerd.",
+        },
+        syllabus: {
+          k: "Studiewijzer importeren",
+          title: "Begin met je studiewijzer",
+          body: "Plak of upload je studiewijzer en StudyOS bouwt op je echte vakken, data en onderwerpen.",
+        },
         databases: {
           k: "Databases",
           title: "Echte, gestructureerde data",
           body: "Opdrachten, cijfers en leesstof als tabellen met eigen velden — geen losse notities.",
         },
-        calendar: {
-          k: "Agenda",
-          title: "Planner & agenda",
-          body: "Elke deadline op één plek. Wissel met één klik tussen tabel, bord en agenda.",
-        },
         dashboard: {
           k: "Dashboard",
           title: "Een helder thuisbasis",
           body: "Een pagina die je hele week samenbrengt, zodat je altijd weet wat er aankomt.",
-        },
-        autosave: {
-          k: "Automatisch opslaan",
-          title: "Bewerk, direct opgeslagen",
-          body: "Hernoem, vink af, voeg rijen toe — elke wijziging slaat zichzelf op zodra je hem maakt.",
         },
         assistant: {
           k: "Assistent",
@@ -124,8 +129,8 @@ export const nl = {
         price: "$0",
         features: [
           "AI-werkruimtes genereren",
-          "Alles bewerken & automatisch opslaan",
-          "Dashboards, databases, agenda",
+          "Flashcards & gespreide herhaling",
+          "Agendasynchronisatie & studiewijzer importeren",
           "Vraag om bewerkingen in gewoon Nederlands",
         ],
         cta: "Aan de slag",
@@ -136,7 +141,7 @@ export const nl = {
         price: "$5",
         features: [
           "Alles uit Gratis",
-          "Onbeperkte generaties",
+          "Een groot maandelijks credittegoed",
           "Het slimste, meest gedetailleerde model",
           "Prioriteitssupport",
         ],
@@ -214,6 +219,8 @@ export const nl = {
         editing: "Volledige inline bewerking & automatisch opslaan",
         databases: "Databases — tabel, bord & agenda",
         flashcards: "Flashcards met gespreide herhaling",
+        calendarSync: "Agendasynchronisatie (Google / Apple / Outlook)",
+        syllabusImport: "Studiewijzer importeren",
         dragDrop: "Bewerken met slepen en neerzetten",
         agentChat: "AI-agentchat die je werkruimte bewerkt",
         model: "Generatiemodel",

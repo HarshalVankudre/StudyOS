@@ -87,25 +87,30 @@ export const fr = {
           title: "Des espaces conçus pour vous",
           body: "Une seule consigne devient un espace de travail complet, adapté à vos cours exacts.",
         },
+        flashcards: {
+          k: "Cartes mémo",
+          title: "Réviser avec la répétition espacée",
+          body: "Transformez n’importe quel sujet en paquet. StudyOS planifie chaque carte pour que vous la revoyiez juste avant de l’oublier.",
+        },
+        calendar: {
+          k: "Synchronisation du calendrier",
+          title: "Vos échéances, partout",
+          body: "Abonnez-vous dans Google, Apple ou Outlook Calendar — chaque devoir et examen reste synchronisé automatiquement.",
+        },
+        syllabus: {
+          k: "Import du programme",
+          title: "Partez de votre programme",
+          body: "Collez ou importez votre programme et StudyOS part de vos cours, dates et sujets réels.",
+        },
         databases: {
           k: "Bases de données",
           title: "Des données réelles et structurées",
           body: "Devoirs, notes et lectures sous forme de tableaux avec des champs personnalisés — pas de notes éparses.",
         },
-        calendar: {
-          k: "Calendrier",
-          title: "Planning et calendrier",
-          body: "Toutes vos échéances au même endroit. Basculez entre tableau, tableau Kanban et calendrier en un clic.",
-        },
         dashboard: {
           k: "Tableau de bord",
           title: "Un point de repère clair",
           body: "Une page qui rassemble toute votre semaine pour que vous sachiez toujours ce qui vient ensuite.",
-        },
-        autosave: {
-          k: "Enregistrement auto",
-          title: "Modifié, enregistré aussitôt",
-          body: "Renommez, cochez, ajoutez des lignes — chaque changement s’enregistre dès que vous le faites.",
         },
         assistant: {
           k: "Assistant",
@@ -123,8 +128,8 @@ export const fr = {
         price: "$0",
         features: [
           "Générer des espaces de travail par l’IA",
-          "Tout modifier et enregistrer automatiquement",
-          "Tableaux de bord, bases de données, calendrier",
+          "Cartes mémo et répétition espacée",
+          "Synchronisation du calendrier et import du programme",
           "Demander des modifications en langage courant",
         ],
         cta: "Commencer",
@@ -135,7 +140,7 @@ export const fr = {
         price: "$5",
         features: [
           "Tout ce que contient l’offre Gratuit",
-          "Générations illimitées",
+          "Une grande enveloppe mensuelle de crédits",
           "Le modèle le plus intelligent et le plus détaillé",
           "Support prioritaire",
         ],
@@ -213,6 +218,8 @@ export const fr = {
         editing: "Édition en ligne complète et enregistrement auto",
         databases: "Bases de données — tableau, tableau Kanban et calendrier",
         flashcards: "Cartes mémo avec répétition espacée",
+        calendarSync: "Synchronisation du calendrier (Google / Apple / Outlook)",
+        syllabusImport: "Import du programme",
         dragDrop: "Édition par glisser-déposer",
         agentChat: "Chat avec l’agent IA qui modifie votre espace de travail",
         model: "Modèle de génération",

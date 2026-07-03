@@ -57,6 +57,8 @@ export default async function PricingPage() {
     { feature: dict.pricing.comparison.features.editing, free: true, pro: true },
     { feature: dict.pricing.comparison.features.databases, free: true, pro: true },
     { feature: dict.pricing.comparison.features.flashcards, free: true, pro: true },
+    { feature: dict.pricing.comparison.features.calendarSync, free: true, pro: true },
+    { feature: dict.pricing.comparison.features.syllabusImport, free: true, pro: true },
     { feature: dict.pricing.comparison.features.dragDrop, free: true, pro: true },
     { feature: dict.pricing.comparison.features.agentChat, free: true, pro: true },
     {

@@ -100,25 +100,30 @@ export const en = {
           title: "Workspaces, made for you",
           body: "One prompt becomes a complete workspace tailored to your exact courses.",
         },
+        flashcards: {
+          k: "Flashcards",
+          title: "Study with spaced repetition",
+          body: "Turn any topic into a deck. StudyOS schedules each card so you review it right before you’d forget.",
+        },
+        calendar: {
+          k: "Calendar sync",
+          title: "Your deadlines, everywhere",
+          body: "Subscribe in Google, Apple or Outlook Calendar — every assignment and exam stays in sync automatically.",
+        },
+        syllabus: {
+          k: "Syllabus import",
+          title: "Start from your syllabus",
+          body: "Paste or upload your syllabus and StudyOS builds from your real courses, dates and topics.",
+        },
         databases: {
           k: "Databases",
           title: "Real, structured data",
           body: "Assignments, grades and readings as tables with custom fields — not loose notes.",
         },
-        calendar: {
-          k: "Calendar",
-          title: "Planner & calendar",
-          body: "Every deadline in one place. Switch between table, board and calendar in a click.",
-        },
         dashboard: {
           k: "Dashboard",
           title: "A clear home base",
           body: "A page that pulls your whole week together so you always know what’s next.",
-        },
-        autosave: {
-          k: "Autosave",
-          title: "Edit, saved instantly",
-          body: "Rename, check off, add rows — every change saves itself the moment you make it.",
         },
         assistant: {
           k: "Assistant",
@@ -136,8 +141,8 @@ export const en = {
         price: "$0",
         features: [
           "Generate AI workspaces",
-          "Edit & autosave everything",
-          "Dashboards, databases, calendar",
+          "Flashcards & spaced repetition",
+          "Calendar sync & syllabus import",
           "Ask to edit in plain English",
         ],
         cta: "Get started",
@@ -148,7 +153,7 @@ export const en = {
         price: "$5",
         features: [
           "Everything in Free",
-          "Unlimited generations",
+          "A big monthly credit allowance",
           "The smartest, most detailed model",
           "Priority support",
         ],
@@ -226,6 +231,8 @@ export const en = {
         editing: "Full inline editing & autosave",
         databases: "Databases — table, board & calendar",
         flashcards: "Flashcards with spaced repetition",
+        calendarSync: "Calendar sync (Google / Apple / Outlook)",
+        syllabusImport: "Syllabus import",
         dragDrop: "Drag-and-drop editing",
         agentChat: "AI agent chat that edits your workspace",
         model: "Generation model",
