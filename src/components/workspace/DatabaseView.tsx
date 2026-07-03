@@ -700,6 +700,158 @@ function TableView({ db, view }: { db: Database; view: DBView }) {
   );
 }
 
+/**
+ * Multi-value cell (multi_select and relation) rendered as wrapping colored
+ * pills with an inline add-menu — replacing the native <select multiple>, which
+ * browsers draw as a clipped, unstyled listbox that ignores the design. The
+ * add-menu expands INLINE (full-width flex row) rather than as an absolutely
+ * positioned popover, so the table's overflow-hidden can never clip it.
+ */
+function ChipMultiSelect({
+  label,
+  items,
+  selected,
+  onChange,
+  addLabel,
+}: {
+  label: string;
+  items: { id: string; label: string; color?: string }[];
+  selected: string[];
+  onChange: (next: string[]) => void;
+  addLabel: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const byId = new Map(items.map((i) => [i.id, i]));
+  const chosen = selected.filter((id) => byId.has(id));
+  const available = items.filter((i) => !selected.includes(i.id));
+  const toggle = (id: string) =>
+    onChange(
+      selected.includes(id)
+        ? selected.filter((x) => x !== id)
+        : [...selected, id],
+    );
+
+  return (
+    <div className="flex flex-wrap items-center gap-1 py-0.5" role="group" aria-label={label}>
+      {chosen.map((id) => {
+        const item = byId.get(id)!;
+        return (
+          <span
+            key={id}
+            className={`inline-flex max-w-full items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${pillClasses(item.color)}`}
+          >
+            <span className="truncate">{item.label}</span>
+            <button
+              type="button"
+              onClick={() => toggle(id)}
+              aria-label={`Remove ${item.label}`}
+              className="shrink-0 opacity-60 transition hover:opacity-100"
+            >
+              ✕
+            </button>
+          </span>
+        );
+      })}
+      {available.length > 0 && (
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          className="rounded-full border border-dashed border-line-strong px-2 py-0.5 text-xs text-ink-faint transition hover:border-ink/40 hover:text-ink"
+        >
+          {open ? "×" : `+ ${addLabel}`}
+        </button>
+      )}
+      {open && available.length > 0 && (
+        <div className="mt-1 flex w-full flex-wrap gap-1">
+          {available.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => toggle(item.id)}
+              className={`inline-flex max-w-full items-center gap-1 rounded-full px-2 py-0.5 text-xs ring-1 ring-inset transition hover:brightness-110 ${pillClasses(item.color)}`}
+            >
+              <span aria-hidden>+</span>
+              <span className="truncate">{item.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Single-choice cell (select and status) rendered as one colored pill with an
+ * inline choose-menu — consistent with ChipMultiSelect and matching the pill
+ * styling used in the board/calendar views (the native <select> showed neither
+ * the option colors nor the design). Inline menu (not a popover) so the table's
+ * overflow can't clip it.
+ */
+function SingleSelectCell({
+  label,
+  options,
+  value,
+  onChange,
+  emptyLabel,
+}: {
+  label: string;
+  options: { id: string; label: string; color?: string }[];
+  value: string | null;
+  onChange: (next: string | null) => void;
+  emptyLabel: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const current = options.find((o) => o.id === value);
+  const choose = (id: string | null) => {
+    onChange(id);
+    setOpen(false);
+  };
+  return (
+    <div className="flex flex-wrap items-center gap-1 py-0.5" role="group" aria-label={label}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="max-w-full rounded-full text-left"
+      >
+        {current ? (
+          <span
+            className={`inline-block max-w-full truncate rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${pillClasses(current.color)}`}
+          >
+            {current.label}
+          </span>
+        ) : (
+          <span className="px-1 text-xs text-ink-faint">{emptyLabel}</span>
+        )}
+      </button>
+      {open && (
+        <div className="mt-1 flex w-full flex-wrap gap-1">
+          {options.map((o) => (
+            <button
+              key={o.id}
+              type="button"
+              onClick={() => choose(o.id)}
+              className={`inline-flex max-w-full items-center rounded-full px-2 py-0.5 text-xs ring-1 ring-inset transition hover:brightness-110 ${pillClasses(o.color)} ${o.id === value ? "outline outline-1 outline-ink/40" : ""}`}
+            >
+              <span className="truncate">{o.label}</span>
+            </button>
+          ))}
+          {value !== null && (
+            <button
+              type="button"
+              onClick={() => choose(null)}
+              className="rounded-full border border-dashed border-line-strong px-2 py-0.5 text-xs text-ink-faint transition hover:text-ink"
+            >
+              {emptyLabel}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function EditableCell({
   databaseId,
   rowId,
@@ -773,39 +925,29 @@ function EditableCell({
     case "select":
     case "status":
       return (
-        <select
-          value={typeof value === "string" ? value : ""}
-          onChange={(e) => setCell(e.target.value || null)}
-          className={`${base} text-ink`}
-        >
-          <option value="">{dict.db.empty}</option>
-          {prop.options?.map((o) => (
-            <option key={o.id} value={o.id}>
-              {o.label}
-            </option>
-          ))}
-        </select>
+        <SingleSelectCell
+          label={prop.name}
+          options={prop.options ?? []}
+          value={typeof value === "string" ? value : null}
+          onChange={setCell}
+          emptyLabel={dict.db.empty}
+        />
       );
     case "multi_select": {
       const selected = Array.isArray(value) ? value : [];
+      const items = (prop.options ?? []).map((o) => ({
+        id: o.id,
+        label: o.label,
+        color: o.color,
+      }));
       return (
-        <select
-          multiple
-          value={selected}
-          onChange={(e) =>
-            setCell(
-              Array.from(e.currentTarget.selectedOptions, (option) => option.value),
-            )
-          }
-          aria-label={prop.name}
-          className={`${base} min-h-14 text-ink`}
-        >
-          {prop.options?.map((option) => (
-            <option key={option.id} value={option.id}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+        <ChipMultiSelect
+          label={prop.name}
+          items={items}
+          selected={selected}
+          onChange={setCell}
+          addLabel={dict.db.addTag}
+        />
       );
     }
     case "relation": {
@@ -814,26 +956,20 @@ function EditableCell({
         (database) => database.id === prop.relationDatabaseId,
       );
       const relatedTitle = related ? titleProperty(related) : null;
+      const items = (related?.rows ?? []).map((row) => ({
+        id: row.id,
+        label: relatedTitle
+          ? String(row.cells[relatedTitle.id] ?? dict.db.untitled)
+          : row.id,
+      }));
       return (
-        <select
-          multiple
-          value={selected}
-          onChange={(e) =>
-            setCell(
-              Array.from(e.currentTarget.selectedOptions, (option) => option.value),
-            )
-          }
-          aria-label={prop.name}
-          className={`${base} min-h-14 text-ink`}
-        >
-          {related?.rows.map((row) => (
-            <option key={row.id} value={row.id}>
-              {relatedTitle
-                ? String(row.cells[relatedTitle.id] ?? dict.db.untitled)
-                : row.id}
-            </option>
-          ))}
-        </select>
+        <ChipMultiSelect
+          label={prop.name}
+          items={items}
+          selected={selected}
+          onChange={setCell}
+          addLabel={dict.db.addLink}
+        />
       );
     }
     case "text":

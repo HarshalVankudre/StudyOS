@@ -555,6 +555,8 @@ export const fr = {
     addOnDay: "Ajouter ce jour-là",
     clickToRename: "Cliquez pour renommer",
     delete: "Supprimer",
+    addTag: "Ajouter",
+    addLink: "Lier",
   },
 
   // ---- Database settings panel ------------------------------------------

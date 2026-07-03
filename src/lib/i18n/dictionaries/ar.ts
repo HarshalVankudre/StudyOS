@@ -556,6 +556,8 @@ export const ar = {
     addOnDay: "أضِف في هذا اليوم",
     clickToRename: "انقر لإعادة التسمية",
     delete: "حذف",
+    addTag: "إضافة",
+    addLink: "ربط",
   },
 
   // ---- Database settings panel ------------------------------------------

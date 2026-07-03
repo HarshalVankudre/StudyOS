@@ -555,6 +555,8 @@ export const ja = {
     addOnDay: "この日に追加",
     clickToRename: "クリックして名前を変更",
     delete: "削除",
+    addTag: "追加",
+    addLink: "リンク",
   },
 
   // ---- Database settings panel ------------------------------------------
