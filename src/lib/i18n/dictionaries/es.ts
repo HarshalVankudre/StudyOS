@@ -87,25 +87,30 @@ export const es = {
           title: "Espacios de trabajo, hechos para ti",
           body: "Una instrucción se convierte en un espacio de trabajo completo adaptado a tus asignaturas exactas.",
         },
+        flashcards: {
+          k: "Tarjetas",
+          title: "Estudia con repetición espaciada",
+          body: "Convierte cualquier tema en un mazo. StudyOS programa cada tarjeta para que la repases justo antes de olvidarla.",
+        },
+        calendar: {
+          k: "Sincronización de calendario",
+          title: "Tus fechas de entrega, en todas partes",
+          body: "Suscríbete en Google, Apple u Outlook Calendar — cada tarea y examen se mantiene sincronizado automáticamente.",
+        },
+        syllabus: {
+          k: "Importar temario",
+          title: "Empieza desde tu temario",
+          body: "Pega o sube tu temario y StudyOS parte de tus asignaturas, fechas y temas reales.",
+        },
         databases: {
           k: "Bases de datos",
           title: "Datos reales y estructurados",
           body: "Tareas, notas y lecturas como tablas con campos personalizados — no apuntes sueltos.",
         },
-        calendar: {
-          k: "Calendario",
-          title: "Planificador y calendario",
-          body: "Cada fecha de entrega en un solo lugar. Cambia entre tabla, tablero y calendario con un clic.",
-        },
         dashboard: {
           k: "Panel",
           title: "Una base clara",
           body: "Una página que reúne toda tu semana para que siempre sepas qué viene a continuación.",
-        },
-        autosave: {
-          k: "Autoguardado",
-          title: "Edita, guardado al instante",
-          body: "Renombra, marca, añade filas — cada cambio se guarda solo en el momento en que lo haces.",
         },
         assistant: {
           k: "Asistente",
@@ -123,8 +128,8 @@ export const es = {
         price: "$0",
         features: [
           "Genera espacios de trabajo con IA",
-          "Edita y autoguarda todo",
-          "Paneles, bases de datos, calendario",
+          "Tarjetas y repetición espaciada",
+          "Sincronización de calendario e importación de temario",
           "Pide cambios en lenguaje natural",
         ],
         cta: "Empezar",
@@ -135,7 +140,7 @@ export const es = {
         price: "$5",
         features: [
           "Todo lo de Gratis",
-          "Generaciones ilimitadas",
+          "Una gran asignación mensual de créditos",
           "El modelo más inteligente y detallado",
           "Soporte prioritario",
         ],
@@ -213,6 +218,8 @@ export const es = {
         editing: "Edición en línea completa y autoguardado",
         databases: "Bases de datos — tabla, tablero y calendario",
         flashcards: "Tarjetas con repetición espaciada",
+        calendarSync: "Sincronización de calendario (Google / Apple / Outlook)",
+        syllabusImport: "Importación de temario",
         dragDrop: "Edición con arrastrar y soltar",
         agentChat: "Chat con agente de IA que edita tu espacio de trabajo",
         model: "Modelo de generación",

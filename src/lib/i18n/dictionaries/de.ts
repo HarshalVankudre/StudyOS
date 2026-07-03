@@ -88,25 +88,30 @@ export const de = {
           title: "Workspaces, gemacht für dich",
           body: "Ein Prompt wird zu einem kompletten Workspace, zugeschnitten auf genau deine Kurse.",
         },
+        flashcards: {
+          k: "Karteikarten",
+          title: "Lernen mit verteilter Wiederholung",
+          body: "Mach aus jedem Thema einen Stapel. StudyOS plant jede Karte so, dass du sie kurz vor dem Vergessen wiederholst.",
+        },
+        calendar: {
+          k: "Kalendersynchronisierung",
+          title: "Deine Fristen, überall",
+          body: "Abonniere in Google, Apple oder Outlook Calendar — jede Aufgabe und Prüfung bleibt automatisch synchron.",
+        },
+        syllabus: {
+          k: "Lehrplan-Import",
+          title: "Starte mit deinem Lehrplan",
+          body: "Füge deinen Lehrplan ein oder lade ihn hoch, und StudyOS baut auf deinen echten Kursen, Terminen und Themen auf.",
+        },
         databases: {
           k: "Datenbanken",
           title: "Echte, strukturierte Daten",
           body: "Aufgaben, Noten und Lektüre als Tabellen mit eigenen Feldern — keine losen Notizen.",
         },
-        calendar: {
-          k: "Kalender",
-          title: "Planer & Kalender",
-          body: "Jede Deadline an einem Ort. Wechsle mit einem Klick zwischen Tabelle, Board und Kalender.",
-        },
         dashboard: {
           k: "Dashboard",
           title: "Eine klare Homebase",
           body: "Eine Seite, die deine ganze Woche bündelt, damit du immer weißt, was als Nächstes ansteht.",
-        },
-        autosave: {
-          k: "Autosave",
-          title: "Bearbeiten, sofort gespeichert",
-          body: "Umbenennen, abhaken, Zeilen hinzufügen — jede Änderung speichert sich selbst, sobald du sie machst.",
         },
         assistant: {
           k: "Assistent",
@@ -124,8 +129,8 @@ export const de = {
         price: "$0",
         features: [
           "KI-Workspaces generieren",
-          "Alles bearbeiten & automatisch speichern",
-          "Dashboards, Datenbanken, Kalender",
+          "Karteikarten & verteilte Wiederholung",
+          "Kalendersynchronisierung & Lehrplan-Import",
           "Per einfachem Deutsch um Änderungen bitten",
         ],
         cta: "Loslegen",
@@ -136,7 +141,7 @@ export const de = {
         price: "$5",
         features: [
           "Alles aus Kostenlos",
-          "Unbegrenzte Generierungen",
+          "Ein großes monatliches Credit-Kontingent",
           "Das klügste, detaillierteste Modell",
           "Priorisierter Support",
         ],
@@ -214,6 +219,8 @@ export const de = {
         editing: "Vollständiges Inline-Bearbeiten & Autosave",
         databases: "Datenbanken — Tabelle, Board & Kalender",
         flashcards: "Karteikarten mit verteilter Wiederholung",
+        calendarSync: "Kalendersynchronisierung (Google / Apple / Outlook)",
+        syllabusImport: "Lehrplan-Import",
         dragDrop: "Bearbeiten per Drag-and-drop",
         agentChat: "KI-Agent-Chat, der deinen Workspace bearbeitet",
         model: "Generierungsmodell",

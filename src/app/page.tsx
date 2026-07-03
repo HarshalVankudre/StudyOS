@@ -77,11 +77,12 @@ export default async function Home() {
   const L = dict.landing;
   const features = [
     L.features.items.generate,
-    L.features.items.databases,
+    L.features.items.flashcards,
     L.features.items.calendar,
-    L.features.items.dashboard,
-    L.features.items.autosave,
+    L.features.items.syllabus,
     L.features.items.assistant,
+    L.features.items.dashboard,
+    L.features.items.databases,
   ];
   const promptExample = dict.generate.examples[1].text;
   const [heroLead, heroAccent] = splitLastWord(L.hero.titleLine2);

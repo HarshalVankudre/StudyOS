@@ -88,25 +88,30 @@ export const it = {
           title: "Spazi creati su misura per te",
           body: "Un solo prompt diventa uno spazio completo adattato esattamente ai tuoi corsi.",
         },
+        flashcards: {
+          k: "Flashcard",
+          title: "Studia con la ripetizione dilazionata",
+          body: "Trasforma qualsiasi argomento in un mazzo. StudyOS programma ogni carta così la ripassi poco prima di dimenticarla.",
+        },
+        calendar: {
+          k: "Sincronizzazione del calendario",
+          title: "Le tue scadenze, ovunque",
+          body: "Iscriviti in Google, Apple o Outlook Calendar — ogni attività ed esame resta sincronizzato automaticamente.",
+        },
+        syllabus: {
+          k: "Importa il programma",
+          title: "Parti dal tuo programma",
+          body: "Incolla o carica il tuo programma e StudyOS costruisce a partire dai tuoi corsi, date e argomenti reali.",
+        },
         databases: {
           k: "Database",
           title: "Dati reali e strutturati",
           body: "Attività, voti e letture come tabelle con campi personalizzati — non appunti sparsi.",
         },
-        calendar: {
-          k: "Calendario",
-          title: "Planner e calendario",
-          body: "Ogni scadenza in un unico posto. Passa da tabella a bacheca a calendario con un clic.",
-        },
         dashboard: {
           k: "Dashboard",
           title: "Una base chiara e ordinata",
           body: "Una pagina che riunisce tutta la tua settimana così sai sempre cosa viene dopo.",
-        },
-        autosave: {
-          k: "Salvataggio automatico",
-          title: "Modifica, salvato all’istante",
-          body: "Rinomina, spunta, aggiungi righe — ogni modifica si salva da sola nel momento in cui la fai.",
         },
         assistant: {
           k: "Assistente",
@@ -124,8 +129,8 @@ export const it = {
         price: "$0",
         features: [
           "Genera spazi con l’IA",
-          "Modifica e salva tutto in automatico",
-          "Dashboard, database, calendario",
+          "Flashcard e ripetizione dilazionata",
+          "Sincronizzazione del calendario e import del programma",
           "Chiedi modifiche in linguaggio naturale",
         ],
         cta: "Inizia ora",
@@ -136,7 +141,7 @@ export const it = {
         price: "$5",
         features: [
           "Tutto ciò che c’è in Gratis",
-          "Generazioni illimitate",
+          "Un’ampia dotazione mensile di crediti",
           "Il modello più intelligente e dettagliato",
           "Supporto prioritario",
         ],
@@ -214,6 +219,8 @@ export const it = {
         editing: "Modifica inline completa e salvataggio automatico",
         databases: "Database — tabella, bacheca e calendario",
         flashcards: "Flashcard con ripetizione dilazionata",
+        calendarSync: "Sincronizzazione del calendario (Google / Apple / Outlook)",
+        syllabusImport: "Import del programma",
         dragDrop: "Modifica con trascinamento",
         agentChat: "Chat con l’agente IA che modifica il tuo spazio",
         model: "Modello di generazione",

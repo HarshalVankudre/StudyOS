@@ -88,25 +88,30 @@ export const zh = {
           title: "为你量身打造的工作空间",
           body: "一句提示即可生成贴合你具体课程的完整工作空间。",
         },
+        flashcards: {
+          k: "记忆卡片",
+          title: "用间隔重复来学习",
+          body: "把任意主题变成一套卡组。StudyOS 会为每张卡片安排复习时间，让你在快要忘记前及时复习。",
+        },
+        calendar: {
+          k: "日历同步",
+          title: "随处可见你的截止日期",
+          body: "在 Google、Apple 或 Outlook Calendar 中订阅 —— 每项作业和考试都会自动保持同步。",
+        },
+        syllabus: {
+          k: "导入课程大纲",
+          title: "从你的课程大纲开始",
+          body: "粘贴或上传你的课程大纲，StudyOS 就会根据你真实的课程、日期和主题来构建。",
+        },
         databases: {
           k: "数据库",
           title: "真正结构化的数据",
           body: "作业、成绩和阅读以带自定义字段的表格呈现 —— 而非零散的笔记。",
         },
-        calendar: {
-          k: "日历",
-          title: "计划表与日历",
-          body: "所有截止日期集中一处。一键在表格、看板和日历之间切换。",
-        },
         dashboard: {
           k: "仪表盘",
           title: "清晰的大本营",
           body: "一个页面汇总你的整周安排，让你随时知道下一步该做什么。",
-        },
-        autosave: {
-          k: "自动保存",
-          title: "编辑即刻保存",
-          body: "重命名、勾选、新增行 —— 每一处改动都会在你操作的瞬间自动保存。",
         },
         assistant: {
           k: "助手",
@@ -124,8 +129,8 @@ export const zh = {
         price: "$0",
         features: [
           "生成 AI 工作空间",
-          "编辑并自动保存一切",
-          "仪表盘、数据库、日历",
+          "记忆卡片与间隔重复",
+          "日历同步与课程大纲导入",
           "用日常语言要求修改",
         ],
         cta: "开始使用",
@@ -136,7 +141,7 @@ export const zh = {
         price: "$5",
         features: [
           "包含免费版的全部功能",
-          "无限次生成",
+          "每月大额积分额度",
           "最聪明、最详尽的模型",
           "优先支持",
         ],
@@ -214,6 +219,8 @@ export const zh = {
         editing: "完整的行内编辑与自动保存",
         databases: "数据库 —— 表格、看板和日历",
         flashcards: "支持间隔重复的记忆卡片",
+        calendarSync: "日历同步（Google / Apple / Outlook）",
+        syllabusImport: "课程大纲导入",
         dragDrop: "拖放式编辑",
         agentChat: "可编辑工作空间的 AI 智能体对话",
         model: "生成模型",
