@@ -100,6 +100,12 @@ export function AccountMenu({
           }}
         />
         <MenuLink
+          icon="✦"
+          label={dict.agentCenter.label}
+          href="/app/agents"
+          onNavigate={() => setOpen(false)}
+        />
+        <MenuLink
           icon="💳"
           label={dict.account.subscriptionPayments}
           href="/app/settings#billing"
@@ -138,6 +144,7 @@ export function AccountMenu({
           onClick={() => setOpen((v) => !v)}
           aria-haspopup="menu"
           aria-expanded={open}
+          aria-label={`${dict.account.viewProfile}: ${name}`}
           title={name}
           className="flex items-center gap-1.5 rounded-full p-0.5 pr-1.5 transition hover:bg-ink/5"
         >

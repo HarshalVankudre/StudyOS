@@ -7,6 +7,13 @@ export async function generateMetadata(): Promise<Metadata> {
   return { title: dict.meta.generateTitle };
 }
 
-export default function GeneratePage() {
-  return <GeneratorClient />;
+export default async function GeneratePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ prompt?: string | string[] }>;
+}) {
+  const value = (await searchParams).prompt;
+  const initialPrompt = typeof value === "string" ? value.slice(0, 2000) : "";
+
+  return <GeneratorClient initialPrompt={initialPrompt} />;
 }

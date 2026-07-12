@@ -1,4 +1,4 @@
-import type { Dictionary } from "./en";
+import { en, type Dictionary } from "./en";
 // Español (es-ES) — traducción del diccionario canónico en inglés.
 export const es = {
   // ---- Document <title> / <meta> ----------------------------------------
@@ -295,6 +295,7 @@ export const es = {
     updatedAt: "actualizado {date}",
     fallbackIcon: "📄",
   },
+  agentCenter: en.agentCenter,
 
   // ---- Generate flow (/generate) ----------------------------------------
   generate: {

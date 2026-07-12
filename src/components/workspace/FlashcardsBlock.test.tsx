@@ -95,6 +95,11 @@ describe("FlashcardsBlock", () => {
     render(<FlashcardsBlock pageId="p1" block={block} />);
 
     await user.click(screen.getByRole("button", { name: "Study 1 due" }));
+    expect(screen.getByRole("dialog", { name: "Bio" })).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "Bio" })).toHaveAttribute(
+      "aria-valuenow",
+      "0",
+    );
     // Front shown, answer hidden.
     expect(screen.getByText("ATP?")).toBeInTheDocument();
     expect(screen.queryByText("the energy currency")).not.toBeInTheDocument();
@@ -112,6 +117,22 @@ describe("FlashcardsBlock", () => {
     expect(card.cards[0].reps).toBe(1);
     expect(card.cards[0].dueAt).toBeTruthy();
     expect(screen.getByText("Session complete")).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "Bio" })).toHaveAttribute(
+      "aria-valuenow",
+      "100",
+    );
+  });
+
+  it("closes the modal review session with Escape", async () => {
+    const user = userEvent.setup();
+    const block = withWorkspace(deckWith([{ id: "c1", front: "Q", back: "A" }]));
+    render(<FlashcardsBlock pageId="p1" block={block} />);
+
+    await user.click(screen.getByRole("button", { name: "Study 1 due" }));
+    expect(screen.getByRole("dialog", { name: "Bio" })).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Bio" })).not.toBeInTheDocument();
   });
 
   it("keeps the session mounted through completion after the last card leaves the due queue", async () => {
