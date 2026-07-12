@@ -79,6 +79,7 @@ const TOOL_INPUT_HINTS: Record<string, string> = {
     '{"ops":[ <minimal operations; same vocabulary as the editor> ]}  // e.g. {"op":"update_page","pageId":"<id>","title":"<new>"}',
   run_in_sandbox:
     '{"inputs":[{"path":"main.tex","content":"..."}],"setup":[],"run":["pdflatex -interaction=nonstopmode main.tex","pdftoppm -png -r 200 main.pdf out/page"],"outputs":["out/page-1.png"],"timeoutSec":90}',
+  check_component: '{"source":"function App(){ return <div>...</div> }"}',
 };
 
 /**
@@ -310,9 +311,15 @@ function buildPlanMessages(history: AgentMessage[], message: string, areas: Agen
   // render-visual is only reachable when its skill is registered (AGENT_SANDBOX on);
   // otherwise the planner must not be told about it.
   const canRender = !!skillRegistry.get("render-visual");
-  const skillMenu = canRender
-    ? "precise-edit|study-planner|render-visual"
-    : "precise-edit|study-planner";
+  const canInteractive = !!skillRegistry.get("interactive-builder");
+  const canFlashcards = !!skillRegistry.get("flashcard-maker");
+  const skillMenu = [
+    "precise-edit",
+    "study-planner",
+    ...(canFlashcards ? ["flashcard-maker"] : []),
+    ...(canRender ? ["render-visual"] : []),
+    ...(canInteractive ? ["interactive-builder"] : []),
+  ].join("|");
   const system = [
     "You are the planning layer of the StudyOS workspace agent. Decide what to do for the latest message.",
     "Return exactly one JSON object and nothing else, one of:",
@@ -320,8 +327,14 @@ function buildPlanMessages(history: AgentMessage[], message: string, areas: Agen
     '{"action":"clarify","reply":"<one question>","choices":[{"id":"a","label":"<short>","value":"<full answer>"}]}  // 2-4 choices, only when materially ambiguous',
     `{"action":"execute","skillId":"<${skillMenu}>","summary":"<one-sentence user-facing goal>","affectedAreaIds":["<existing id>"]}`,
     "Pick study-planner for exam/assignment/revision/schedule work; otherwise precise-edit.",
+    canFlashcards
+      ? "Pick flashcard-maker when the user wants flashcards, a study deck, quiz cards, or Q&A/term-definition pairs to memorize or review."
+      : "",
     canRender
       ? "Pick render-visual when the user wants a LaTeX formula, math, diagram, plot, figure, or a cheat-sheet/document rendered as an IMAGE placed into a page. It embeds an image in the workspace (PNG), not a downloadable file."
+      : "",
+    canInteractive
+      ? "Pick interactive-builder when the user wants a live/interactive widget — a chart of their data, a quiz, a calculator, or an interactive diagram."
       : "",
     corrective ? "Your previous reply was not valid JSON. Return ONLY the JSON object." : "",
     "Valid workspace area ids:",

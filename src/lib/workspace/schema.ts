@@ -8,6 +8,13 @@
 import { z } from "zod";
 import type { Workspace } from "./types";
 
+/** Max bytes of a react_artifact component source (larger than a text field). */
+export const MAX_COMPONENT_SOURCE = 100_000;
+
+/** Bounds for a flashcard deck (agent- and user-authored). */
+export const MAX_FLASHCARDS = 200;
+export const MAX_FLASHCARD_TEXT = 2_000;
+
 const selectOption = z.object({
   id: z.string(),
   label: z.string(),
@@ -112,6 +119,31 @@ const block = z.discriminatedUnion("type", [
     type: z.literal("database_view"),
     databaseId: z.string(),
     viewId: z.string(),
+  }),
+  z.object({
+    id: z.string(),
+    type: z.literal("react_artifact"),
+    title: z.string().optional(),
+    source: z.string().min(1).max(MAX_COMPONENT_SOURCE),
+  }),
+  z.object({
+    id: z.string(),
+    type: z.literal("flashcards"),
+    title: z.string().optional(),
+    cards: z
+      .array(
+        z.object({
+          id: z.string(),
+          front: z.string().min(1).max(MAX_FLASHCARD_TEXT),
+          back: z.string().min(1).max(MAX_FLASHCARD_TEXT),
+          ease: z.number().optional(),
+          intervalDays: z.number().optional(),
+          reps: z.number().int().optional(),
+          dueAt: z.string().optional(),
+          lastReviewedAt: z.string().optional(),
+        }),
+      )
+      .max(MAX_FLASHCARDS),
   }),
 ]);
 

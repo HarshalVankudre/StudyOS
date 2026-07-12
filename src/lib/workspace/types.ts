@@ -112,7 +112,9 @@ export type BlockType =
   | "callout"
   | "divider"
   | "database_view"
-  | "media";
+  | "media"
+  | "react_artifact"
+  | "flashcards";
 
 interface BaseBlock {
   id: string;
@@ -182,6 +184,43 @@ export interface DatabaseViewBlock extends BaseBlock {
   viewId: string;
 }
 
+/** A live, interactive React component rendered in a sandboxed iframe. */
+export interface ReactArtifactBlock extends BaseBlock {
+  type: "react_artifact";
+  title?: string;
+  /** Self-contained JSX source defining a top-level `App` component. */
+  source: string;
+}
+
+/**
+ * One flashcard. `front`/`back` are the content; the remaining fields are the
+ * SM-2 spaced-repetition scheduling state, all optional so an AI or a user can
+ * author a card with just front+back (absent state = a brand-new card). The
+ * review UI fills them in over time — see lib/study/srs.ts.
+ */
+export interface Flashcard {
+  id: string;
+  front: string;
+  back: string;
+  /** SM-2 ease factor (≥1.3); higher = easier = longer intervals. */
+  ease?: number;
+  /** Current interval in days between reviews. */
+  intervalDays?: number;
+  /** Count of consecutive successful reviews. */
+  reps?: number;
+  /** ISO date (YYYY-MM-DD) this card is next due for review. */
+  dueAt?: string;
+  /** ISO datetime of the last review. */
+  lastReviewedAt?: string;
+}
+
+/** A spaced-repetition flashcard deck embedded in a page. */
+export interface FlashcardsBlock extends BaseBlock {
+  type: "flashcards";
+  title?: string;
+  cards: Flashcard[];
+}
+
 /** Discriminated union of every block kind (switch on `block.type`). */
 export type Block =
   | HeadingBlock
@@ -193,7 +232,9 @@ export type Block =
   | CalloutBlock
   | DividerBlock
   | MediaBlock
-  | DatabaseViewBlock;
+  | DatabaseViewBlock
+  | ReactArtifactBlock
+  | FlashcardsBlock;
 
 export interface Page {
   id: string;

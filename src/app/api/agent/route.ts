@@ -13,7 +13,12 @@ import type {
 import { modelForPlan } from "@/lib/ai/plans";
 import { addUsage, withUsageMeter, type TokenUsage } from "@/lib/ai/usage-meter";
 import { getUserPlan } from "@/lib/billing";
-import { chargeCredits, hasCredits, usageToCredits } from "@/lib/credits";
+import {
+  chargeCredits,
+  getCreditBalance,
+  hasCredits,
+  usageToCredits,
+} from "@/lib/credits";
 import { getLocale } from "@/lib/i18n/server";
 import { getDictionary, type Dictionary } from "@/lib/i18n/dictionaries";
 import { fmt } from "@/lib/i18n/interpolate";
@@ -25,11 +30,16 @@ import {
 import {
   appendTaskEvent,
   claimTaskForFinalization,
+  countActiveTasks,
   createTask,
   isTaskCancelled,
   markTaskDone,
   markTaskError,
 } from "@/lib/ai/tasks/store";
+import {
+  checkUsageLimit,
+  MAX_CONCURRENT_AGENT_TASKS,
+} from "@/lib/usage-limits";
 import {
   TaskCancelledError,
   isTaskCancelledError,
@@ -126,6 +136,20 @@ export async function POST(request: Request) {
           return;
         }
 
+        // Burst-rate throttle + concurrent-work cap. Credits bound total
+        // spend; these bound how fast it can be spent and how many model
+        // loops one user can hold open at once.
+        if (!(await checkUsageLimit(userId, "agent")).allowed) {
+          send({ type: "error", message: T.limits.rateLimited });
+          finish();
+          return;
+        }
+        if ((await countActiveTasks()) >= MAX_CONCURRENT_AGENT_TASKS) {
+          send({ type: "error", message: T.limits.rateLimited });
+          finish();
+          return;
+        }
+
         // Durable record: survives a disconnect (reconnect by id) and carries a
         // cancel flag consulted before the workspace is changed.
         const task = await createTask({ workspaceId, baseVersion });
@@ -171,6 +195,21 @@ export async function POST(request: Request) {
         const allAreas = workspaceAreas(workspace);
         let usage: TokenUsage = { promptTokens: 0, completionTokens: 0 };
 
+        // Charge this turn's credits and read the resulting balance, so the
+        // client can show both the per-turn cost and a live balance. Returns
+        // the two fields to attach to whatever response we're about to emit.
+        const chargeTurn = async (): Promise<{
+          creditsCost: number;
+          creditsBalance: number;
+        }> => {
+          const creditsCost = await chargeCredits(
+            userId,
+            usageToCredits(usage),
+            "agent",
+          );
+          return { creditsCost, creditsBalance: await getCreditBalance(userId) };
+        };
+
         let result: AgentResponse;
 
         if (isAuthenticAgentEnabled()) {
@@ -197,7 +236,7 @@ export async function POST(request: Request) {
           // reply / clarify / no-change: no workspace to apply — settle immediately.
           if (!result.changed || !result.workspace) {
             await claimFinalization();
-            await chargeCredits(userId, usageToCredits(usage), "agent");
+            Object.assign(result, await chargeTurn());
             await markTaskDone(task.id, JSON.stringify(result));
             await emit({ type: "result", response: result });
             finish();
@@ -249,8 +288,11 @@ export async function POST(request: Request) {
 
           if (decision.action === "reply") {
             await claimFinalization();
-            await chargeCredits(userId, usageToCredits(usage), "agent");
-            const response: AgentResponse = { reply: decision.reply, changed: false };
+            const response: AgentResponse = {
+              reply: decision.reply,
+              changed: false,
+              ...(await chargeTurn()),
+            };
             await markTaskDone(task.id, JSON.stringify(response));
             send({ type: "result", response });
             finish();
@@ -259,11 +301,11 @@ export async function POST(request: Request) {
 
           if (decision.action === "clarify") {
             await claimFinalization();
-            await chargeCredits(userId, usageToCredits(usage), "agent");
             const response: AgentResponse = {
               reply: decision.reply,
               changed: false,
               choices: decision.choices,
+              ...(await chargeTurn()),
             };
             await markTaskDone(task.id, JSON.stringify(response));
             send({ type: "result", response });
@@ -350,11 +392,11 @@ export async function POST(request: Request) {
           baseVersion,
           result.workspace!,
         );
-        await chargeCredits(userId, usageToCredits(usage), "agent");
         const response: AgentResponse = {
           ...result,
           workspace: applied.workspace,
           changeId: applied.changeId,
+          ...(await chargeTurn()),
         };
         await markTaskDone(task.id, JSON.stringify(response));
         await emit({ type: "result", response });

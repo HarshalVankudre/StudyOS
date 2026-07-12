@@ -8,16 +8,20 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { useI18n } from "@/lib/i18n/client";
 import type { Workspace } from "@/lib/workspace/types";
 import { AccountMenu } from "@/components/account/AccountMenu";
+import { CreditMeter } from "@/components/account/CreditMeter";
 import { AgentChat } from "./AgentChat";
 import { PageView } from "./PageView";
+import { StudyLauncher } from "./StudyLauncher";
 import { WorkspaceProvider, type SaveStatus } from "./WorkspaceContext";
 
 export function WorkspaceEditor({
   id,
   initialWorkspace,
+  initialCredits = 0,
 }: {
   id: string;
   initialWorkspace: Workspace;
+  initialCredits?: number;
 }) {
   const { dict } = useI18n();
   const [workspace, setWorkspace] = useState(initialWorkspace);
@@ -31,12 +35,34 @@ export function WorkspaceEditor({
 
   // AI agent chat panel
   const [aiOpen, setAiOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [agentBusy, setAgentBusy] = useState(false);
 
   const latest = useRef(workspace);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const agentBusyRef = useRef(false);
   const pendingSaveRef = useRef(false);
+  const sidebarTriggerRef = useRef<HTMLButtonElement>(null);
+  const sidebarCloseRef = useRef<HTMLButtonElement>(null);
+
+  const closeSidebar = useCallback(() => {
+    setSidebarOpen(false);
+    requestAnimationFrame(() => {
+      if (sidebarTriggerRef.current?.offsetParent) {
+        sidebarTriggerRef.current.focus();
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    sidebarCloseRef.current?.focus();
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeSidebar();
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [closeSidebar, sidebarOpen]);
 
   const update = useCallback(
     (mutator: (draft: Workspace) => void) => {
@@ -113,6 +139,7 @@ export function WorkspaceEditor({
       });
     });
     setActivePageId(id);
+    closeSidebar();
   };
 
   const deletePage = (pageId: string) => {
@@ -130,16 +157,42 @@ export function WorkspaceEditor({
 
   return (
     <WorkspaceProvider value={{ workspace, update, status, rev, agentBusy, setAgentBusy: handleAgentBusyChange }}>
-      <div className="flex h-screen w-full overflow-hidden bg-paper text-ink">
+      <div className="flex h-[100dvh] w-full overflow-hidden bg-paper text-ink">
+        {sidebarOpen && (
+          <button
+            type="button"
+            aria-label={dict.common.cancel}
+            tabIndex={-1}
+            className="fixed inset-0 z-40 bg-black/55 backdrop-blur-[1px] md:hidden"
+            onClick={closeSidebar}
+          />
+        )}
+
         {/* Sidebar */}
-        <aside className="flex w-60 shrink-0 flex-col border-r border-line bg-surface">
-          <Link
-            href="/app"
-            className="flex items-center gap-1.5 px-4 pb-1 pt-4 font-display text-[15px] font-extrabold tracking-tight text-ink"
-          >
-            StudyOS
-            <span className="mb-1.5 h-1 w-1 rounded-full bg-lime" aria-hidden />
-          </Link>
+        <aside
+          aria-label={workspace.name}
+          className={`fixed inset-y-0 start-0 z-50 flex w-[min(20rem,85vw)] shrink-0 flex-col border-e border-line bg-surface shadow-pop transition-transform duration-200 md:static md:z-auto md:w-60 md:translate-x-0 md:shadow-none ${
+            sidebarOpen ? "translate-x-0" : "-translate-x-full rtl:translate-x-full"
+          }`}
+        >
+          <div className="flex min-h-12 items-center justify-between ps-4 pe-2 pt-1">
+            <Link
+              href="/app"
+              className="flex items-center gap-1.5 font-display text-[15px] font-extrabold tracking-tight text-ink"
+            >
+              StudyOS
+              <span className="mb-1.5 h-1 w-1 rounded-full bg-lime" aria-hidden />
+            </Link>
+            <button
+              ref={sidebarCloseRef}
+              type="button"
+              onClick={closeSidebar}
+              aria-label={dict.common.cancel}
+              className="grid h-11 w-11 place-items-center rounded-md text-ink-soft transition hover:bg-hover hover:text-ink md:hidden"
+            >
+              <span aria-hidden>✕</span>
+            </button>
+          </div>
           <div className="flex items-center gap-2 px-3 pb-2 pt-1">
             <input
               value={workspace.icon ?? ""}
@@ -154,6 +207,7 @@ export function WorkspaceEditor({
             />
             <input
               value={workspace.name}
+              aria-label={workspace.name}
               onChange={(e) =>
                 update((d) => {
                   d.name = e.target.value;
@@ -169,8 +223,11 @@ export function WorkspaceEditor({
               return (
                 <div key={page.id} className="group flex items-center">
                   <button
-                    onClick={() => setActivePageId(page.id)}
-                    className={`flex flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition ${
+                    onClick={() => {
+                      setActivePageId(page.id);
+                      closeSidebar();
+                    }}
+                    className={`flex min-h-11 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-start text-sm transition ${
                       active
                         ? "bg-hover font-medium text-ink"
                         : "text-ink-soft hover:bg-hover"
@@ -183,9 +240,10 @@ export function WorkspaceEditor({
                     <button
                       onClick={() => deletePage(page.id)}
                       title={dict.editor.deletePage}
-                      className="px-1.5 text-ink-soft/40 opacity-0 transition hover:text-rose-500 group-hover:opacity-100"
+                      aria-label={`${dict.editor.deletePage}: ${page.title}`}
+                      className="grid h-11 w-11 shrink-0 place-items-center rounded-md text-ink-soft/70 opacity-0 transition hover:bg-hover hover:text-rose-500 focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
                     >
-                      ✕
+                      <span aria-hidden>✕</span>
                     </button>
                   )}
                 </div>
@@ -193,7 +251,7 @@ export function WorkspaceEditor({
             })}
             <button
               onClick={addPage}
-              className="mt-1 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-ink-soft transition hover:bg-hover hover:text-ink"
+              className="mt-1 flex min-h-11 w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-sm text-ink-soft transition hover:bg-hover hover:text-ink"
             >
               <span className="w-5 text-center">+</span>
               <span>{dict.editor.newPage}</span>
@@ -207,24 +265,41 @@ export function WorkspaceEditor({
             {dict.editor.allWorkspaces}
           </Link>
 
+          <div className="flex min-h-12 items-center gap-2 border-t border-line px-3 py-2">
+            <CreditMeter initial={initialCredits} />
+            <span className="ms-auto flex items-center gap-1">
+              <ThemeToggle />
+              <LanguageSwitcher compact />
+            </span>
+          </div>
+
           <AccountMenu />
         </aside>
 
         {/* Main */}
-        <main className="flex flex-1 flex-col overflow-hidden">
-          <div className="flex items-center justify-between border-b border-line px-6 py-2.5">
-            <div className="flex items-center gap-1.5 font-mono text-[11px] text-ink-faint">
-              <span>
+        <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          <div className="flex min-h-14 items-center gap-2 border-b border-line px-2 sm:px-4 lg:px-6">
+            <button
+              ref={sidebarTriggerRef}
+              type="button"
+              onClick={() => setSidebarOpen(true)}
+              aria-label={workspace.name}
+              aria-expanded={sidebarOpen}
+              className="grid h-11 w-11 shrink-0 place-items-center rounded-md text-lg text-ink-soft transition hover:bg-hover hover:text-ink md:hidden"
+            >
+              <span aria-hidden>☰</span>
+            </button>
+            <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden font-mono text-[11px] text-ink-faint">
+              <span className="hidden truncate sm:inline">
                 {workspace.icon} {workspace.name}
               </span>
-              <span>/</span>
-              <span className="text-ink-soft">
+              <span className="hidden sm:inline">/</span>
+              <span className="truncate text-ink-soft">
                 {activePage?.icon} {activePage?.title}
               </span>
             </div>
-            <div className="flex items-center gap-3">
-              <ThemeToggle />
-              <LanguageSwitcher compact />
+            <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+              <StudyLauncher />
               <button
                 onClick={() => {
                   setAiOpen((v) => {
@@ -243,14 +318,17 @@ export function WorkspaceEditor({
                   });
                 }}
                 aria-pressed={aiOpen}
-                className={`flex items-center gap-2 rounded-md border px-3.5 py-1.5 text-xs font-semibold transition ${
+                aria-label={aiOpen ? dict.editor.closeAgent : dict.editor.askAi}
+                className={`flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-md border px-2 text-xs font-semibold transition sm:min-h-0 sm:min-w-0 sm:px-3.5 sm:py-1.5 ${
                   aiOpen
                     ? "border-lime bg-lime-faint text-ink"
                     : "border-line-strong bg-card text-ink hover:bg-hover"
                 }`}
               >
                 <span className="h-1.5 w-1.5 rounded-full bg-lime" aria-hidden />
-                {aiOpen ? dict.editor.closeAgent : dict.editor.askAi}
+                <span className="hidden sm:inline">
+                  {aiOpen ? dict.editor.closeAgent : dict.editor.askAi}
+                </span>
               </button>
               <SaveIndicator status={status} />
             </div>
@@ -284,7 +362,9 @@ function SaveIndicator({ status }: { status: SaveStatus }) {
         : dict.editor.saved;
   return (
     <span
-      className={`flex items-center gap-1.5 text-xs ${status === "error" ? "text-rose-500" : "text-ink-soft"}`}
+      role="status"
+      aria-label={label}
+      className={`flex min-h-11 items-center gap-1.5 px-1 text-xs sm:min-h-0 sm:px-0 ${status === "error" ? "text-rose-500" : "text-ink-soft"}`}
     >
       <span
         className={`h-1.5 w-1.5 rounded-full ${
@@ -295,7 +375,7 @@ function SaveIndicator({ status }: { status: SaveStatus }) {
               : "bg-emerald-500"
         }`}
       />
-      {label}
+      <span className="hidden lg:inline">{label}</span>
     </span>
   );
 }

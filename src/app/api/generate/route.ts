@@ -12,8 +12,15 @@ import { formatPreferences } from "@/lib/ai/onboarding";
 import { modelForPlan } from "@/lib/ai/plans";
 import { addUsage, withUsageMeter } from "@/lib/ai/usage-meter";
 import { getUserPlan } from "@/lib/billing";
-import { chargeCredits, hasCredits, usageToCredits } from "@/lib/credits";
+import {
+  chargeCredits,
+  getCreditBalance,
+  hasCredits,
+  usageToCredits,
+} from "@/lib/credits";
+import { checkUsageLimit, recordFunnelEvent } from "@/lib/usage-limits";
 import { getLocale } from "@/lib/i18n/server";
+import { MAX_SOURCE_TEXT, normalizeSourceText } from "@/lib/import/syllabus";
 import { getDictionary, type Dictionary } from "@/lib/i18n/dictionaries";
 import { fmt } from "@/lib/i18n/interpolate";
 import { saveNewWorkspace } from "@/lib/workspace/store";
@@ -33,6 +40,9 @@ const requestSchema = z.object({
     )
     .max(10)
     .default([]),
+  // Optional pasted/uploaded course material (a syllabus) to ground on.
+  // Re-normalized + hard-capped server-side by normalizeSourceText.
+  sourceText: z.string().max(MAX_SOURCE_TEXT * 3).optional().default(""),
 });
 
 const encoder = new TextEncoder();
@@ -82,6 +92,7 @@ export async function POST(request: Request) {
 
       try {
         const { prompt, answers } = parsed.data;
+        const sourceText = normalizeSourceText(parsed.data.sourceText);
         const preferences = formatPreferences(answers);
         const model = modelForPlan(await getUserPlan());
 
@@ -90,6 +101,14 @@ export async function POST(request: Request) {
             type: "error",
             message: T.credits.outGenerate,
           });
+          finish();
+          return;
+        }
+
+        // Throttle after the credit gate: credits bound total spend, this
+        // bounds burst rate (abuse, runaway clients).
+        if (!(await checkUsageLimit(userId, "generate")).allowed) {
+          send({ type: "error", message: T.limits.rateLimited });
           finish();
           return;
         }
@@ -108,7 +127,7 @@ export async function POST(request: Request) {
           progress: 18,
         });
         const planned = await withUsageMeter(() =>
-          planWorkspace(prompt, model, preferences, locale),
+          planWorkspace(prompt, model, preferences, locale, sourceText),
         );
         const plan = planned.result;
         send({ type: "plan", plan });
@@ -154,14 +173,14 @@ export async function POST(request: Request) {
         }, 550);
 
         const generated = await withUsageMeter(() =>
-          generateWorkspace(prompt, model, preferences, plan, locale),
+          generateWorkspace(prompt, model, preferences, plan, locale, sourceText),
         );
         const workspace = generated.result;
         if (ticker) clearInterval(ticker);
         ticker = null;
 
         // Spend credits for the GLM 5.2 tokens this generation actually used.
-        await chargeCredits(
+        const creditsCost = await chargeCredits(
           userId,
           usageToCredits(addUsage(planned.usage, generated.usage)),
           "generate",
@@ -191,7 +210,13 @@ export async function POST(request: Request) {
           progress: 97,
         });
         const workspaceId = await saveNewWorkspace(workspace);
-        send({ type: "complete", workspaceId });
+        recordFunnelEvent(userId, "generate_complete");
+        send({
+          type: "complete",
+          workspaceId,
+          credits: creditsCost,
+          balance: await getCreditBalance(userId),
+        });
         finish();
       } catch (error) {
         console.error("[StudyOS] streamed generation failed:", error);

@@ -1,4 +1,4 @@
-import type { Dictionary } from "./en";
+import { en, type Dictionary } from "./en";
 // 日本語（ja-JP）— StudyOS の翻訳辞書。
 export const ja = {
   // ---- Document <title> / <meta> ----------------------------------------
@@ -10,7 +10,7 @@ export const ja = {
     generateTitle: "ワークスペースを生成 · StudyOS",
     pricingTitle: "料金 · StudyOS",
     pricingDescription:
-      "StudyOS の無料プランと Pro プランを比較。まずは無料で始めて、最も高性能なモデル、無制限の生成、優先サポートが必要になったらアップグレードできます。",
+      "StudyOS の無料プランと Pro プランを比較。まずは無料で始めて、最も高性能なモデル、より大きな毎月のクレジット枠、優先サポートが必要になったらアップグレードできます。",
     workspaceTitle: "{name} · StudyOS",
     brandFallback: "StudyOS",
   },
@@ -87,25 +87,30 @@ export const ja = {
           title: "あなた専用のワークスペース",
           body: "ひとつのプロンプトが、あなたの履修科目にぴったり合った完全なワークスペースになります。",
         },
+        flashcards: {
+          k: "フラッシュカード",
+          title: "間隔反復で学ぶ",
+          body: "どんなトピックもデッキに。StudyOS が各カードの復習を、忘れる直前のタイミングにスケジュールします。",
+        },
+        calendar: {
+          k: "カレンダー同期",
+          title: "締め切りを、どこでも",
+          body: "Google、Apple、Outlook のカレンダーで購読すれば、すべての課題や試験が自動で同期され続けます。",
+        },
+        syllabus: {
+          k: "シラバスの取り込み",
+          title: "シラバスから始める",
+          body: "シラバスを貼り付けるかアップロードすれば、StudyOS があなたの実際の科目・日程・トピックをもとに作成します。",
+        },
         databases: {
           k: "データベース",
           title: "本物の構造化データ",
           body: "課題、成績、リーディングをカスタムフィールド付きのテーブルで。ただのメモではありません。",
         },
-        calendar: {
-          k: "カレンダー",
-          title: "プランナーとカレンダー",
-          body: "すべての締め切りをひとつの場所に。テーブル、ボード、カレンダーをワンクリックで切り替え。",
-        },
         dashboard: {
           k: "ダッシュボード",
           title: "わかりやすいホーム",
           body: "一週間をまとめて見渡せるページで、次にやることがいつでもわかります。",
-        },
-        autosave: {
-          k: "自動保存",
-          title: "編集はすぐに保存",
-          body: "名前の変更、チェック、行の追加 — どんな変更もその瞬間に自動で保存されます。",
         },
         assistant: {
           k: "アシスタント",
@@ -123,8 +128,8 @@ export const ja = {
         price: "$0",
         features: [
           "AIワークスペースの生成",
-          "すべてを編集・自動保存",
-          "ダッシュボード、データベース、カレンダー",
+          "フラッシュカードと間隔反復",
+          "カレンダー同期とシラバスの取り込み",
           "日常の言葉で編集を依頼",
         ],
         cta: "始める",
@@ -135,7 +140,7 @@ export const ja = {
         price: "$5",
         features: [
           "無料プランのすべて",
-          "無制限の生成",
+          "毎月の大きなクレジット枠",
           "最も賢く、最も詳細なモデル",
           "優先サポート",
         ],
@@ -167,7 +172,7 @@ export const ja = {
     badge: "シンプルで、学生にやさしい料金",
     title: "まずは無料で。準備ができたらアップグレード。",
     subtitle:
-      "学期を整理するために必要なものはすべて無料です。Pro では最も高性能なモデル、無制限の生成、優先サポートが加わります。",
+      "学期を整理するために必要なものはすべて無料です。Pro では最も高性能なモデル、より大きな毎月のクレジット枠、優先サポートが加わります。",
     free: {
       name: "無料",
       price: "$0",
@@ -180,7 +185,7 @@ export const ja = {
       ],
       ctaSignedOut: "無料で始める",
       ctaSignedIn: "ワークスペースを開く",
-      bulletCredits: "{count} クレジットのスターターAIクレジット",
+      bulletCredits: "無料のAIクレジットを毎月 {count} 付与",
     },
     pro: {
       badge: "一番人気",
@@ -190,7 +195,7 @@ export const ja = {
       billed: "月額課金 · いつでも解約可能。",
       bullets: [
         "無料プランのすべて",
-        "無制限のワークスペース生成",
+        "たっぷり使える毎月のクレジット枠",
         "最も高性能で、最も詳細なモデル",
         "優先サポートと先行アクセス",
       ],
@@ -198,7 +203,7 @@ export const ja = {
       manageBilling: "請求を管理",
       upgrade: "Pro にアップグレード",
       ctaSignedOut: "Pro で始める",
-      bulletCredits: "{count} クレジットのAIクレジット込み",
+      bulletCredits: "AIクレジットを毎月 {count} 付与",
     },
     comparison: {
       title: "プランを比較",
@@ -212,6 +217,9 @@ export const ja = {
         onboarding: "ガイド付きのオンボーディング質問",
         editing: "完全なインライン編集と自動保存",
         databases: "データベース — テーブル、ボード、カレンダー",
+        flashcards: "間隔反復付きフラッシュカード",
+        calendarSync: "カレンダー同期（Google / Apple / Outlook）",
+        syllabusImport: "シラバスの取り込み",
         dragDrop: "ドラッグ＆ドロップ編集",
         agentChat: "ワークスペースを編集するAIエージェントチャット",
         model: "生成モデル",
@@ -234,9 +242,9 @@ export const ja = {
       heading: "AIはクレジットで動きます",
       intro:
         "AIリクエストはその処理量に応じてクレジットを消費します — ちょっとした調整なら少しだけ、ワークスペースをまるごと構築するならもっと多く。Pro にはクレジットがたっぷり含まれ、いつでも追加できます。",
-      freeIncludes: "無料プランには {count} クレジットのスターターが含まれます",
-      proIncludes: "Pro には {count} クレジットが含まれます",
-      neverExpire: "いつでも追加 — クレジットは期限切れになりません",
+      freeIncludes: "無料プランには毎月 {count} クレジットが含まれます",
+      proIncludes: "Pro には毎月 {count} クレジットが含まれます",
+      neverExpire: "いつでも追加 — 購入したパックは期限切れになりません",
       balance: "残高：{count} クレジット",
       pack: "クレジットパック",
       unit: "クレジット",
@@ -252,7 +260,7 @@ export const ja = {
       },
       {
         q: "Pro では何が得られますか？",
-        a: "無制限の生成、より豊かで正確なワークスペースのための最高性能モデル、優先サポート、そして新機能への先行アクセスです。",
+        a: "毎月たっぷり付与されるクレジット、より豊かで正確なワークスペースのための最高性能モデル、優先サポート、そして新機能への先行アクセスです。",
       },
       {
         q: "いつでも解約できますか？",
@@ -287,6 +295,7 @@ export const ja = {
     updatedAt: "{date} に更新",
     fallbackIcon: "📄",
   },
+  agentCenter: en.agentCenter,
 
   // ---- Generate flow (/generate) ----------------------------------------
   generate: {
@@ -322,6 +331,16 @@ export const ja = {
       continue: "続ける",
       examplesLabel: "迷ったら、例から始めましょう",
       finePrint: "無料 · クレジットカード不要 · 数秒で完成",
+    },
+    syllabus: {
+      toggle: "📄 シラバスを追加",
+      optional: "任意",
+      hint: "シラバスや履修科目リストを貼り付けるか、.txt ファイルをアップロードすると、StudyOS があなたの実際の科目・締め切り・トピックをもとに作成します。",
+      placeholder:
+        "ここにシラバス、履修科目リスト、学期の時間割を貼り付けてください…",
+      upload: ".txt をアップロード",
+      attached: "{chars} 文字を追加しました",
+      clear: "クリア",
     },
     questions: {
       back: "← 説明を編集",
@@ -461,6 +480,7 @@ export const ja = {
       divider: "区切り線",
       database: "テーブル",
       media: "画像",
+      flashcards: "フラッシュカード",
     },
     placeholders: {
       paragraph: "入力してください…",
@@ -481,6 +501,45 @@ export const ja = {
     },
   },
 
+  // ---- Flashcards & spaced-repetition study -----------------------------
+  study: {
+    newDeckTitle: "新しいデッキ",
+    untitledDeck: "フラッシュカード",
+    deckTitlePlaceholder: "デッキのタイトル…",
+    stats: {
+      cards: "カード {count} 枚",
+      due: "復習待ち {count} 枚",
+      mature: "習得済み {count} 枚",
+    },
+    studyDue: "{count} 枚を復習",
+    allCaughtUp: "すべて完了 🎉",
+    editCards: "カードを編集",
+    doneEditing: "完了",
+    addCard: "+ カードを追加",
+    deleteCard: "カードを削除",
+    emptyDeck: "まだカードがありません。追加するか、AI にデッキの作成を頼みましょう。",
+    frontPlaceholder: "表（問題）",
+    backPlaceholder: "裏（答え）",
+    showAnswer: "答えを表示",
+    tapToReveal: "タップして答えを表示",
+    spaceKey: "スペース",
+    grades: {
+      again: "もう一度",
+      hard: "難しい",
+      good: "普通",
+      easy: "簡単",
+    },
+    doneTitle: "セッション完了",
+    doneSummary: "{count} 枚のカードを復習しました。",
+    doneAgain: "{count} 枚は近いうちにもう一度確認しましょう。",
+    finish: "完了",
+    // Workspace-level study launcher
+    dueAcrossWorkspace: "{count} 枚を復習",
+    noneDue: "復習なし",
+    streak: "{count} 日連続",
+    reviewAll: "復習",
+  },
+
   // ---- Database views (table / board / calendar) ------------------------
   db: {
     databaseIcon: "データベースのアイコン",
@@ -497,6 +556,8 @@ export const ja = {
     addOnDay: "この日に追加",
     clickToRename: "クリックして名前を変更",
     delete: "削除",
+    addTag: "追加",
+    addLink: "リンク",
   },
 
   // ---- Database settings panel ------------------------------------------
@@ -641,6 +702,12 @@ export const ja = {
       "AIクレジットが残っていません。生成を続けるには、料金ページからクレジットを追加してください。",
     outAgent:
       "AIクレジットが残っていません。エージェントを使い続けるには、料金ページからクレジットを追加してください。",
+    // Transparency: always-visible meter, per-action cost, low-balance nudge.
+    low: "残りわずか",
+    runningLow: "クレジットが残りわずかです。",
+    turnCostTitle: "今回のクレジット",
+    buysApprox: "≈ ワークスペース生成 {gens} 回、またはエージェント編集 {edits} 回",
+    buyMore: "さらに購入",
   },
 
   // ---- Account menu -----------------------------------------------------
@@ -675,10 +742,20 @@ export const ja = {
     upgrade: "Pro にアップグレード",
     comparePlans: "プランを比較",
     creditsDesc:
-      "クレジットがすべてのAIリクエストを動かします。いつでも追加 — クレジットは期限切れになりません。",
+      "クレジットがすべてのAIリクエストを動かします。プランのクレジットは毎月更新され、購入したパックは期限切れになりません。",
     buyPack: "{count} クレジットを購入 · ${price}",
     viewPricing: "料金を見る",
     signOut: "サインアウト",
+    dangerZone: "危険な操作",
+    deleteAccount: "アカウントを削除",
+    deleteAccountDesc:
+      "アカウント、ワークスペース、クレジット、サブスクリプションを完全に削除します。この操作は取り消せません。",
+    deleteAccountConfirm:
+      "アカウントを完全に削除しますか？\n\nすべてのワークスペース、クレジット、サブスクリプションが削除されます。この操作は取り消せません。",
+    deleteAccountButton: "アカウントを削除する",
+    deleting: "削除中…",
+    deleteAccountError:
+      "現在サブスクリプションを解約できなかったため、何も削除されていません。しばらくしてからもう一度お試しください。",
   },
 
   // ---- Workspace card (delete control) ----------------------------------
@@ -687,6 +764,46 @@ export const ja = {
     deleteAria: "{name} を削除",
     deleteConfirm:
       "「{name}」を削除しますか？\n\nワークスペースとその中身がすべて完全に削除されます。この操作は取り消せません。",
+  },
+
+  // ---- Error & not-found pages -------------------------------------------
+  errors: {
+    notFoundTitle: "ページが見つかりません",
+    notFoundBody: "このページは存在しません — 移動または削除された可能性があります。",
+    errorTitle: "問題が発生しました",
+    errorBody:
+      "予期しないエラーが発生しました。作業内容は自動保存されています — もう一度お試しください。",
+    tryAgain: "もう一度試す",
+    backHome: "ホームに戻る",
+  },
+
+  // ---- Legal & footer -----------------------------------------------------
+  legal: {
+    terms: "利用規約",
+    privacy: "プライバシーポリシー",
+    contact: "お問い合わせ",
+  },
+
+  // ---- Calendar subscription (ICS feed) ----------------------------------
+  calendar: {
+    title: "カレンダー同期",
+    description:
+      "Google、Apple、Outlook のカレンダーで締め切りを購読できます。課題や試験、日付のある項目が自動的に最新の状態に保たれます。",
+    urlLabel: "あなた専用のカレンダーリンク",
+    copy: "コピー",
+    copied: "コピーしました ✓",
+    addToCalendar: "カレンダーに追加",
+    reset: "リンクをリセット",
+    resetting: "リセットしています…",
+    instructions:
+      "このリンクをカレンダーアプリの「URL から購読」オプションに貼り付けてください。リンクを知っている人は誰でもあなたの締め切りを見られるため、非公開にしてください。アクセスを取り消すには、いつでもリセットできます。",
+  },
+
+  // ---- Usage limits --------------------------------------------------------
+  limits: {
+    rateLimited:
+      "現在リクエストの上限に達しています。少し待ってからもう一度お試しください。",
+    sandboxQuota: "本日のレンダリング上限に達しました。明日リセットされます。",
   },
 
   // ---- Mock generator scaffolding (no-API-key fallback) ------------------

@@ -1,4 +1,4 @@
-import type { Dictionary } from "./en";
+import { en, type Dictionary } from "./en";
 // Français (fr-FR) — traduction de StudyOS, conforme au contrat Dictionary.
 export const fr = {
   // ---- Document <title> / <meta> ----------------------------------------
@@ -10,7 +10,7 @@ export const fr = {
     generateTitle: "Générez votre espace de travail · StudyOS",
     pricingTitle: "Tarifs · StudyOS",
     pricingDescription:
-      "Comparez StudyOS Gratuit et Pro. Commencez gratuitement et passez à l’offre supérieure quand vous voulez le modèle le plus performant, des générations illimitées et un support prioritaire.",
+      "Comparez StudyOS Gratuit et Pro. Commencez gratuitement et passez à l’offre supérieure quand vous voulez le modèle le plus performant, une enveloppe mensuelle de crédits plus généreuse et un support prioritaire.",
     workspaceTitle: "{name} · StudyOS",
     brandFallback: "StudyOS",
   },
@@ -87,25 +87,30 @@ export const fr = {
           title: "Des espaces conçus pour vous",
           body: "Une seule consigne devient un espace de travail complet, adapté à vos cours exacts.",
         },
+        flashcards: {
+          k: "Cartes mémo",
+          title: "Réviser avec la répétition espacée",
+          body: "Transformez n’importe quel sujet en paquet. StudyOS planifie chaque carte pour que vous la revoyiez juste avant de l’oublier.",
+        },
+        calendar: {
+          k: "Synchronisation du calendrier",
+          title: "Vos échéances, partout",
+          body: "Abonnez-vous dans Google, Apple ou Outlook Calendar — chaque devoir et examen reste synchronisé automatiquement.",
+        },
+        syllabus: {
+          k: "Import du programme",
+          title: "Partez de votre programme",
+          body: "Collez ou importez votre programme et StudyOS part de vos cours, dates et sujets réels.",
+        },
         databases: {
           k: "Bases de données",
           title: "Des données réelles et structurées",
           body: "Devoirs, notes et lectures sous forme de tableaux avec des champs personnalisés — pas de notes éparses.",
         },
-        calendar: {
-          k: "Calendrier",
-          title: "Planning et calendrier",
-          body: "Toutes vos échéances au même endroit. Basculez entre tableau, tableau Kanban et calendrier en un clic.",
-        },
         dashboard: {
           k: "Tableau de bord",
           title: "Un point de repère clair",
           body: "Une page qui rassemble toute votre semaine pour que vous sachiez toujours ce qui vient ensuite.",
-        },
-        autosave: {
-          k: "Enregistrement auto",
-          title: "Modifié, enregistré aussitôt",
-          body: "Renommez, cochez, ajoutez des lignes — chaque changement s’enregistre dès que vous le faites.",
         },
         assistant: {
           k: "Assistant",
@@ -123,8 +128,8 @@ export const fr = {
         price: "$0",
         features: [
           "Générer des espaces de travail par l’IA",
-          "Tout modifier et enregistrer automatiquement",
-          "Tableaux de bord, bases de données, calendrier",
+          "Cartes mémo et répétition espacée",
+          "Synchronisation du calendrier et import du programme",
           "Demander des modifications en langage courant",
         ],
         cta: "Commencer",
@@ -135,7 +140,7 @@ export const fr = {
         price: "$5",
         features: [
           "Tout ce que contient l’offre Gratuit",
-          "Générations illimitées",
+          "Une grande enveloppe mensuelle de crédits",
           "Le modèle le plus intelligent et le plus détaillé",
           "Support prioritaire",
         ],
@@ -167,7 +172,7 @@ export const fr = {
     badge: "Des tarifs simples, pensés pour les étudiants",
     title: "Commencez gratuitement. Évoluez quand vous êtes prêt.",
     subtitle:
-      "Tout ce dont vous avez besoin pour organiser votre semestre est gratuit. L’offre Pro ajoute le modèle le plus performant, des générations illimitées et un support prioritaire.",
+      "Tout ce dont vous avez besoin pour organiser votre semestre est gratuit. L’offre Pro ajoute le modèle le plus performant, une enveloppe mensuelle de crédits plus généreuse et un support prioritaire.",
     free: {
       name: "Gratuit",
       price: "$0",
@@ -180,7 +185,7 @@ export const fr = {
       ],
       ctaSignedOut: "Commencer gratuitement",
       ctaSignedIn: "Ouvrir vos espaces de travail",
-      bulletCredits: "{count} crédits IA de départ",
+      bulletCredits: "{count} crédits IA gratuits chaque mois",
     },
     pro: {
       badge: "Le plus populaire",
@@ -190,7 +195,7 @@ export const fr = {
       billed: "Facturé mensuellement · annulable à tout moment.",
       bullets: [
         "Tout ce que contient l’offre Gratuit",
-        "Générations d’espaces de travail illimitées",
+        "Une enveloppe mensuelle pour un usage intensif",
         "Le modèle le plus performant et le plus détaillé",
         "Support prioritaire et accès anticipé",
       ],
@@ -198,7 +203,7 @@ export const fr = {
       manageBilling: "Gérer la facturation",
       upgrade: "Passer à Pro",
       ctaSignedOut: "Commencer avec Pro",
-      bulletCredits: "{count} crédits IA inclus",
+      bulletCredits: "{count} crédits IA chaque mois",
     },
     comparison: {
       title: "Comparer les offres",
@@ -212,6 +217,9 @@ export const fr = {
         onboarding: "Questions d’accueil guidées",
         editing: "Édition en ligne complète et enregistrement auto",
         databases: "Bases de données — tableau, tableau Kanban et calendrier",
+        flashcards: "Cartes mémo avec répétition espacée",
+        calendarSync: "Synchronisation du calendrier (Google / Apple / Outlook)",
+        syllabusImport: "Import du programme",
         dragDrop: "Édition par glisser-déposer",
         agentChat: "Chat avec l’agent IA qui modifie votre espace de travail",
         model: "Modèle de génération",
@@ -234,9 +242,9 @@ export const fr = {
       heading: "L’IA fonctionne avec des crédits",
       intro:
         "Chaque requête IA dépense des crédits selon son ampleur — un petit ajustement coûte peu, construire un espace de travail entier coûte plus. L’offre Pro arrive chargée de crédits, et vous pouvez recharger à tout moment.",
-      freeIncludes: "L’offre Gratuit inclut {count} crédits de départ",
-      proIncludes: "L’offre Pro inclut {count} crédits",
-      neverExpire: "Rechargez à tout moment — les crédits n’expirent jamais",
+      freeIncludes: "L’offre Gratuit inclut {count} crédits chaque mois",
+      proIncludes: "L’offre Pro inclut {count} crédits chaque mois",
+      neverExpire: "Rechargez à tout moment — les packs achetés n’expirent jamais",
       balance: "Votre solde : {count} crédits",
       pack: "Pack de crédits",
       unit: "crédits",
@@ -252,7 +260,7 @@ export const fr = {
       },
       {
         q: "Qu’est-ce que j’obtiens avec Pro ?",
-        a: "Des générations illimitées, le modèle le plus performant pour des espaces de travail plus riches et plus précis, un support prioritaire et un accès anticipé aux nouvelles fonctionnalités.",
+        a: "Une généreuse enveloppe mensuelle de crédits, le modèle le plus performant pour des espaces de travail plus riches et plus précis, un support prioritaire et un accès anticipé aux nouvelles fonctionnalités.",
       },
       {
         q: "Puis-je annuler à tout moment ?",
@@ -287,6 +295,7 @@ export const fr = {
     updatedAt: "mis à jour le {date}",
     fallbackIcon: "📄",
   },
+  agentCenter: en.agentCenter,
 
   // ---- Generate flow (/generate) ----------------------------------------
   generate: {
@@ -322,6 +331,16 @@ export const fr = {
       continue: "Continuer",
       examplesLabel: "Vous hésitez ? Partez d’un exemple",
       finePrint: "Gratuit · sans carte bancaire · prêt en quelques secondes",
+    },
+    syllabus: {
+      toggle: "📄 Ajouter votre programme",
+      optional: "facultatif",
+      hint: "Collez votre programme ou votre liste de cours — ou importez un fichier .txt — et StudyOS part de vos cours, échéances et sujets réels.",
+      placeholder:
+        "Collez ici votre programme, votre liste de cours ou votre emploi du temps du semestre…",
+      upload: "Importer .txt",
+      attached: "{chars} caractères ajoutés",
+      clear: "Effacer",
     },
     questions: {
       back: "← Modifier la description",
@@ -461,6 +480,7 @@ export const fr = {
       divider: "Séparateur",
       database: "Tableau",
       media: "Image",
+      flashcards: "Cartes mémo",
     },
     placeholders: {
       paragraph: "Saisissez quelque chose…",
@@ -481,6 +501,45 @@ export const fr = {
     },
   },
 
+  // ---- Flashcards & spaced-repetition study -----------------------------
+  study: {
+    newDeckTitle: "Nouveau paquet",
+    untitledDeck: "Cartes mémo",
+    deckTitlePlaceholder: "Titre du paquet…",
+    stats: {
+      cards: "{count} cartes",
+      due: "{count} à réviser",
+      mature: "{count} apprises",
+    },
+    studyDue: "Réviser {count} cartes",
+    allCaughtUp: "Tout est à jour 🎉",
+    editCards: "Modifier les cartes",
+    doneEditing: "Terminé",
+    addCard: "+ Ajouter une carte",
+    deleteCard: "Supprimer la carte",
+    emptyDeck: "Pas encore de cartes. Ajoutez-en une, ou demandez à l’IA de créer un paquet.",
+    frontPlaceholder: "Recto (question)",
+    backPlaceholder: "Verso (réponse)",
+    showAnswer: "Afficher la réponse",
+    tapToReveal: "Touchez pour révéler la réponse",
+    spaceKey: "Espace",
+    grades: {
+      again: "Encore",
+      hard: "Difficile",
+      good: "Bien",
+      easy: "Facile",
+    },
+    doneTitle: "Session terminée",
+    doneSummary: "Vous avez révisé {count} cartes.",
+    doneAgain: "{count} à revoir bientôt.",
+    finish: "Terminé",
+    // Workspace-level study launcher
+    dueAcrossWorkspace: "Réviser {count} cartes",
+    noneDue: "Rien à réviser",
+    streak: "Série de {count} jours",
+    reviewAll: "Réviser",
+  },
+
   // ---- Database views (table / board / calendar) ------------------------
   db: {
     databaseIcon: "Icône de la base de données",
@@ -497,6 +556,8 @@ export const fr = {
     addOnDay: "Ajouter ce jour-là",
     clickToRename: "Cliquez pour renommer",
     delete: "Supprimer",
+    addTag: "Ajouter",
+    addLink: "Lier",
   },
 
   // ---- Database settings panel ------------------------------------------
@@ -641,6 +702,12 @@ export const fr = {
       "Vous n’avez plus de crédits IA. Ajoutez-en depuis la page Tarifs pour continuer à générer.",
     outAgent:
       "Vous n’avez plus de crédits IA. Ajoutez-en depuis la page Tarifs pour continuer à utiliser l’agent.",
+    // Transparency: always-visible meter, per-action cost, low-balance nudge.
+    low: "Faible",
+    runningLow: "Vos crédits s’épuisent.",
+    turnCostTitle: "Crédits pour ce tour",
+    buysApprox: "≈ {gens} générations d’espaces de travail ou {edits} modifications de l’agent",
+    buyMore: "En acheter plus",
   },
 
   // ---- Account menu -----------------------------------------------------
@@ -675,10 +742,20 @@ export const fr = {
     upgrade: "Passer à Pro",
     comparePlans: "Comparer les offres",
     creditsDesc:
-      "Les crédits alimentent chaque requête IA. Rechargez à tout moment — les crédits n’expirent jamais.",
+      "Les crédits alimentent chaque requête IA. Votre offre les renouvelle chaque mois, et les packs achetés n’expirent jamais.",
     buyPack: "Acheter {count} crédits · ${price}",
     viewPricing: "Voir les tarifs",
     signOut: "Se déconnecter",
+    dangerZone: "Zone de danger",
+    deleteAccount: "Supprimer le compte",
+    deleteAccountDesc:
+      "Supprimez définitivement votre compte, vos espaces de travail, vos crédits et votre abonnement. Cette action est irréversible.",
+    deleteAccountConfirm:
+      "Supprimer définitivement votre compte ?\n\nTous vos espaces de travail, vos crédits et votre abonnement seront supprimés. Cette action est irréversible.",
+    deleteAccountButton: "Supprimer mon compte",
+    deleting: "Suppression…",
+    deleteAccountError:
+      "Nous n’avons pas pu annuler votre abonnement pour le moment, donc rien n’a été supprimé. Veuillez réessayer dans un instant.",
   },
 
   // ---- Workspace card (delete control) ----------------------------------
@@ -687,6 +764,46 @@ export const fr = {
     deleteAria: "Supprimer {name}",
     deleteConfirm:
       "Supprimer « {name} » ?\n\nCela supprime définitivement l’espace de travail et tout son contenu. Cette action est irréversible.",
+  },
+
+  // ---- Error & not-found pages -------------------------------------------
+  errors: {
+    notFoundTitle: "Page introuvable",
+    notFoundBody: "Cette page n’existe pas — elle a peut-être été déplacée ou supprimée.",
+    errorTitle: "Une erreur est survenue",
+    errorBody:
+      "Une erreur inattendue s’est produite. Votre travail est enregistré automatiquement — réessayez.",
+    tryAgain: "Réessayer",
+    backHome: "Retour à l’accueil",
+  },
+
+  // ---- Legal & footer -----------------------------------------------------
+  legal: {
+    terms: "Conditions d’utilisation",
+    privacy: "Politique de confidentialité",
+    contact: "Contact",
+  },
+
+  // ---- Calendar subscription (ICS feed) ----------------------------------
+  calendar: {
+    title: "Synchronisation du calendrier",
+    description:
+      "Abonnez-vous à vos échéances dans Google, Apple ou Outlook Calendar. Vos devoirs, examens et éléments datés restent à jour automatiquement.",
+    urlLabel: "Votre lien de calendrier privé",
+    copy: "Copier",
+    copied: "Copié ✓",
+    addToCalendar: "Ajouter au calendrier",
+    reset: "Réinitialiser le lien",
+    resetting: "Réinitialisation…",
+    instructions:
+      "Collez ce lien dans l’option « S’abonner à partir d’une URL » de votre application de calendrier. Gardez-le privé — toute personne disposant du lien peut voir vos échéances. Réinitialisez-le à tout moment pour révoquer l’accès.",
+  },
+
+  // ---- Usage limits --------------------------------------------------------
+  limits: {
+    rateLimited:
+      "Vous avez atteint la limite de requêtes pour le moment. Veuillez patienter un instant puis réessayer.",
+    sandboxQuota: "Vous avez atteint la limite de rendu du jour. Elle se réinitialise demain.",
   },
 
   // ---- Mock generator scaffolding (no-API-key fallback) ------------------

@@ -1,4 +1,4 @@
-import type { Dictionary } from "./en";
+import { en, type Dictionary } from "./en";
 
 /** Dutch (nl-NL) — translation of the canonical English dictionary. */
 export const nl = {
@@ -11,7 +11,7 @@ export const nl = {
     generateTitle: "Genereer je werkruimte · StudyOS",
     pricingTitle: "Prijzen · StudyOS",
     pricingDescription:
-      "Vergelijk StudyOS Gratis en Pro. Begin gratis en upgrade wanneer je het krachtigste model, onbeperkte generaties en prioriteitssupport wilt.",
+      "Vergelijk StudyOS Gratis en Pro. Begin gratis en upgrade wanneer je het krachtigste model, een ruimer maandelijks credittegoed en prioriteitssupport wilt.",
     workspaceTitle: "{name} · StudyOS",
     brandFallback: "StudyOS",
   },
@@ -88,25 +88,30 @@ export const nl = {
           title: "Werkruimtes, op maat voor jou",
           body: "Eén prompt wordt een complete werkruimte, afgestemd op precies jouw vakken.",
         },
+        flashcards: {
+          k: "Flashcards",
+          title: "Leer met gespreide herhaling",
+          body: "Maak van elk onderwerp een stapel. StudyOS plant elke kaart zo dat je hem herhaalt net voordat je hem zou vergeten.",
+        },
+        calendar: {
+          k: "Agendasynchronisatie",
+          title: "Je deadlines, overal",
+          body: "Abonneer je in Google, Apple of Outlook Calendar — elke opdracht en elk tentamen blijft automatisch gesynchroniseerd.",
+        },
+        syllabus: {
+          k: "Studiewijzer importeren",
+          title: "Begin met je studiewijzer",
+          body: "Plak of upload je studiewijzer en StudyOS bouwt op je echte vakken, data en onderwerpen.",
+        },
         databases: {
           k: "Databases",
           title: "Echte, gestructureerde data",
           body: "Opdrachten, cijfers en leesstof als tabellen met eigen velden — geen losse notities.",
         },
-        calendar: {
-          k: "Agenda",
-          title: "Planner & agenda",
-          body: "Elke deadline op één plek. Wissel met één klik tussen tabel, bord en agenda.",
-        },
         dashboard: {
           k: "Dashboard",
           title: "Een helder thuisbasis",
           body: "Een pagina die je hele week samenbrengt, zodat je altijd weet wat er aankomt.",
-        },
-        autosave: {
-          k: "Automatisch opslaan",
-          title: "Bewerk, direct opgeslagen",
-          body: "Hernoem, vink af, voeg rijen toe — elke wijziging slaat zichzelf op zodra je hem maakt.",
         },
         assistant: {
           k: "Assistent",
@@ -124,8 +129,8 @@ export const nl = {
         price: "$0",
         features: [
           "AI-werkruimtes genereren",
-          "Alles bewerken & automatisch opslaan",
-          "Dashboards, databases, agenda",
+          "Flashcards & gespreide herhaling",
+          "Agendasynchronisatie & studiewijzer importeren",
           "Vraag om bewerkingen in gewoon Nederlands",
         ],
         cta: "Aan de slag",
@@ -136,7 +141,7 @@ export const nl = {
         price: "$5",
         features: [
           "Alles uit Gratis",
-          "Onbeperkte generaties",
+          "Een groot maandelijks credittegoed",
           "Het slimste, meest gedetailleerde model",
           "Prioriteitssupport",
         ],
@@ -168,7 +173,7 @@ export const nl = {
     badge: "Eenvoudige, studentvriendelijke prijzen",
     title: "Begin gratis. Upgrade wanneer je er klaar voor bent.",
     subtitle:
-      "Alles wat je nodig hebt om je semester te organiseren is gratis. Pro voegt het krachtigste model, onbeperkte generaties en prioriteitssupport toe.",
+      "Alles wat je nodig hebt om je semester te organiseren is gratis. Pro voegt het krachtigste model, een ruimer maandelijks credittegoed en prioriteitssupport toe.",
     free: {
       name: "Gratis",
       price: "$0",
@@ -181,7 +186,7 @@ export const nl = {
       ],
       ctaSignedOut: "Begin gratis",
       ctaSignedIn: "Open je werkruimtes",
-      bulletCredits: "{count} AI-startcredits",
+      bulletCredits: "{count} gratis AI-credits per maand",
     },
     pro: {
       badge: "Meest gekozen",
@@ -191,7 +196,7 @@ export const nl = {
       billed: "Maandelijks gefactureerd · altijd opzegbaar.",
       bullets: [
         "Alles uit Gratis",
-        "Onbeperkte werkruimtegeneraties",
+        "Een maandelijks tegoed voor intensief gebruik",
         "Het krachtigste, meest gedetailleerde model",
         "Prioriteitssupport & vroege toegang",
       ],
@@ -199,7 +204,7 @@ export const nl = {
       manageBilling: "Facturatie beheren",
       upgrade: "Upgraden naar Pro",
       ctaSignedOut: "Aan de slag met Pro",
-      bulletCredits: "{count} AI-credits inbegrepen",
+      bulletCredits: "{count} AI-credits per maand",
     },
     comparison: {
       title: "Vergelijk abonnementen",
@@ -213,6 +218,9 @@ export const nl = {
         onboarding: "Begeleide instapvragen",
         editing: "Volledige inline bewerking & automatisch opslaan",
         databases: "Databases — tabel, bord & agenda",
+        flashcards: "Flashcards met gespreide herhaling",
+        calendarSync: "Agendasynchronisatie (Google / Apple / Outlook)",
+        syllabusImport: "Studiewijzer importeren",
         dragDrop: "Bewerken met slepen en neerzetten",
         agentChat: "AI-agentchat die je werkruimte bewerkt",
         model: "Generatiemodel",
@@ -235,9 +243,9 @@ export const nl = {
       heading: "AI draait op credits",
       intro:
         "Elke AI-aanvraag kost credits op basis van hoeveel werk hij doet — een snelle aanpassing kost weinig, een hele werkruimte bouwen kost meer. Pro komt boordevol credits, en je kunt altijd bijvullen.",
-      freeIncludes: "Gratis bevat {count} startcredits",
-      proIncludes: "Pro bevat {count} credits",
-      neverExpire: "Vul altijd bij — credits verlopen nooit",
+      freeIncludes: "Gratis bevat {count} credits per maand",
+      proIncludes: "Pro bevat {count} credits per maand",
+      neverExpire: "Vul altijd bij — gekochte pakketten verlopen nooit",
       balance: "Je saldo: {count} credits",
       pack: "Creditpakket",
       unit: "credits",
@@ -253,7 +261,7 @@ export const nl = {
       },
       {
         q: "Wat krijg ik met Pro?",
-        a: "Onbeperkte generaties, het krachtigste model voor rijkere en nauwkeurigere werkruimtes, prioriteitssupport en vroege toegang tot nieuwe functies.",
+        a: "Een royaal maandelijks credittegoed, het krachtigste model voor rijkere en nauwkeurigere werkruimtes, prioriteitssupport en vroege toegang tot nieuwe functies.",
       },
       {
         q: "Kan ik altijd opzeggen?",
@@ -288,6 +296,7 @@ export const nl = {
     updatedAt: "bijgewerkt {date}",
     fallbackIcon: "📄",
   },
+  agentCenter: en.agentCenter,
 
   // ---- Generate flow (/generate) ----------------------------------------
   generate: {
@@ -323,6 +332,16 @@ export const nl = {
       continue: "Doorgaan",
       examplesLabel: "Niet zeker? Begin met een voorbeeld",
       finePrint: "Gratis · geen creditcard · klaar in seconden",
+    },
+    syllabus: {
+      toggle: "📄 Voeg je studiewijzer toe",
+      optional: "optioneel",
+      hint: "Plak je studiewijzer of vakkenlijst — of upload een .txt-bestand — en StudyOS bouwt op je echte vakken, deadlines en onderwerpen.",
+      placeholder:
+        "Plak hier je studiewijzer, vakkenlijst of semesterrooster…",
+      upload: ".txt uploaden",
+      attached: "{chars} tekens toegevoegd",
+      clear: "Wissen",
     },
     questions: {
       back: "← Beschrijving bewerken",
@@ -462,6 +481,7 @@ export const nl = {
       divider: "Scheidingslijn",
       database: "Tabel",
       media: "Afbeelding",
+      flashcards: "Flashcards",
     },
     placeholders: {
       paragraph: "Typ iets…",
@@ -482,6 +502,45 @@ export const nl = {
     },
   },
 
+  // ---- Flashcards & spaced-repetition study -----------------------------
+  study: {
+    newDeckTitle: "Nieuwe stapel",
+    untitledDeck: "Flashcards",
+    deckTitlePlaceholder: "Stapeltitel…",
+    stats: {
+      cards: "{count} kaarten",
+      due: "{count} te herhalen",
+      mature: "{count} geleerd",
+    },
+    studyDue: "Herhaal {count} kaarten",
+    allCaughtUp: "Helemaal bij 🎉",
+    editCards: "Kaarten bewerken",
+    doneEditing: "Klaar",
+    addCard: "+ Kaart toevoegen",
+    deleteCard: "Kaart verwijderen",
+    emptyDeck: "Nog geen kaarten. Voeg er een toe, of vraag de AI om een stapel te maken.",
+    frontPlaceholder: "Voorkant (vraag)",
+    backPlaceholder: "Achterkant (antwoord)",
+    showAnswer: "Antwoord tonen",
+    tapToReveal: "Tik om het antwoord te tonen",
+    spaceKey: "Spatie",
+    grades: {
+      again: "Opnieuw",
+      hard: "Moeilijk",
+      good: "Goed",
+      easy: "Makkelijk",
+    },
+    doneTitle: "Sessie voltooid",
+    doneSummary: "Je hebt {count} kaarten herhaald.",
+    doneAgain: "{count} moet je binnenkort opnieuw bekijken.",
+    finish: "Klaar",
+    // Workspace-level study launcher
+    dueAcrossWorkspace: "Herhaal {count} kaarten",
+    noneDue: "Niets te herhalen",
+    streak: "Reeks van {count} dagen",
+    reviewAll: "Herhalen",
+  },
+
   // ---- Database views (table / board / calendar) ------------------------
   db: {
     databaseIcon: "Database-icoon",
@@ -498,6 +557,8 @@ export const nl = {
     addOnDay: "Toevoegen op deze dag",
     clickToRename: "Klik om te hernoemen",
     delete: "Verwijderen",
+    addTag: "Toevoegen",
+    addLink: "Koppelen",
   },
 
   // ---- Database settings panel ------------------------------------------
@@ -642,6 +703,12 @@ export const nl = {
       "Je AI-credits zijn op. Voeg er meer toe via de Prijzen-pagina om te blijven genereren.",
     outAgent:
       "Je AI-credits zijn op. Voeg er meer toe via de Prijzen-pagina om de agent te blijven gebruiken.",
+    // Transparency: always-visible meter, per-action cost, low-balance nudge.
+    low: "Laag",
+    runningLow: "Je credits raken op.",
+    turnCostTitle: "Credits deze beurt",
+    buysApprox: "≈ {gens} werkruimte-generaties of {edits} agentbewerkingen",
+    buyMore: "Meer kopen",
   },
 
   // ---- Account menu -----------------------------------------------------
@@ -676,10 +743,20 @@ export const nl = {
     upgrade: "Upgraden naar Pro",
     comparePlans: "Abonnementen vergelijken",
     creditsDesc:
-      "Credits voeden elke AI-aanvraag. Vul altijd bij — credits verlopen nooit.",
+      "Credits voeden elke AI-aanvraag. Je abonnement vult ze maandelijks aan, en gekochte pakketten verlopen nooit.",
     buyPack: "Koop {count} credits · ${price}",
     viewPricing: "Prijzen bekijken",
     signOut: "Uitloggen",
+    dangerZone: "Gevarenzone",
+    deleteAccount: "Account verwijderen",
+    deleteAccountDesc:
+      "Verwijder je account, werkruimtes, credits en abonnement definitief. Dit kan niet ongedaan worden gemaakt.",
+    deleteAccountConfirm:
+      "Je account definitief verwijderen?\n\nAl je werkruimtes, credits en je abonnement worden verwijderd. Dit kan niet ongedaan worden gemaakt.",
+    deleteAccountButton: "Mijn account verwijderen",
+    deleting: "Verwijderen…",
+    deleteAccountError:
+      "We konden je abonnement op dit moment niet opzeggen, dus er is niets verwijderd. Probeer het over een moment opnieuw.",
   },
 
   // ---- Workspace card (delete control) ----------------------------------
@@ -688,6 +765,46 @@ export const nl = {
     deleteAria: "{name} verwijderen",
     deleteConfirm:
       "“{name}” verwijderen?\n\nHiermee verwijder je de werkruimte en alles erin definitief. Dit kan niet ongedaan worden gemaakt.",
+  },
+
+  // ---- Error & not-found pages -------------------------------------------
+  errors: {
+    notFoundTitle: "Pagina niet gevonden",
+    notFoundBody: "Deze pagina bestaat niet — misschien is deze verplaatst of verwijderd.",
+    errorTitle: "Er ging iets mis",
+    errorBody:
+      "Er is een onverwachte fout opgetreden. Je werk is automatisch opgeslagen — probeer het opnieuw.",
+    tryAgain: "Opnieuw proberen",
+    backHome: "Terug naar de startpagina",
+  },
+
+  // ---- Legal & footer -----------------------------------------------------
+  legal: {
+    terms: "Servicevoorwaarden",
+    privacy: "Privacybeleid",
+    contact: "Contact",
+  },
+
+  // ---- Calendar subscription (ICS feed) ----------------------------------
+  calendar: {
+    title: "Agenda synchroniseren",
+    description:
+      "Abonneer je op je deadlines in Google, Apple of Outlook Calendar. Je opdrachten, tentamens en gedateerde items blijven automatisch up-to-date.",
+    urlLabel: "Je privé-agendalink",
+    copy: "Kopiëren",
+    copied: "Gekopieerd ✓",
+    addToCalendar: "Aan agenda toevoegen",
+    reset: "Link resetten",
+    resetting: "Resetten…",
+    instructions:
+      "Plak deze link in de optie “Abonneren via URL” van je agenda-app. Houd hem privé — iedereen met de link kan je deadlines zien. Reset hem wanneer je wilt om de toegang in te trekken.",
+  },
+
+  // ---- Usage limits --------------------------------------------------------
+  limits: {
+    rateLimited:
+      "Je hebt voorlopig de aanvraaglimiet bereikt. Wacht even en probeer het opnieuw.",
+    sandboxQuota: "Je hebt de renderlimiet van vandaag bereikt. Deze wordt morgen gereset.",
   },
 
   // ---- Mock generator scaffolding (no-API-key fallback) ------------------

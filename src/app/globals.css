@@ -10,7 +10,7 @@
   --surface-2: #17171599;
   --text: #f4f3ef;
   --text-soft: #a8a89e;
-  --text-faint: #6a6a62;
+  --text-faint: #898981;
   --border-c: rgba(255, 255, 255, 0.08);
   --border-strong-c: rgba(255, 255, 255, 0.14);
   --hover-c: rgba(255, 255, 255, 0.05);
@@ -63,13 +63,13 @@
   --surface-2: #f4f4f5;
   --text: #18181b;
   --text-soft: #52525b;
-  --text-faint: #a1a1aa;
+  --text-faint: #71717a;
   --border-c: rgba(24, 24, 27, 0.1);
   --border-strong-c: rgba(24, 24, 27, 0.16);
   --hover-c: rgba(24, 24, 27, 0.04);
 
   --accent: #0d9488;
-  --accent-on: #ffffff;
+  --accent-on: #0b0b0a;
   --accent-deep: #0f766e;
   --accent-faint: rgba(13, 148, 136, 0.12);
   --accent-glow: rgba(13, 148, 136, 0.25);
@@ -96,7 +96,7 @@
   --popover: #ffffff;
   --popover-foreground: #18181b;
   --primary: #0d9488;
-  --primary-foreground: #ffffff;
+  --primary-foreground: #0b0b0a;
   --secondary: #f4f4f5;
   --secondary-foreground: #18181b;
   --muted: #f4f4f5;
@@ -190,6 +190,11 @@ body {
   font-family: var(--font-hanken), ui-sans-serif, system-ui, -apple-system,
     sans-serif;
   transition: background 0.4s ease, color 0.4s ease;
+}
+
+:where(a, button, input, textarea, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--ring) !important;
+  outline-offset: 2px !important;
 }
 
 /* ---------- Motion ---------- */

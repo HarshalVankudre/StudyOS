@@ -65,6 +65,10 @@ export type GenerationEvent =
   | {
       type: "complete";
       workspaceId: string;
+      /** Credits this generation cost (0 when nothing ran). */
+      credits?: number;
+      /** The user's credit balance after the charge. */
+      balance?: number;
     }
   | {
       type: "error";

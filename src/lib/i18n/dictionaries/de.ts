@@ -1,4 +1,4 @@
-import type { Dictionary } from "./en";
+import { en, type Dictionary } from "./en";
 
 /** German (de-DE) — translation of the canonical English dictionary. */
 export const de = {
@@ -11,7 +11,7 @@ export const de = {
     generateTitle: "Deinen Workspace generieren · StudyOS",
     pricingTitle: "Preise · StudyOS",
     pricingDescription:
-      "Vergleiche StudyOS Kostenlos und Pro. Starte kostenlos und upgrade, wenn du das leistungsfähigste Modell, unbegrenzte Generierungen und priorisierten Support willst.",
+      "Vergleiche StudyOS Kostenlos und Pro. Starte kostenlos und upgrade, wenn du das leistungsfähigste Modell, ein größeres monatliches Credit-Kontingent und priorisierten Support willst.",
     workspaceTitle: "{name} · StudyOS",
     brandFallback: "StudyOS",
   },
@@ -88,25 +88,30 @@ export const de = {
           title: "Workspaces, gemacht für dich",
           body: "Ein Prompt wird zu einem kompletten Workspace, zugeschnitten auf genau deine Kurse.",
         },
+        flashcards: {
+          k: "Karteikarten",
+          title: "Lernen mit verteilter Wiederholung",
+          body: "Mach aus jedem Thema einen Stapel. StudyOS plant jede Karte so, dass du sie kurz vor dem Vergessen wiederholst.",
+        },
+        calendar: {
+          k: "Kalendersynchronisierung",
+          title: "Deine Fristen, überall",
+          body: "Abonniere in Google, Apple oder Outlook Calendar — jede Aufgabe und Prüfung bleibt automatisch synchron.",
+        },
+        syllabus: {
+          k: "Lehrplan-Import",
+          title: "Starte mit deinem Lehrplan",
+          body: "Füge deinen Lehrplan ein oder lade ihn hoch, und StudyOS baut auf deinen echten Kursen, Terminen und Themen auf.",
+        },
         databases: {
           k: "Datenbanken",
           title: "Echte, strukturierte Daten",
           body: "Aufgaben, Noten und Lektüre als Tabellen mit eigenen Feldern — keine losen Notizen.",
         },
-        calendar: {
-          k: "Kalender",
-          title: "Planer & Kalender",
-          body: "Jede Deadline an einem Ort. Wechsle mit einem Klick zwischen Tabelle, Board und Kalender.",
-        },
         dashboard: {
           k: "Dashboard",
           title: "Eine klare Homebase",
           body: "Eine Seite, die deine ganze Woche bündelt, damit du immer weißt, was als Nächstes ansteht.",
-        },
-        autosave: {
-          k: "Autosave",
-          title: "Bearbeiten, sofort gespeichert",
-          body: "Umbenennen, abhaken, Zeilen hinzufügen — jede Änderung speichert sich selbst, sobald du sie machst.",
         },
         assistant: {
           k: "Assistent",
@@ -124,8 +129,8 @@ export const de = {
         price: "$0",
         features: [
           "KI-Workspaces generieren",
-          "Alles bearbeiten & automatisch speichern",
-          "Dashboards, Datenbanken, Kalender",
+          "Karteikarten & verteilte Wiederholung",
+          "Kalendersynchronisierung & Lehrplan-Import",
           "Per einfachem Deutsch um Änderungen bitten",
         ],
         cta: "Loslegen",
@@ -136,7 +141,7 @@ export const de = {
         price: "$5",
         features: [
           "Alles aus Kostenlos",
-          "Unbegrenzte Generierungen",
+          "Ein großes monatliches Credit-Kontingent",
           "Das klügste, detaillierteste Modell",
           "Priorisierter Support",
         ],
@@ -168,7 +173,7 @@ export const de = {
     badge: "Einfache, studierendenfreundliche Preise",
     title: "Kostenlos starten. Upgrade, wenn du bereit bist.",
     subtitle:
-      "Alles, was du brauchst, um dein Semester zu organisieren, ist kostenlos. Pro ergänzt das leistungsfähigste Modell, unbegrenzte Generierungen und priorisierten Support.",
+      "Alles, was du brauchst, um dein Semester zu organisieren, ist kostenlos. Pro ergänzt das leistungsfähigste Modell, ein größeres monatliches Credit-Kontingent und priorisierten Support.",
     free: {
       name: "Kostenlos",
       price: "$0",
@@ -181,7 +186,7 @@ export const de = {
       ],
       ctaSignedOut: "Kostenlos loslegen",
       ctaSignedIn: "Deine Workspaces öffnen",
-      bulletCredits: "{count} KI-Credits zum Start",
+      bulletCredits: "{count} kostenlose KI-Credits jeden Monat",
     },
     pro: {
       badge: "Am beliebtesten",
@@ -191,7 +196,7 @@ export const de = {
       billed: "Monatlich abgerechnet · jederzeit kündbar.",
       bullets: [
         "Alles aus Kostenlos",
-        "Unbegrenzte Workspace-Generierungen",
+        "Ein monatliches Kontingent für intensive Nutzung",
         "Das leistungsfähigste, detaillierteste Modell",
         "Priorisierter Support & früher Zugang",
       ],
@@ -199,7 +204,7 @@ export const de = {
       manageBilling: "Abrechnung verwalten",
       upgrade: "Auf Pro upgraden",
       ctaSignedOut: "Mit Pro loslegen",
-      bulletCredits: "{count} KI-Credits inklusive",
+      bulletCredits: "{count} KI-Credits jeden Monat",
     },
     comparison: {
       title: "Tarife vergleichen",
@@ -213,6 +218,9 @@ export const de = {
         onboarding: "Geführte Onboarding-Fragen",
         editing: "Vollständiges Inline-Bearbeiten & Autosave",
         databases: "Datenbanken — Tabelle, Board & Kalender",
+        flashcards: "Karteikarten mit verteilter Wiederholung",
+        calendarSync: "Kalendersynchronisierung (Google / Apple / Outlook)",
+        syllabusImport: "Lehrplan-Import",
         dragDrop: "Bearbeiten per Drag-and-drop",
         agentChat: "KI-Agent-Chat, der deinen Workspace bearbeitet",
         model: "Generierungsmodell",
@@ -235,9 +243,9 @@ export const de = {
       heading: "KI läuft mit Credits",
       intro:
         "Jede KI-Anfrage verbraucht Credits, je nachdem, wie viel sie leistet — eine schnelle Anpassung kostet wenig, einen ganzen Workspace zu bauen kostet mehr. Pro kommt randvoll mit Credits, und du kannst jederzeit aufladen.",
-      freeIncludes: "Kostenlos enthält {count} Start-Credits",
-      proIncludes: "Pro enthält {count} Credits",
-      neverExpire: "Jederzeit aufladen — Credits verfallen nie",
+      freeIncludes: "Kostenlos enthält {count} Credits jeden Monat",
+      proIncludes: "Pro enthält {count} Credits jeden Monat",
+      neverExpire: "Jederzeit aufladen — gekaufte Pakete verfallen nie",
       balance: "Dein Guthaben: {count} Credits",
       pack: "Credit-Paket",
       unit: "Credits",
@@ -253,7 +261,7 @@ export const de = {
       },
       {
         q: "Was bekomme ich mit Pro?",
-        a: "Unbegrenzte Generierungen, das leistungsfähigste Modell für reichhaltigere und genauere Workspaces, priorisierten Support und frühen Zugang zu neuen Funktionen.",
+        a: "Ein großes monatliches Credit-Kontingent, das leistungsfähigste Modell für reichhaltigere und genauere Workspaces, priorisierten Support und frühen Zugang zu neuen Funktionen.",
       },
       {
         q: "Kann ich jederzeit kündigen?",
@@ -288,6 +296,7 @@ export const de = {
     updatedAt: "aktualisiert {date}",
     fallbackIcon: "📄",
   },
+  agentCenter: en.agentCenter,
 
   // ---- Generate flow (/generate) ----------------------------------------
   generate: {
@@ -323,6 +332,16 @@ export const de = {
       continue: "Weiter",
       examplesLabel: "Unsicher? Starte mit einem Beispiel",
       finePrint: "Kostenlos · keine Kreditkarte · in Sekunden bereit",
+    },
+    syllabus: {
+      toggle: "📄 Deinen Lehrplan hinzufügen",
+      optional: "optional",
+      hint: "Füge deinen Lehrplan oder deine Kursliste ein – oder lade eine .txt-Datei hoch – und StudyOS baut auf deinen echten Kursen, Fristen und Themen auf.",
+      placeholder:
+        "Füge hier deinen Lehrplan, deine Kursliste oder deinen Semesterplan ein…",
+      upload: ".txt hochladen",
+      attached: "{chars} Zeichen hinzugefügt",
+      clear: "Löschen",
     },
     questions: {
       back: "← Beschreibung bearbeiten",
@@ -462,6 +481,7 @@ export const de = {
       divider: "Trennlinie",
       database: "Tabelle",
       media: "Bild",
+      flashcards: "Karteikarten",
     },
     placeholders: {
       paragraph: "Schreib etwas…",
@@ -482,6 +502,45 @@ export const de = {
     },
   },
 
+  // ---- Flashcards & spaced-repetition study -----------------------------
+  study: {
+    newDeckTitle: "Neuer Stapel",
+    untitledDeck: "Karteikarten",
+    deckTitlePlaceholder: "Titel des Stapels…",
+    stats: {
+      cards: "{count} Karten",
+      due: "{count} fällig",
+      mature: "{count} gelernt",
+    },
+    studyDue: "{count} fällige lernen",
+    allCaughtUp: "Alles erledigt 🎉",
+    editCards: "Karten bearbeiten",
+    doneEditing: "Fertig",
+    addCard: "+ Karte hinzufügen",
+    deleteCard: "Karte löschen",
+    emptyDeck: "Noch keine Karten. Füge eine hinzu oder bitte die KI, einen Stapel zu erstellen.",
+    frontPlaceholder: "Vorderseite (Frage)",
+    backPlaceholder: "Rückseite (Antwort)",
+    showAnswer: "Antwort anzeigen",
+    tapToReveal: "Tippe, um die Antwort zu zeigen",
+    spaceKey: "Leertaste",
+    grades: {
+      again: "Nochmal",
+      hard: "Schwer",
+      good: "Gut",
+      easy: "Einfach",
+    },
+    doneTitle: "Sitzung abgeschlossen",
+    doneSummary: "Du hast {count} Karten wiederholt.",
+    doneAgain: "{count} brauchen bald noch eine Wiederholung.",
+    finish: "Fertig",
+    // Workspace-level study launcher
+    dueAcrossWorkspace: "{count} fällige lernen",
+    noneDue: "Nichts fällig",
+    streak: "{count} Tage in Folge",
+    reviewAll: "Wiederholen",
+  },
+
   // ---- Database views (table / board / calendar) ------------------------
   db: {
     databaseIcon: "Datenbanksymbol",
@@ -498,6 +557,8 @@ export const de = {
     addOnDay: "An diesem Tag hinzufügen",
     clickToRename: "Zum Umbenennen klicken",
     delete: "Löschen",
+    addTag: "Hinzufügen",
+    addLink: "Verknüpfen",
   },
 
   // ---- Database settings panel ------------------------------------------
@@ -642,6 +703,12 @@ export const de = {
       "Deine KI-Credits sind aufgebraucht. Lade auf der Preise-Seite mehr nach, um weiter zu generieren.",
     outAgent:
       "Deine KI-Credits sind aufgebraucht. Lade auf der Preise-Seite mehr nach, um den Agenten weiter zu nutzen.",
+    // Transparency: always-visible meter, per-action cost, low-balance nudge.
+    low: "Niedrig",
+    runningLow: "Deine Credits gehen zur Neige.",
+    turnCostTitle: "Credits in dieser Runde",
+    buysApprox: "≈ {gens} Workspace-Generierungen oder {edits} Agent-Bearbeitungen",
+    buyMore: "Mehr kaufen",
   },
 
   // ---- Account menu -----------------------------------------------------
@@ -676,10 +743,20 @@ export const de = {
     upgrade: "Auf Pro upgraden",
     comparePlans: "Tarife vergleichen",
     creditsDesc:
-      "Credits treiben jede KI-Anfrage an. Lade jederzeit auf — Credits verfallen nie.",
+      "Credits treiben jede KI-Anfrage an. Dein Tarif füllt sie monatlich auf, und gekaufte Pakete verfallen nie.",
     buyPack: "{count} Credits kaufen · ${price}",
     viewPricing: "Preise ansehen",
     signOut: "Abmelden",
+    dangerZone: "Gefahrenzone",
+    deleteAccount: "Konto löschen",
+    deleteAccountDesc:
+      "Lösche dein Konto, deine Workspaces, deine Credits und dein Abo dauerhaft. Das kann nicht rückgängig gemacht werden.",
+    deleteAccountConfirm:
+      "Dein Konto dauerhaft löschen?\n\nAlle Workspaces, Credits und dein Abo werden entfernt. Das kann nicht rückgängig gemacht werden.",
+    deleteAccountButton: "Mein Konto löschen",
+    deleting: "Wird gelöscht…",
+    deleteAccountError:
+      "Wir konnten dein Abo gerade nicht kündigen, deshalb wurde nichts gelöscht. Bitte versuch es in einem Moment erneut.",
   },
 
   // ---- Workspace card (delete control) ----------------------------------
@@ -688,6 +765,46 @@ export const de = {
     deleteAria: "{name} löschen",
     deleteConfirm:
       "„{name}“ löschen?\n\nDadurch werden der Workspace und alles darin dauerhaft entfernt. Das kann nicht rückgängig gemacht werden.",
+  },
+
+  // ---- Error & not-found pages -------------------------------------------
+  errors: {
+    notFoundTitle: "Seite nicht gefunden",
+    notFoundBody: "Diese Seite existiert nicht — vielleicht wurde sie verschoben oder gelöscht.",
+    errorTitle: "Etwas ist schiefgelaufen",
+    errorBody:
+      "Ein unerwarteter Fehler ist aufgetreten. Deine Arbeit ist automatisch gespeichert — versuch es erneut.",
+    tryAgain: "Erneut versuchen",
+    backHome: "Zurück zur Startseite",
+  },
+
+  // ---- Legal & footer -----------------------------------------------------
+  legal: {
+    terms: "Nutzungsbedingungen",
+    privacy: "Datenschutzerklärung",
+    contact: "Kontakt",
+  },
+
+  // ---- Calendar subscription (ICS feed) ----------------------------------
+  calendar: {
+    title: "Kalendersynchronisierung",
+    description:
+      "Abonniere deine Fristen in Google, Apple oder Outlook Calendar. Deine Aufgaben, Prüfungen und Einträge mit Datum bleiben automatisch aktuell.",
+    urlLabel: "Dein privater Kalenderlink",
+    copy: "Kopieren",
+    copied: "Kopiert ✓",
+    addToCalendar: "Zum Kalender hinzufügen",
+    reset: "Link zurücksetzen",
+    resetting: "Wird zurückgesetzt…",
+    instructions:
+      "Füge diesen Link in deiner Kalender-App unter „Aus URL abonnieren“ ein. Halte ihn privat — wer den Link hat, sieht deine Fristen. Setz ihn jederzeit zurück, um den Zugriff zu widerrufen.",
+  },
+
+  // ---- Usage limits --------------------------------------------------------
+  limits: {
+    rateLimited:
+      "Du hast vorerst das Anfragelimit erreicht. Bitte warte einen Moment und versuch es erneut.",
+    sandboxQuota: "Du hast das heutige Rendering-Limit erreicht. Es wird morgen zurückgesetzt.",
   },
 
   // ---- Mock generator scaffolding (no-API-key fallback) ------------------

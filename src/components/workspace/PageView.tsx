@@ -6,6 +6,8 @@ import { useI18n } from "@/lib/i18n/client";
 import type { Dictionary } from "@/lib/i18n/dictionaries/en";
 import { BlockText } from "./BlockText";
 import { DatabaseView } from "./DatabaseView";
+import { FlashcardsBlock } from "./FlashcardsBlock";
+import { ReactArtifact } from "./ReactArtifact";
 import { useWorkspace } from "./WorkspaceContext";
 
 /** The authenticated, owner-checked source for a media asset. */
@@ -23,6 +25,7 @@ const BLOCK_TYPES = [
   { type: "callout", icon: "★" },
   { type: "divider", icon: "—" },
   { type: "database", icon: "▦" },
+  { type: "flashcards", icon: "🗂" },
 ];
 
 export function PageView({ page }: { page: Page }) {
@@ -58,8 +61,8 @@ export function PageView({ page }: { page: Page }) {
     });
 
   return (
-    <div className="mx-auto max-w-4xl px-10 py-12">
-      <header className="mb-8 flex items-center gap-3">
+    <div className="mx-auto max-w-4xl px-4 py-8 sm:px-8 sm:py-10 lg:px-10 lg:py-12">
+      <header className="mb-6 flex min-w-0 items-center gap-2 sm:mb-8 sm:gap-3">
         <input
           value={page.icon ?? ""}
           onChange={(e) =>
@@ -70,29 +73,31 @@ export function PageView({ page }: { page: Page }) {
           }
           aria-label={dict.page.pageIcon}
           maxLength={8}
-          className="w-14 rounded bg-transparent px-1 text-center text-4xl outline-none hover:bg-white/[0.04] focus:bg-white/[0.04]"
+          className="w-12 rounded bg-transparent px-1 text-center text-3xl outline-none hover:bg-white/[0.04] focus:bg-white/[0.04] sm:w-14 sm:text-4xl"
         />
         <input
           value={page.title}
+          aria-label={dict.page.headingDefault}
           onChange={(e) =>
             update((d) => {
               const p = d.pages.find((x) => x.id === page.id);
               if (p) p.title = e.target.value;
             })
           }
-          className="w-full rounded px-1 font-display text-4xl font-bold tracking-tight text-ink outline-none hover:bg-white/[0.04] focus:bg-white/[0.04]"
+          className="min-w-0 w-full rounded px-1 font-display text-3xl font-bold tracking-tight text-ink outline-none hover:bg-white/[0.04] focus:bg-white/[0.04] sm:text-4xl"
         />
       </header>
 
       <div className="space-y-1">
         {page.blocks.map((block) => (
-          <div key={block.id} className="group relative">
+          <div key={block.id} className="group relative ps-11 sm:ps-0">
             <button
               onClick={() => deleteBlock(block.id)}
               title={dict.page.deleteBlock}
-              className="absolute -left-7 top-1.5 text-ink-soft/30 opacity-0 transition hover:text-rose-500 group-hover:opacity-100"
+              aria-label={dict.page.deleteBlock}
+              className="absolute start-0 top-0 grid h-11 w-11 place-items-center rounded-md text-ink-soft/70 opacity-60 transition hover:bg-hover hover:text-rose-500 focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 sm:-start-11 sm:opacity-0"
             >
-              ✕
+              <span aria-hidden>✕</span>
             </button>
             <BlockView pageId={page.id} block={block} />
           </div>
@@ -148,6 +153,13 @@ function newBlock(type: string, dict: Dictionary): Block {
       return { id, type: "quote", text: "" };
     case "callout":
       return { id, type: "callout", text: "", emoji: "💡" };
+    case "flashcards":
+      return {
+        id,
+        type: "flashcards",
+        title: dict.study.newDeckTitle,
+        cards: [{ id: crypto.randomUUID(), front: "", back: "" }],
+      };
     case "divider":
       return { id, type: "divider" };
     case "paragraph":
@@ -354,6 +366,10 @@ function BlockView({ pageId, block }: { pageId: string; block: Block }) {
           ) : null}
         </figure>
       );
+    case "react_artifact":
+      return <ReactArtifact source={block.source} title={block.title} />;
+    case "flashcards":
+      return <FlashcardsBlock pageId={pageId} block={block} />;
     default:
       return null;
   }

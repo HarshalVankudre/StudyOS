@@ -1,4 +1,4 @@
-import type { Dictionary } from "./en";
+import { en, type Dictionary } from "./en";
 
 // 简体中文（zh-CN）—— 规范英文字典的翻译。
 export const zh = {
@@ -11,7 +11,7 @@ export const zh = {
     generateTitle: "生成你的工作空间 · StudyOS",
     pricingTitle: "定价 · StudyOS",
     pricingDescription:
-      "对比 StudyOS 免费版与 Pro 版。免费开始，想要最强大的模型、无限次生成和优先支持时再升级。",
+      "对比 StudyOS 免费版与 Pro 版。免费开始，想要最强大的模型、更高的每月积分额度和优先支持时再升级。",
     workspaceTitle: "{name} · StudyOS",
     brandFallback: "StudyOS",
   },
@@ -88,25 +88,30 @@ export const zh = {
           title: "为你量身打造的工作空间",
           body: "一句提示即可生成贴合你具体课程的完整工作空间。",
         },
+        flashcards: {
+          k: "记忆卡片",
+          title: "用间隔重复来学习",
+          body: "把任意主题变成一套卡组。StudyOS 会为每张卡片安排复习时间，让你在快要忘记前及时复习。",
+        },
+        calendar: {
+          k: "日历同步",
+          title: "随处可见你的截止日期",
+          body: "在 Google、Apple 或 Outlook Calendar 中订阅 —— 每项作业和考试都会自动保持同步。",
+        },
+        syllabus: {
+          k: "导入课程大纲",
+          title: "从你的课程大纲开始",
+          body: "粘贴或上传你的课程大纲，StudyOS 就会根据你真实的课程、日期和主题来构建。",
+        },
         databases: {
           k: "数据库",
           title: "真正结构化的数据",
           body: "作业、成绩和阅读以带自定义字段的表格呈现 —— 而非零散的笔记。",
         },
-        calendar: {
-          k: "日历",
-          title: "计划表与日历",
-          body: "所有截止日期集中一处。一键在表格、看板和日历之间切换。",
-        },
         dashboard: {
           k: "仪表盘",
           title: "清晰的大本营",
           body: "一个页面汇总你的整周安排，让你随时知道下一步该做什么。",
-        },
-        autosave: {
-          k: "自动保存",
-          title: "编辑即刻保存",
-          body: "重命名、勾选、新增行 —— 每一处改动都会在你操作的瞬间自动保存。",
         },
         assistant: {
           k: "助手",
@@ -124,8 +129,8 @@ export const zh = {
         price: "$0",
         features: [
           "生成 AI 工作空间",
-          "编辑并自动保存一切",
-          "仪表盘、数据库、日历",
+          "记忆卡片与间隔重复",
+          "日历同步与课程大纲导入",
           "用日常语言要求修改",
         ],
         cta: "开始使用",
@@ -136,7 +141,7 @@ export const zh = {
         price: "$5",
         features: [
           "包含免费版的全部功能",
-          "无限次生成",
+          "每月大额积分额度",
           "最聪明、最详尽的模型",
           "优先支持",
         ],
@@ -168,7 +173,7 @@ export const zh = {
     badge: "简单、对学生友好的定价",
     title: "免费开始。准备好了再升级。",
     subtitle:
-      "整理学期所需的一切都是免费的。Pro 版增加最强大的模型、无限次生成和优先支持。",
+      "整理学期所需的一切都是免费的。Pro 版增加最强大的模型、更高的每月积分额度和优先支持。",
     free: {
       name: "免费",
       price: "$0",
@@ -181,7 +186,7 @@ export const zh = {
       ],
       ctaSignedOut: "免费开始使用",
       ctaSignedIn: "打开你的工作空间",
-      bulletCredits: "{count} 个入门 AI 积分",
+      bulletCredits: "每月 {count} 个免费 AI 积分",
     },
     pro: {
       badge: "最受欢迎",
@@ -191,7 +196,7 @@ export const zh = {
       billed: "按月计费 · 随时取消。",
       bullets: [
         "包含免费版的全部功能",
-        "无限次生成工作空间",
+        "满足重度使用的每月积分额度",
         "最强大、最详尽的模型",
         "优先支持与抢先体验",
       ],
@@ -199,7 +204,7 @@ export const zh = {
       manageBilling: "管理账单",
       upgrade: "升级到 Pro",
       ctaSignedOut: "开始使用 Pro",
-      bulletCredits: "包含 {count} 个 AI 积分",
+      bulletCredits: "每月 {count} 个 AI 积分",
     },
     comparison: {
       title: "方案对比",
@@ -213,6 +218,9 @@ export const zh = {
         onboarding: "引导式上手问题",
         editing: "完整的行内编辑与自动保存",
         databases: "数据库 —— 表格、看板和日历",
+        flashcards: "支持间隔重复的记忆卡片",
+        calendarSync: "日历同步（Google / Apple / Outlook）",
+        syllabusImport: "课程大纲导入",
         dragDrop: "拖放式编辑",
         agentChat: "可编辑工作空间的 AI 智能体对话",
         model: "生成模型",
@@ -235,9 +243,9 @@ export const zh = {
       heading: "AI 由积分驱动",
       intro:
         "每次 AI 请求都会按其工作量消耗积分 —— 一个小调整花费一点点，搭建整个工作空间则花费更多。Pro 自带充足积分，你也可以随时充值。",
-      freeIncludes: "免费版包含 {count} 个入门积分",
-      proIncludes: "Pro 版包含 {count} 个积分",
-      neverExpire: "随时充值 —— 积分永不过期",
+      freeIncludes: "免费版每月包含 {count} 个积分",
+      proIncludes: "Pro 版每月包含 {count} 个积分",
+      neverExpire: "随时充值 —— 购买的积分包永不过期",
       balance: "你的余额：{count} 个积分",
       pack: "积分包",
       unit: "积分",
@@ -253,7 +261,7 @@ export const zh = {
       },
       {
         q: "Pro 版能带给我什么？",
-        a: "无限次生成、用于打造更丰富更精准工作空间的最强大模型、优先支持，以及新功能的抢先体验。",
+        a: "充足的每月积分额度、用于打造更丰富更精准工作空间的最强大模型、优先支持，以及新功能的抢先体验。",
       },
       {
         q: "我可以随时取消吗？",
@@ -288,6 +296,7 @@ export const zh = {
     updatedAt: "更新于 {date}",
     fallbackIcon: "📄",
   },
+  agentCenter: en.agentCenter,
 
   // ---- Generate flow (/generate) ----------------------------------------
   generate: {
@@ -323,6 +332,16 @@ export const zh = {
       continue: "继续",
       examplesLabel: "拿不准？从示例开始",
       finePrint: "免费 · 无需信用卡 · 几秒即成",
+    },
+    syllabus: {
+      toggle: "📄 添加你的课程大纲",
+      optional: "可选",
+      hint: "粘贴你的课程大纲或课程列表，或上传 .txt 文件，StudyOS 就会根据你真实的课程、截止日期和主题来构建。",
+      placeholder:
+        "在此粘贴你的课程大纲、课程列表或学期课表…",
+      upload: "上传 .txt",
+      attached: "已添加 {chars} 个字符",
+      clear: "清除",
     },
     questions: {
       back: "← 编辑描述",
@@ -462,6 +481,7 @@ export const zh = {
       divider: "分隔线",
       database: "表格",
       media: "图片",
+      flashcards: "记忆卡片",
     },
     placeholders: {
       paragraph: "输入点什么…",
@@ -482,6 +502,45 @@ export const zh = {
     },
   },
 
+  // ---- Flashcards & spaced-repetition study -----------------------------
+  study: {
+    newDeckTitle: "新建卡组",
+    untitledDeck: "记忆卡片",
+    deckTitlePlaceholder: "卡组标题…",
+    stats: {
+      cards: "{count} 张卡片",
+      due: "{count} 张待复习",
+      mature: "{count} 张已掌握",
+    },
+    studyDue: "复习 {count} 张",
+    allCaughtUp: "全部搞定 🎉",
+    editCards: "编辑卡片",
+    doneEditing: "完成",
+    addCard: "+ 添加卡片",
+    deleteCard: "删除卡片",
+    emptyDeck: "还没有卡片。添加一张，或让 AI 生成一套卡组。",
+    frontPlaceholder: "正面（问题）",
+    backPlaceholder: "背面（答案）",
+    showAnswer: "显示答案",
+    tapToReveal: "点按显示答案",
+    spaceKey: "空格键",
+    grades: {
+      again: "重来",
+      hard: "困难",
+      good: "良好",
+      easy: "简单",
+    },
+    doneTitle: "本次复习完成",
+    doneSummary: "你复习了 {count} 张卡片。",
+    doneAgain: "{count} 张需要尽快再看一遍。",
+    finish: "完成",
+    // Workspace-level study launcher
+    dueAcrossWorkspace: "复习 {count} 张",
+    noneDue: "没有待复习",
+    streak: "连续 {count} 天",
+    reviewAll: "复习",
+  },
+
   // ---- Database views (table / board / calendar) ------------------------
   db: {
     databaseIcon: "数据库图标",
@@ -498,6 +557,8 @@ export const zh = {
     addOnDay: "在这一天添加",
     clickToRename: "点击重命名",
     delete: "删除",
+    addTag: "添加",
+    addLink: "关联",
   },
 
   // ---- Database settings panel ------------------------------------------
@@ -642,6 +703,12 @@ export const zh = {
       "你的 AI 积分已用完。请在定价页面添加更多积分以继续生成。",
     outAgent:
       "你的 AI 积分已用完。请在定价页面添加更多积分以继续使用智能体。",
+    // Transparency: always-visible meter, per-action cost, low-balance nudge.
+    low: "偏低",
+    runningLow: "你的积分快用完了。",
+    turnCostTitle: "本回合积分",
+    buysApprox: "≈ {gens} 次工作区生成或 {edits} 次智能体编辑",
+    buyMore: "购买更多",
   },
 
   // ---- Account menu -----------------------------------------------------
@@ -676,10 +743,20 @@ export const zh = {
     upgrade: "升级到 Pro",
     comparePlans: "对比方案",
     creditsDesc:
-      "积分为每次 AI 请求提供动力。随时充值 —— 积分永不过期。",
+      "积分为每次 AI 请求提供动力。你的方案每月刷新积分，购买的积分包永不过期。",
     buyPack: "购买 {count} 个积分 · ${price}",
     viewPricing: "查看定价",
     signOut: "退出登录",
+    dangerZone: "危险区域",
+    deleteAccount: "删除账户",
+    deleteAccountDesc:
+      "永久删除你的账户、工作空间、积分和订阅。此操作无法撤销。",
+    deleteAccountConfirm:
+      "永久删除你的账户？\n\n所有工作空间、积分和订阅都将被移除。此操作无法撤销。",
+    deleteAccountButton: "删除我的账户",
+    deleting: "正在删除…",
+    deleteAccountError:
+      "我们暂时无法取消你的订阅，因此未删除任何内容。请稍后重试。",
   },
 
   // ---- Workspace card (delete control) ----------------------------------
@@ -688,6 +765,46 @@ export const zh = {
     deleteAria: "删除 {name}",
     deleteConfirm:
       "删除“{name}”？\n\n这将永久移除该工作空间及其中的一切。此操作无法撤销。",
+  },
+
+  // ---- Error & not-found pages -------------------------------------------
+  errors: {
+    notFoundTitle: "页面未找到",
+    notFoundBody: "此页面不存在 —— 它可能已被移动或删除。",
+    errorTitle: "出了点问题",
+    errorBody:
+      "发生了意外错误。你的工作已自动保存 —— 请重试。",
+    tryAgain: "重试",
+    backHome: "返回首页",
+  },
+
+  // ---- Legal & footer -----------------------------------------------------
+  legal: {
+    terms: "服务条款",
+    privacy: "隐私政策",
+    contact: "联系我们",
+  },
+
+  // ---- Calendar subscription (ICS feed) ----------------------------------
+  calendar: {
+    title: "日历同步",
+    description:
+      "在 Google、Apple 或 Outlook Calendar 中订阅你的截止日期。你的作业、考试和带日期的事项会自动保持最新。",
+    urlLabel: "你的私人日历链接",
+    copy: "复制",
+    copied: "已复制 ✓",
+    addToCalendar: "添加到日历",
+    reset: "重置链接",
+    resetting: "正在重置…",
+    instructions:
+      "将此链接粘贴到日历应用的“通过网址订阅”选项中。请妥善保密——任何拿到链接的人都能看到你的截止日期。你可以随时重置以撤销访问权限。",
+  },
+
+  // ---- Usage limits --------------------------------------------------------
+  limits: {
+    rateLimited:
+      "你暂时达到了请求上限。请稍等片刻后重试。",
+    sandboxQuota: "你已达到今天的渲染上限。明天将自动重置。",
   },
 
   // ---- Mock generator scaffolding (no-API-key fallback) ------------------

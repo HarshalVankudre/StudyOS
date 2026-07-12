@@ -9,14 +9,17 @@ import {
 } from "@/lib/ai/onboarding";
 import { getUserPlan } from "@/lib/billing";
 import { getLocale } from "@/lib/i18n/server";
+import { normalizeSourceText } from "@/lib/import/syllabus";
 import { saveNewWorkspace } from "@/lib/workspace/store";
 
 /**
- * Server Action: from the student's description, produce a few tailored
- * multiple-choice onboarding questions. Always resolves (static fallback).
+ * Server Action: from the student's description (and any pasted/uploaded
+ * course material), produce a few tailored multiple-choice onboarding
+ * questions. Always resolves (static fallback).
  */
 export async function planQuestionsAction(
   prompt: string,
+  sourceText = "",
 ): Promise<GenQuestion[]> {
   const clean = (prompt ?? "").toString().slice(0, 2000).trim();
   if (!clean) {
@@ -26,7 +29,7 @@ export async function planQuestionsAction(
     getUserPlan().then(modelForPlan),
     getLocale(),
   ]);
-  return planQuestions(clean, model, locale);
+  return planQuestions(clean, model, locale, normalizeSourceText(sourceText));
 }
 
 /**

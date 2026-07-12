@@ -89,6 +89,11 @@ describe("AgentChat stop task", () => {
     render(
       <AgentChat workspaceId="ws-1" onApplied={vi.fn()} onClose={vi.fn()} />,
     );
+    expect(screen.getByRole("complementary", { name: "AI agent" })).toBeInTheDocument();
+    expect(screen.getByRole("log")).toHaveAttribute("aria-live", "polite");
+    expect(screen.getByRole("textbox", { name: "Ask the agent…" })).toHaveAttribute(
+      "aria-describedby",
+    );
     await userEvent.type(
       screen.getByPlaceholderText("Ask the agent…"),
       "rename home",

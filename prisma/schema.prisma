@@ -74,6 +74,56 @@ model AgentTask {
   @@index([userId, workspaceId])
 }
 
+// One row per user controlling the Daily Study Agent. The agent is intentionally
+// workspace-read-only: it derives a daily plan but never edits source coursework.
+// `timeZone` is an IANA zone captured from the browser (for example,
+// "Europe/Berlin") so "today" follows the student's calendar day.
+model DailyStudyAgentConfig {
+  userId       String   @id
+  enabled      Boolean  @default(true)
+  dailyMinutes Int      @default(60)
+  timeZone     String   @default("UTC")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+// The current plan for one local calendar day. Items are stored as validated
+// JSON text so the planner can evolve its item shape without coupling the
+// workspace's flexible JSON document model to a rigid relational schema.
+model DailyStudyPlan {
+  id             String   @id @default(cuid())
+  userId         String
+  localDate      String
+  timeZone       String
+  summary        String
+  items          String
+  sourceCount    Int      @default(0)
+  candidateCount Int      @default(0)
+  generatedAt    DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([userId, localDate])
+  @@index([userId, generatedAt])
+}
+
+// Long-lived, transparent activity history for user-facing agents. Unlike the
+// short-lived AgentTask transport rows, these records remain available in the
+// Agent Center so a student can inspect what ran and why.
+model AgentRun {
+  id          String    @id @default(cuid())
+  userId      String
+  agentKey    String
+  trigger     String
+  status      String    @default("running")
+  summary     String?
+  error       String?
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  @@index([userId, startedAt])
+}
+
 // One row per user (Clerk user id) tracking their Stripe subscription.
 model Subscription {
   userId               String    @id
@@ -82,6 +132,32 @@ model Subscription {
   status               String    @default("free")
   currentPeriodEnd     DateTime?
   updatedAt            DateTime  @updatedAt
+
+  // The webhook resolves invoices/subscription events back to a user by
+  // subscription id when metadata is missing.
+  @@index([stripeSubscriptionId])
+}
+
+// One row per rate-limited action (AI request, sandbox run) and per funnel
+// milestone. Counted over sliding windows to enforce per-user limits that are
+// correct across instances; also doubles as first-party funnel analytics.
+model UsageEvent {
+  id        String   @id @default(cuid())
+  userId    String
+  kind      String
+  createdAt DateTime @default(now())
+
+  @@index([userId, kind, createdAt])
+}
+
+// A per-user unguessable capability token for the read-only ICS calendar feed.
+// The feed URL (/api/calendar/<token>) is fetched by calendar apps that can't
+// authenticate, so the token IS the credential. One active token per user;
+// resetting rotates it and revokes the old URL.
+model CalendarToken {
+  token     String   @id
+  userId    String   @unique
+  createdAt DateTime @default(now())
 }
 
 // A user's AI credit balance. Credits are spent per AI request based on the

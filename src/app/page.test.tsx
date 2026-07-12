@@ -11,6 +11,9 @@ vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }));
 vi.mock("@clerk/nextjs", () => ({
   UserButton: () => <div data-testid="user-button" />,
 }));
+vi.mock("next/form", () => ({
+  default: (props: React.ComponentProps<"form">) => <form {...props} />,
+}));
 vi.mock("@/lib/i18n/server", () => ({ getI18n: mocks.getI18n }));
 vi.mock("@/components/LanguageSwitcher", () => ({
   LanguageSwitcher: () => <div data-testid="language-switcher" />,
@@ -41,5 +44,14 @@ describe("landing page", () => {
     expect(
       screen.getByRole("link", { name: /build your workspace/i }),
     ).toHaveAttribute("href", "/generate");
+
+    const prompt = screen.getByRole("textbox", {
+      name: en.generate.describe.placeholder,
+    });
+    expect(prompt).toHaveAttribute("name", "prompt");
+    expect(prompt.closest("form")).toHaveAttribute("action", "/generate");
+    expect(
+      screen.getByRole("link", { name: en.landing.hero.ctaDemo }),
+    ).toHaveAttribute("href", "#organize");
   });
 });

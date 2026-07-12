@@ -23,7 +23,7 @@ export const en = {
     generateTitle: "Generate your workspace · StudyOS",
     pricingTitle: "Pricing · StudyOS",
     pricingDescription:
-      "Compare StudyOS Free and Pro. Start free and upgrade when you want the most capable model, unlimited generations, and priority support.",
+      "Compare StudyOS Free and Pro. Start free and upgrade when you want the most capable model, a bigger monthly credit allowance, and priority support.",
     workspaceTitle: "{name} · StudyOS",
     brandFallback: "StudyOS",
   },
@@ -100,25 +100,30 @@ export const en = {
           title: "Workspaces, made for you",
           body: "One prompt becomes a complete workspace tailored to your exact courses.",
         },
+        flashcards: {
+          k: "Flashcards",
+          title: "Study with spaced repetition",
+          body: "Turn any topic into a deck. StudyOS schedules each card so you review it right before you’d forget.",
+        },
+        calendar: {
+          k: "Calendar sync",
+          title: "Your deadlines, everywhere",
+          body: "Subscribe in Google, Apple or Outlook Calendar — every assignment and exam stays in sync automatically.",
+        },
+        syllabus: {
+          k: "Syllabus import",
+          title: "Start from your syllabus",
+          body: "Paste or upload your syllabus and StudyOS builds from your real courses, dates and topics.",
+        },
         databases: {
           k: "Databases",
           title: "Real, structured data",
           body: "Assignments, grades and readings as tables with custom fields — not loose notes.",
         },
-        calendar: {
-          k: "Calendar",
-          title: "Planner & calendar",
-          body: "Every deadline in one place. Switch between table, board and calendar in a click.",
-        },
         dashboard: {
           k: "Dashboard",
           title: "A clear home base",
           body: "A page that pulls your whole week together so you always know what’s next.",
-        },
-        autosave: {
-          k: "Autosave",
-          title: "Edit, saved instantly",
-          body: "Rename, check off, add rows — every change saves itself the moment you make it.",
         },
         assistant: {
           k: "Assistant",
@@ -136,8 +141,8 @@ export const en = {
         price: "$0",
         features: [
           "Generate AI workspaces",
-          "Edit & autosave everything",
-          "Dashboards, databases, calendar",
+          "Flashcards & spaced repetition",
+          "Calendar sync & syllabus import",
           "Ask to edit in plain English",
         ],
         cta: "Get started",
@@ -148,7 +153,7 @@ export const en = {
         price: "$5",
         features: [
           "Everything in Free",
-          "Unlimited generations",
+          "A big monthly credit allowance",
           "The smartest, most detailed model",
           "Priority support",
         ],
@@ -180,7 +185,7 @@ export const en = {
     badge: "Simple, student-friendly pricing",
     title: "Start free. Upgrade when you’re ready.",
     subtitle:
-      "Everything you need to organize your semester is free. Pro adds the most capable model, unlimited generations, and priority support.",
+      "Everything you need to organize your semester is free. Pro adds the most capable model, a bigger monthly credit allowance, and priority support.",
     free: {
       name: "Free",
       price: "$0",
@@ -193,7 +198,7 @@ export const en = {
       ],
       ctaSignedOut: "Get started free",
       ctaSignedIn: "Open your workspaces",
-      bulletCredits: "{count} starter AI credits",
+      bulletCredits: "{count} free AI credits every month",
     },
     pro: {
       badge: "Most popular",
@@ -203,7 +208,7 @@ export const en = {
       billed: "Billed monthly · cancel anytime.",
       bullets: [
         "Everything in Free",
-        "Unlimited workspace generations",
+        "A monthly allowance for heavy use",
         "The most capable, most detailed model",
         "Priority support & early access",
       ],
@@ -211,7 +216,7 @@ export const en = {
       manageBilling: "Manage billing",
       upgrade: "Upgrade to Pro",
       ctaSignedOut: "Get started with Pro",
-      bulletCredits: "{count} AI credits included",
+      bulletCredits: "{count} AI credits every month",
     },
     comparison: {
       title: "Compare plans",
@@ -225,6 +230,9 @@ export const en = {
         onboarding: "Guided onboarding questions",
         editing: "Full inline editing & autosave",
         databases: "Databases — table, board & calendar",
+        flashcards: "Flashcards with spaced repetition",
+        calendarSync: "Calendar sync (Google / Apple / Outlook)",
+        syllabusImport: "Syllabus import",
         dragDrop: "Drag-and-drop editing",
         agentChat: "AI agent chat that edits your workspace",
         model: "Generation model",
@@ -247,9 +255,9 @@ export const en = {
       heading: "AI runs on credits",
       intro:
         "Every AI request spends credits based on how much it does — a quick tweak costs a little, building a whole workspace costs more. Pro comes loaded with credits, and you can top up anytime.",
-      freeIncludes: "Free includes {count} starter credits",
-      proIncludes: "Pro includes {count} credits",
-      neverExpire: "Top up anytime — credits never expire",
+      freeIncludes: "Free includes {count} credits every month",
+      proIncludes: "Pro includes {count} credits every month",
+      neverExpire: "Top up anytime — purchased packs never expire",
       balance: "Your balance: {count} credits",
       pack: "Credit pack",
       unit: "credits",
@@ -265,7 +273,7 @@ export const en = {
       },
       {
         q: "What do I get with Pro?",
-        a: "Unlimited generations, the most capable model for richer and more accurate workspaces, priority support, and early access to new features.",
+        a: "A large monthly credit allowance, the most capable model for richer and more accurate workspaces, priority support, and early access to new features.",
       },
       {
         q: "Can I cancel anytime?",
@@ -299,6 +307,64 @@ export const en = {
     loadDemo: "Load demo",
     updatedAt: "updated {date}",
     fallbackIcon: "📄",
+  },
+
+  // ---- Agent Center & Daily Study Agent --------------------------------
+  agentCenter: {
+    metaTitle: "Agent Center · StudyOS",
+    label: "Agent Center",
+    back: "← Workspaces",
+    eyebrow: "Agent Center",
+    title: "Your Daily Study Agent",
+    subtitle:
+      "It reads your real deadlines, open tasks, and due flashcards, then builds one focused plan for today.",
+    enabled: "Active",
+    paused: "Paused",
+    runNow: "Run agent now",
+    running: "Building today’s plan…",
+    todayTitle: "Today’s study plan",
+    todaySubtitle: "Prioritized from your workspace data, with a reason for every session.",
+    noPlanTitle: "No plan for today yet",
+    noPlanBody:
+      "Run the agent now, or enable daily planning and it will prepare one on your first visit each day.",
+    clearTitle: "Your workspace is clear for today.",
+    allDone: "Today’s plan is complete. Nicely done.",
+    minutes: "{count} min",
+    sessions: "{count} sessions",
+    due: "Due {date}",
+    cardsDue: "{count} cards due",
+    openWorkspace: "Open workspace",
+    markDone: "Mark done",
+    undoDone: "Reopen",
+    settingsTitle: "Daily automation",
+    settingsSubtitle: "Set how the agent plans your day. You stay in control.",
+    autoLabel: "Plan automatically each day",
+    autoHint:
+      "Runs on your first StudyOS visit of the day in your local timezone.",
+    budgetLabel: "Daily study budget",
+    save: "Save settings",
+    saving: "Saving…",
+    safetyTitle: "Boundaries you can trust",
+    safetySubtitle: "This agent has a deliberately narrow permission set.",
+    readsLabel: "Reads",
+    readsBody: "Deadlines, task status, pages, and flashcard due dates.",
+    writesLabel: "Writes",
+    writesBody: "Only your private daily plan and its activity history.",
+    neverLabel: "Never",
+    neverBody: "Changes coursework, sends messages, or spends AI credits.",
+    activityTitle: "Activity",
+    activitySubtitle: "A transparent record of every Daily Study Agent run.",
+    noActivity: "No runs yet. Your first plan will appear here.",
+    autoTrigger: "Daily auto-run",
+    manualTrigger: "Run now",
+    completedStatus: "Completed",
+    failedStatus: "Failed",
+    runningStatus: "Running",
+    dashboardTitle: "Today with your agent",
+    dashboardSubtitle: "A focused plan built from your real study data.",
+    openCenter: "Open Agent Center",
+    planToday: "Plan my day",
+    scanned: "Scanned {sources} workspaces · found {candidates} candidates",
   },
 
   // ---- Generate flow (/generate) ----------------------------------------
@@ -335,6 +401,16 @@ export const en = {
       continue: "Continue",
       examplesLabel: "Not sure? Start from an example",
       finePrint: "Free · no credit card · ready in seconds",
+    },
+    syllabus: {
+      toggle: "📄 Add your syllabus",
+      optional: "optional",
+      hint: "Paste your syllabus or course list — or upload a .txt file — and StudyOS builds from your real courses, deadlines, and topics.",
+      placeholder:
+        "Paste your syllabus, course list, or semester schedule here…",
+      upload: "Upload .txt",
+      attached: "{chars} characters added",
+      clear: "Clear",
     },
     questions: {
       back: "← Edit description",
@@ -475,6 +551,7 @@ export const en = {
       divider: "Divider",
       database: "Table",
       media: "Image",
+      flashcards: "Flashcards",
     },
     placeholders: {
       paragraph: "Type something…",
@@ -495,6 +572,45 @@ export const en = {
     },
   },
 
+  // ---- Flashcards & spaced-repetition study -----------------------------
+  study: {
+    newDeckTitle: "New deck",
+    untitledDeck: "Flashcards",
+    deckTitlePlaceholder: "Deck title…",
+    stats: {
+      cards: "{count} cards",
+      due: "{count} due",
+      mature: "{count} learned",
+    },
+    studyDue: "Study {count} due",
+    allCaughtUp: "All caught up 🎉",
+    editCards: "Edit cards",
+    doneEditing: "Done",
+    addCard: "+ Add card",
+    deleteCard: "Delete card",
+    emptyDeck: "No cards yet. Add one, or ask the AI to make a deck.",
+    frontPlaceholder: "Front (question)",
+    backPlaceholder: "Back (answer)",
+    showAnswer: "Show answer",
+    tapToReveal: "Tap to reveal the answer",
+    spaceKey: "Space",
+    grades: {
+      again: "Again",
+      hard: "Hard",
+      good: "Good",
+      easy: "Easy",
+    },
+    doneTitle: "Session complete",
+    doneSummary: "You reviewed {count} cards.",
+    doneAgain: "{count} need another look soon.",
+    finish: "Done",
+    // Workspace-level study launcher
+    dueAcrossWorkspace: "Study {count} due",
+    noneDue: "Nothing due",
+    streak: "{count}-day streak",
+    reviewAll: "Review",
+  },
+
   // ---- Database views (table / board / calendar) ------------------------
   db: {
     databaseIcon: "Database icon",
@@ -511,6 +627,8 @@ export const en = {
     addOnDay: "Add on this day",
     clickToRename: "Click to rename",
     delete: "Delete",
+    addTag: "Add",
+    addLink: "Link",
   },
 
   // ---- Database settings panel ------------------------------------------
@@ -657,6 +775,12 @@ export const en = {
       "You’re out of AI credits. Add more from the Pricing page to keep generating.",
     outAgent:
       "You’re out of AI credits. Add more from the Pricing page to keep using the agent.",
+    // Transparency: always-visible meter, per-action cost, low-balance nudge.
+    low: "Low",
+    runningLow: "You’re running low on credits.",
+    turnCostTitle: "Credits this turn",
+    buysApprox: "≈ {gens} workspace builds or {edits} agent edits",
+    buyMore: "Buy more",
   },
 
   // ---- Account menu -----------------------------------------------------
@@ -691,10 +815,20 @@ export const en = {
     upgrade: "Upgrade to Pro",
     comparePlans: "Compare plans",
     creditsDesc:
-      "Credits power every AI request. Top up anytime — credits never expire.",
+      "Credits power every AI request. Your plan refreshes them monthly, and purchased packs never expire.",
     buyPack: "Buy {count} credits · ${price}",
     viewPricing: "View pricing",
     signOut: "Sign out",
+    dangerZone: "Danger zone",
+    deleteAccount: "Delete account",
+    deleteAccountDesc:
+      "Permanently delete your account, workspaces, credits, and subscription. This can’t be undone.",
+    deleteAccountConfirm:
+      "Delete your account permanently?\n\nAll workspaces, credits, and your subscription will be removed. This can’t be undone.",
+    deleteAccountButton: "Delete my account",
+    deleting: "Deleting…",
+    deleteAccountError:
+      "We couldn’t cancel your subscription just now, so nothing was deleted. Please try again in a moment.",
   },
 
   // ---- Workspace card (delete control) ----------------------------------
@@ -703,6 +837,46 @@ export const en = {
     deleteAria: "Delete {name}",
     deleteConfirm:
       "Delete “{name}”?\n\nThis permanently removes the workspace and everything in it. This can’t be undone.",
+  },
+
+  // ---- Error & not-found pages -------------------------------------------
+  errors: {
+    notFoundTitle: "Page not found",
+    notFoundBody: "This page doesn’t exist — it may have been moved or deleted.",
+    errorTitle: "Something went wrong",
+    errorBody:
+      "An unexpected error occurred. Your work is autosaved — try again.",
+    tryAgain: "Try again",
+    backHome: "Back to home",
+  },
+
+  // ---- Legal & footer -----------------------------------------------------
+  legal: {
+    terms: "Terms of Service",
+    privacy: "Privacy Policy",
+    contact: "Contact",
+  },
+
+  // ---- Calendar subscription (ICS feed) ----------------------------------
+  calendar: {
+    title: "Calendar sync",
+    description:
+      "Subscribe to your deadlines in Google, Apple, or Outlook Calendar. Your assignments, exams, and dated items stay up to date automatically.",
+    urlLabel: "Your private calendar link",
+    copy: "Copy",
+    copied: "Copied ✓",
+    addToCalendar: "Add to calendar",
+    reset: "Reset link",
+    resetting: "Resetting…",
+    instructions:
+      "Paste this link into your calendar app’s “Subscribe from URL” option. Keep it private — anyone with the link can see your deadlines. Reset it anytime to revoke access.",
+  },
+
+  // ---- Usage limits --------------------------------------------------------
+  limits: {
+    rateLimited:
+      "You’ve hit the request limit for now. Please wait a moment and try again.",
+    sandboxQuota: "You’ve reached today’s rendering limit. It resets tomorrow.",
   },
 
   // ---- Mock generator scaffolding (no-API-key fallback) ------------------

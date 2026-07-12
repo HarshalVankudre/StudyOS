@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { useI18n } from "@/lib/i18n/client";
 import type {
@@ -14,6 +14,7 @@ import {
   createInitialAgentActivity,
   reduceAgentActivity,
 } from "@/lib/ai/progress";
+import { emitCreditsBalance } from "@/lib/credits-bus";
 import type { Workspace } from "@/lib/workspace/types";
 import { AgentProgressCard } from "./AgentProgressCard";
 import { AgentUndoButton } from "./AgentUndoButton";
@@ -28,6 +29,7 @@ interface ChatItem {
   affectedAreas?: AgentArea[];
   changeId?: string;
   undone?: boolean;
+  creditsCost?: number;
 }
 
 export function AgentChat({
@@ -41,7 +43,9 @@ export function AgentChat({
   onClose: () => void;
   onBusyChange?: (busy: boolean) => void;
 }) {
-  const { dict } = useI18n();
+  const inputHintId = useId();
+  const errorId = useId();
+  const { dict, t } = useI18n();
   const initialActivity = createInitialAgentActivity(
     dict.agentChat.initialMessage,
   );
@@ -80,9 +84,14 @@ export function AgentChat({
         changeId: response.changeId,
         choices: response.choices,
         affectedAreas: response.affectedAreas,
+        creditsCost: response.creditsCost,
       },
     ]);
     if (response.changed && response.workspace) onApplied(response.workspace);
+    // Broadcast the new balance so the header meter updates live.
+    if (typeof response.creditsBalance === "number") {
+      emitCreditsBalance(response.creditsBalance);
+    }
   };
 
   // After a dropped stream, the task may have finished server-side. Poll the
@@ -319,7 +328,10 @@ export function AgentChat({
   };
 
   return (
-    <aside className="flex w-[390px] shrink-0 flex-col border-l border-line bg-paper">
+    <aside
+      aria-label={dict.agentChat.title}
+      className="fixed inset-0 z-50 flex w-full shrink-0 flex-col border-s border-line bg-paper shadow-pop sm:inset-y-0 sm:start-auto sm:end-0 sm:max-w-[390px] lg:static lg:z-auto lg:w-[390px] lg:shadow-none"
+    >
       <div className="flex items-center justify-between border-b border-line px-4 py-3">
         <div className="flex items-center gap-2">
           <span className="relative grid h-8 w-8 shrink-0 place-items-center rounded-full bg-lime">
@@ -345,13 +357,20 @@ export function AgentChat({
         <button
           onClick={onClose}
           aria-label={dict.agentChat.closeChat}
-          className="rounded p-1 text-ink-soft/60 transition hover:bg-hover hover:text-ink"
+          className="grid h-11 w-11 place-items-center rounded-md text-ink-soft transition hover:bg-hover hover:text-ink"
         >
-          ✕
+          <span aria-hidden>✕</span>
         </button>
       </div>
 
-      <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
+      <div
+        ref={scrollRef}
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions text"
+        aria-busy={busy}
+        className="flex-1 space-y-3 overflow-y-auto px-4 py-4"
+      >
         {items.length === 0 && !busy && (
           <div className="mt-2">
             <p className="text-sm leading-relaxed text-ink-soft">
@@ -362,7 +381,7 @@ export function AgentChat({
                 <button
                   key={suggestion}
                   onClick={() => send(suggestion)}
-                  className="rounded-md border border-line-strong bg-card px-3 py-2 text-left text-sm text-ink-soft transition hover:border-ink/40 hover:text-ink"
+                  className="min-h-11 rounded-md border border-line-strong bg-card px-3 py-2 text-start text-sm text-ink-soft transition hover:border-ink/40 hover:text-ink"
                 >
                   {suggestion}
                 </button>
@@ -383,6 +402,15 @@ export function AgentChat({
               <div className="max-w-[94%] rounded-2xl rounded-bl-sm border border-line bg-card px-3.5 py-2 text-sm text-ink">
                 <MessageResponse>{item.content}</MessageResponse>
               </div>
+
+              {typeof item.creditsCost === "number" && item.creditsCost > 0 && (
+                <span
+                  className="ml-1 font-mono text-[10px] text-ink-soft/70"
+                  title={dict.credits.turnCostTitle}
+                >
+                  {t(dict.credits.amount, { count: item.creditsCost })}
+                </span>
+              )}
 
               {item.choices && item.choices.length > 0 && (
                 <div className="grid w-[94%] gap-1.5 pt-1">
@@ -519,7 +547,11 @@ export function AgentChat({
       </div>
 
       <div className="border-t border-line p-3">
-        {error && <p className="mb-2 px-1 text-xs text-rose-500">{error}</p>}
+        {error && (
+          <p id={errorId} role="alert" className="mb-2 px-1 text-xs text-rose-500">
+            {error}
+          </p>
+        )}
         <div className="flex items-end gap-2 rounded-md border border-line-strong bg-card px-3 py-2 transition focus-within:border-ink/40">
           <textarea
             value={text}
@@ -532,6 +564,8 @@ export function AgentChat({
             }}
             rows={1}
             disabled={busy}
+            aria-label={dict.agentChat.placeholderIdle}
+            aria-describedby={`${inputHintId}${error ? ` ${errorId}` : ""}`}
             placeholder={
               busy
                 ? dict.agentChat.placeholderBusy
@@ -543,12 +577,12 @@ export function AgentChat({
             onClick={() => send(text)}
             disabled={busy || !text.trim()}
             aria-label={dict.agentChat.send}
-            className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-lime text-lime-on transition enabled:hover:bg-lime-deep disabled:opacity-40"
+            className="grid h-11 w-11 shrink-0 place-items-center rounded-md bg-lime text-lime-on transition enabled:hover:bg-lime-deep disabled:opacity-40 sm:h-9 sm:w-9"
           >
             ↑
           </button>
         </div>
-        <p className="mt-1.5 px-1 text-[10px] text-ink-soft/70">
+        <p id={inputHintId} className="mt-1.5 px-1 text-[10px] text-ink-soft/70">
           {dict.agentChat.inputHint}
         </p>
       </div>

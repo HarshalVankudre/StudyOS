@@ -10,7 +10,10 @@ import {
   getCreditBalance,
 } from "@/lib/credits";
 import { getI18n } from "@/lib/i18n/server";
+import { DeleteAccountButton } from "@/components/account/DeleteAccountButton";
+import { CalendarSubscribe } from "@/components/account/CalendarSubscribe";
 import { ManageAccountButton } from "@/components/account/ManageAccountButton";
+import { getCalendarFeedUrlAction } from "../calendar-actions";
 import {
   buyCreditsAction,
   manageBillingAction,
@@ -26,12 +29,14 @@ export default async function SettingsPage() {
   const { userId } = await auth();
   if (!userId) redirect("/sign-in");
 
-  const [user, pro, credits, { dict, t, locale }] = await Promise.all([
-    currentUser(),
-    isPro(),
-    getCreditBalance(userId),
-    getI18n(),
-  ]);
+  const [user, pro, credits, calendarUrl, { dict, t, locale }] =
+    await Promise.all([
+      currentUser(),
+      isPro(),
+      getCreditBalance(userId),
+      getCalendarFeedUrlAction(),
+      getI18n(),
+    ]);
   const S = dict.settings;
 
   const email = user?.emailAddresses?.[0]?.emailAddress;
@@ -169,6 +174,28 @@ export default async function SettingsPage() {
             >
               {S.viewPricing}
             </Link>
+          </div>
+        </section>
+
+        {/* Calendar sync */}
+        <section className="mt-6 rounded-2xl border border-ink/10 bg-card/60 p-6">
+          <h2 className="font-display text-lg font-bold">{dict.calendar.title}</h2>
+          <p className="mt-3 text-sm text-ink-soft">
+            {dict.calendar.description}
+          </p>
+          <div className="mt-5">
+            <CalendarSubscribe initialUrl={calendarUrl} />
+          </div>
+        </section>
+
+        {/* Danger zone */}
+        <section className="mt-6 rounded-2xl border border-rose-600/25 bg-card/60 p-6">
+          <h2 className="font-display text-lg font-bold text-rose-600">
+            {S.dangerZone}
+          </h2>
+          <p className="mt-3 text-sm text-ink-soft">{S.deleteAccountDesc}</p>
+          <div className="mt-5">
+            <DeleteAccountButton />
           </div>
         </section>
 

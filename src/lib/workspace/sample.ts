@@ -418,5 +418,52 @@ export const sampleWorkspace: Workspace = {
         },
       ],
     },
+
+    // ---- Flashcards page -------------------------------------------------
+    {
+      id: "page-flashcards",
+      title: "Flashcards",
+      icon: "🗂",
+      blocks: [
+        { id: "pf-h", type: "heading", level: 1, text: "Flashcards" },
+        {
+          id: "pf-p",
+          type: "paragraph",
+          text: "Review with spaced repetition — the app schedules each card so you see it right before you'd forget. Ask the AI to make a deck from any topic.",
+        },
+        {
+          id: "pf-deck",
+          type: "flashcards",
+          title: "Data Structures — CS 210",
+          cards: [
+            {
+              id: "fc-1",
+              front: "What is the average-case time complexity of a hash table lookup?",
+              back: "O(1) — constant time, assuming a good hash function and low load factor.",
+            },
+            {
+              id: "fc-2",
+              front: "How does a stack differ from a queue?",
+              back: "A stack is LIFO (last in, first out); a queue is FIFO (first in, first out).",
+            },
+            {
+              id: "fc-3",
+              front: "What is the worst-case time to search a balanced binary search tree?",
+              back: "O(log n) — the tree's height stays logarithmic in the number of nodes.",
+            },
+            {
+              id: "fc-4",
+              front: "When is a linked list preferable to an array?",
+              back: "When you need frequent insertions/deletions at arbitrary positions and don't need O(1) random access.",
+            },
+            {
+              id: "fc-5",
+              front: "What does Big-O notation describe?",
+              back: "An upper bound on how an algorithm's running time or space grows as the input size grows.",
+            },
+          ],
+        },
+      ],
+    },
   ],
 };
