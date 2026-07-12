@@ -1,4 +1,4 @@
-import type { Dictionary } from "./en";
+import { en, type Dictionary } from "./en";
 
 /** Italian (it-IT) — translation of the canonical English dictionary. */
 export const it = {
@@ -296,6 +296,7 @@ export const it = {
     updatedAt: "aggiornato {date}",
     fallbackIcon: "📄",
   },
+  agentCenter: en.agentCenter,
 
   // ---- Generate flow (/generate) ----------------------------------------
   generate: {

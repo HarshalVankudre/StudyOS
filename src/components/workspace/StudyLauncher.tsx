@@ -75,7 +75,7 @@ export function StudyLauncher() {
       {dueCount > 0 && (
         <button
           onClick={() => setStudying(true)}
-          className="flex items-center gap-1.5 rounded-md border border-lime bg-lime-faint px-3 py-1.5 text-xs font-semibold text-ink transition hover:bg-lime/20"
+          className="flex min-h-11 items-center gap-1.5 rounded-md border border-lime bg-lime-faint px-2 text-xs font-semibold text-ink transition hover:bg-lime/20 sm:min-h-0 sm:px-3 sm:py-1.5"
         >
           🗂️ {t(S.dueAcrossWorkspace, { count: dueCount })}
         </button>

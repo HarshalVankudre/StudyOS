@@ -1,4 +1,4 @@
-import type { Dictionary } from "./en";
+import { en, type Dictionary } from "./en";
 // Français (fr-FR) — traduction de StudyOS, conforme au contrat Dictionary.
 export const fr = {
   // ---- Document <title> / <meta> ----------------------------------------
@@ -295,6 +295,7 @@ export const fr = {
     updatedAt: "mis à jour le {date}",
     fallbackIcon: "📄",
   },
+  agentCenter: en.agentCenter,
 
   // ---- Generate flow (/generate) ----------------------------------------
   generate: {

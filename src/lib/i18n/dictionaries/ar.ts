@@ -1,4 +1,4 @@
-import type { Dictionary } from "./en";
+import { en, type Dictionary } from "./en";
 
 // Arabic (ar) — ترجمة عربية فصحى للقاموس الإنجليزي المرجعي.
 export const ar = {
@@ -296,6 +296,7 @@ export const ar = {
     updatedAt: "حُدِّثت في {date}",
     fallbackIcon: "📄",
   },
+  agentCenter: en.agentCenter,
 
   // ---- Generate flow (/generate) ----------------------------------------
   generate: {

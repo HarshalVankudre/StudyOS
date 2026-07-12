@@ -1,5 +1,6 @@
 import { UserButton } from "@clerk/nextjs";
 import { auth } from "@clerk/nextjs/server";
+import Form from "next/form";
 import Link from "next/link";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -90,7 +91,7 @@ export default async function Home() {
   return (
     <div className="min-h-screen bg-paper text-ink antialiased">
       <header className="sticky top-0 z-40 border-b border-line bg-paper/80 backdrop-blur-md">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4 sm:px-7">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4 sm:px-7">
           <Brand />
           <nav className="hidden items-center gap-8 text-sm text-ink-soft md:flex">
             <a href="#generate" className="transition-colors hover:text-ink">
@@ -127,7 +128,7 @@ export default async function Home() {
                 </Link>
                 <Link
                   href="/sign-up"
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-lime px-4 py-2 text-[13px] font-semibold text-lime-on shadow-[0_8px_24px_-8px_var(--accent-glow)] transition hover:bg-lime-deep"
+                  className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg bg-lime px-3 py-2 text-xs font-semibold text-lime-on shadow-[0_8px_24px_-8px_var(--accent-glow)] transition hover:bg-lime-deep sm:px-4 sm:text-[13px]"
                 >
                   {L.nav.getStarted}
                   <span aria-hidden>→</span>
@@ -136,9 +137,31 @@ export default async function Home() {
             )}
           </div>
         </div>
+        <nav
+          aria-label="Mobile navigation"
+          className="border-t border-line md:hidden"
+        >
+          <div className="mx-auto flex max-w-6xl items-center gap-5 overflow-x-auto px-4 py-2.5 text-xs whitespace-nowrap text-ink-soft sm:px-7">
+            <a href="#generate" className="transition-colors hover:text-ink">
+              {L.nav.howItWorks}
+            </a>
+            <a href="#organize" className="transition-colors hover:text-ink">
+              {L.nav.features}
+            </a>
+            <Link href="/pricing" className="transition-colors hover:text-ink">
+              {L.nav.pricing}
+            </Link>
+            <Link
+              href={userId ? "/app" : "/sign-in"}
+              className="ml-auto transition-colors hover:text-ink"
+            >
+              {userId ? L.nav.openApp : L.nav.signIn}
+            </Link>
+          </div>
+        </nav>
       </header>
 
-      <main>
+      <main id="main-content">
         <section className="overflow-hidden border-b border-line">
           <div className="mx-auto grid max-w-6xl items-center gap-14 px-5 py-16 sm:px-7 sm:py-20 lg:grid-cols-[0.92fr_1.08fr] lg:gap-12 lg:py-24">
             <div>
@@ -155,13 +178,16 @@ export default async function Home() {
               <h1
                 className="reveal mt-5 font-display text-[3.25rem] font-bold leading-[0.94] tracking-[-0.04em] text-balance sm:text-[4.75rem]"
                 style={{ animationDelay: "0.07s" }}
+                aria-label={`${L.hero.titleLine1} ${L.hero.titleLine2}`}
               >
-                <span className="font-medium italic text-ink-soft">
-                  {L.hero.titleLine1}
+                <span aria-hidden>
+                  <span className="font-medium italic text-ink-soft">
+                    {L.hero.titleLine1}
+                  </span>
+                  <br />
+                  {heroLead && <>{heroLead} </>}
+                  <span className="text-lime">{heroAccent}</span>
                 </span>
-                <br />
-                {heroLead && <>{heroLead} </>}
-                <span className="text-lime">{heroAccent}</span>
               </h1>
               <p
                 className="reveal mt-6 max-w-[42ch] text-[17px] leading-7 text-ink-soft"
@@ -175,6 +201,7 @@ export default async function Home() {
               >
                 <PromptCard
                   prompt={promptExample}
+                  inputPlaceholder={dict.generate.describe.placeholder}
                   finePrint={L.hero.finePrint}
                   demoLabel={L.hero.ctaDemo}
                 />
@@ -206,7 +233,10 @@ export default async function Home() {
           </div>
         </section>
 
-        <section id="generate" className="scroll-mt-20 border-b border-line">
+        <section
+          id="generate"
+          className="scroll-mt-28 border-b border-line md:scroll-mt-20"
+        >
           <div className="mx-auto max-w-6xl px-5 py-20 sm:px-7 sm:py-24">
             <ChapterHeader
               number="01"
@@ -241,7 +271,10 @@ export default async function Home() {
           </div>
         </section>
 
-        <section id="organize" className="scroll-mt-20 border-b border-line">
+        <section
+          id="organize"
+          className="scroll-mt-28 border-b border-line md:scroll-mt-20"
+        >
           <div className="mx-auto max-w-6xl px-5 py-20 sm:px-7 sm:py-24">
             <ChapterHeader
               number="02"
@@ -257,7 +290,10 @@ export default async function Home() {
           </div>
         </section>
 
-        <section id="ask" className="scroll-mt-20 border-b border-line">
+        <section
+          id="ask"
+          className="scroll-mt-28 border-b border-line md:scroll-mt-20"
+        >
           <div className="mx-auto max-w-6xl px-5 py-20 sm:px-7 sm:py-24">
             <ChapterHeader
               number="03"
@@ -304,11 +340,16 @@ export default async function Home() {
               }}
               aria-hidden
             />
-            <h2 className="font-display text-5xl font-bold leading-[0.98] tracking-[-0.035em] sm:text-6xl">
-              {L.closing.titleLine1}
-              <br />
-              <span className="font-medium italic text-ink-soft">
-                {L.closing.titleLine2}
+            <h2
+              className="font-display text-5xl font-bold leading-[0.98] tracking-[-0.035em] sm:text-6xl"
+              aria-label={`${L.closing.titleLine1} ${L.closing.titleLine2}`}
+            >
+              <span aria-hidden>
+                {L.closing.titleLine1}
+                <br />
+                <span className="font-medium italic text-ink-soft">
+                  {L.closing.titleLine2}
+                </span>
               </span>
             </h2>
             <p className="mx-auto mt-5 max-w-md text-[17px] text-ink-soft">
@@ -366,10 +407,12 @@ function Brand() {
 
 function PromptCard({
   prompt,
+  inputPlaceholder,
   finePrint,
   demoLabel,
 }: {
   prompt: string;
+  inputPlaceholder: string;
   finePrint: string;
   demoLabel: string;
 }) {
@@ -381,22 +424,31 @@ function PromptCard({
       </div>
       <div className="px-1 pb-1 pt-4">
         <p className="font-display text-lg italic leading-7 text-ink">“{prompt}”</p>
-        <div className="mt-4 flex items-center gap-2">
-          <span className="min-w-0 flex-1 truncate rounded-lg border border-line bg-white/[0.03] px-3 py-2.5 text-xs text-ink-faint">
-            Describe your semester…
-          </span>
-          <Link
-            href="/generate"
+        <Form action="/generate" className="mt-4 flex items-center gap-2">
+          <label htmlFor="landing-prompt" className="sr-only">
+            {inputPlaceholder}
+          </label>
+          <input
+            id="landing-prompt"
+            name="prompt"
+            type="text"
+            required
+            maxLength={2000}
+            placeholder={inputPlaceholder}
+            className="min-w-0 flex-1 rounded-lg border border-line bg-white/[0.03] px-3 py-2.5 text-xs text-ink outline-none transition placeholder:text-ink-faint focus:border-lime/50 focus:ring-2 focus:ring-lime/10"
+          />
+          <button
+            type="submit"
             className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-lime px-4 py-2.5 text-xs font-semibold text-lime-on transition hover:bg-lime-deep"
           >
             Build
             <span aria-hidden>→</span>
-          </Link>
-        </div>
+          </button>
+        </Form>
         <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[9px] text-ink-faint">
           <span>{finePrint}</span>
           <Link
-            href="/app"
+            href="#organize"
             className="text-ink-soft underline-offset-4 hover:text-ink hover:underline"
           >
             {demoLabel}

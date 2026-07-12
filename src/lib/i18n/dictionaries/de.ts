@@ -1,4 +1,4 @@
-import type { Dictionary } from "./en";
+import { en, type Dictionary } from "./en";
 
 /** German (de-DE) — translation of the canonical English dictionary. */
 export const de = {
@@ -296,6 +296,7 @@ export const de = {
     updatedAt: "aktualisiert {date}",
     fallbackIcon: "📄",
   },
+  agentCenter: en.agentCenter,
 
   // ---- Generate flow (/generate) ----------------------------------------
   generate: {

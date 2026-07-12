@@ -1,6 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useI18n } from "@/lib/i18n/client";
 import type { Flashcard } from "@/lib/workspace/types";
 import { GRADES, reviewCard, type Grade } from "@/lib/study/srs";
@@ -84,7 +90,6 @@ export function StudySession({
   // Keyboard controls.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") return onClose();
       if (finished) return;
       if (!flipped && (e.key === " " || e.key === "Enter")) {
         e.preventDefault();
@@ -101,31 +106,51 @@ export function StudySession({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [flipped, finished, grade, onClose]);
+  }, [flipped, finished, grade]);
 
   const progress = total === 0 ? 100 : Math.round((done / (done + queue.length)) * 100);
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-paper/95 backdrop-blur-sm">
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
+      <DialogContent
+        showCloseButton={false}
+        onPointerDownOutside={(event) => event.preventDefault()}
+        className="inset-0 top-0 left-0 flex h-[100dvh] w-screen max-w-none translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-0 bg-paper/95 p-0 backdrop-blur-sm sm:max-w-none"
+      >
+        <DialogDescription className="sr-only">
+          {S.tapToReveal}
+        </DialogDescription>
       {/* Top bar */}
       <div className="flex items-center justify-between border-b border-line px-5 py-3">
-        <span className="truncate font-display text-sm font-bold text-ink">
+        <DialogTitle className="truncate font-display text-sm font-bold text-ink">
           {title}
-        </span>
+        </DialogTitle>
         <div className="flex items-center gap-4">
           <span className="font-mono text-xs text-ink-soft">
             {finished ? total : Math.min(done + 1, total)} / {total}
           </span>
           <button
             onClick={onClose}
-            className="rounded-md px-2 py-1 text-sm text-ink-soft transition hover:bg-hover hover:text-ink"
+            className="grid h-11 w-11 place-items-center rounded-md text-sm text-ink-soft transition hover:bg-hover hover:text-ink"
             aria-label={dict.common.cancel}
           >
-            ✕
+            <span aria-hidden>✕</span>
           </button>
         </div>
       </div>
-      <div className="h-1 w-full bg-line">
+      <div
+        role="progressbar"
+        aria-label={title}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={progress}
+        className="h-1 w-full bg-line"
+      >
         <div
           className="h-full bg-lime transition-all"
           style={{ width: `${progress}%` }}
@@ -156,6 +181,8 @@ export function StudySession({
           {/* Card */}
           <button
             onClick={() => setFlipped(true)}
+            autoFocus
+            aria-pressed={flipped}
             className="flex min-h-[220px] w-full max-w-2xl cursor-pointer flex-col items-center justify-center gap-4 rounded-2xl border border-line-strong bg-card p-8 text-center shadow-pop transition hover:border-ink/20"
             aria-label={flipped ? undefined : S.tapToReveal}
           >
@@ -179,7 +206,7 @@ export function StudySession({
                 <button
                   key={g}
                   onClick={() => grade(g)}
-                  className={`flex flex-col items-center gap-1 rounded-xl border bg-card py-3 text-sm font-semibold transition ${GRADE_STYLES[g]}`}
+                  className={`flex min-h-11 flex-col items-center gap-1 rounded-xl border bg-card py-3 text-sm font-semibold transition ${GRADE_STYLES[g]}`}
                 >
                   <span>{S.grades[g]}</span>
                   <span className="font-mono text-[11px] opacity-70">
@@ -202,6 +229,7 @@ export function StudySession({
           )}
         </div>
       )}
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

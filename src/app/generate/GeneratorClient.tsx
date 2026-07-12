@@ -19,10 +19,14 @@ import { planQuestionsAction } from "./actions";
 
 type Stage = "describe" | "questions";
 
-export function GeneratorClient() {
+export function GeneratorClient({
+  initialPrompt = "",
+}: {
+  initialPrompt?: string;
+}) {
   const router = useRouter();
   const { dict } = useI18n();
-  const [prompt, setPrompt] = useState("");
+  const [prompt, setPrompt] = useState(initialPrompt);
   const [sourceText, setSourceText] = useState("");
   const [error, setError] = useState<string | null>(null);
 

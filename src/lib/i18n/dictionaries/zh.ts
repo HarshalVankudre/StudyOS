@@ -1,4 +1,4 @@
-import type { Dictionary } from "./en";
+import { en, type Dictionary } from "./en";
 
 // 简体中文（zh-CN）—— 规范英文字典的翻译。
 export const zh = {
@@ -296,6 +296,7 @@ export const zh = {
     updatedAt: "更新于 {date}",
     fallbackIcon: "📄",
   },
+  agentCenter: en.agentCenter,
 
   // ---- Generate flow (/generate) ----------------------------------------
   generate: {

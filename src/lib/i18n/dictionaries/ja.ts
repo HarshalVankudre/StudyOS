@@ -1,4 +1,4 @@
-import type { Dictionary } from "./en";
+import { en, type Dictionary } from "./en";
 // 日本語（ja-JP）— StudyOS の翻訳辞書。
 export const ja = {
   // ---- Document <title> / <meta> ----------------------------------------
@@ -295,6 +295,7 @@ export const ja = {
     updatedAt: "{date} に更新",
     fallbackIcon: "📄",
   },
+  agentCenter: en.agentCenter,
 
   // ---- Generate flow (/generate) ----------------------------------------
   generate: {

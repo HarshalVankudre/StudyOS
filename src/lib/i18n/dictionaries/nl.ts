@@ -1,4 +1,4 @@
-import type { Dictionary } from "./en";
+import { en, type Dictionary } from "./en";
 
 /** Dutch (nl-NL) — translation of the canonical English dictionary. */
 export const nl = {
@@ -296,6 +296,7 @@ export const nl = {
     updatedAt: "bijgewerkt {date}",
     fallbackIcon: "📄",
   },
+  agentCenter: en.agentCenter,
 
   // ---- Generate flow (/generate) ----------------------------------------
   generate: {
