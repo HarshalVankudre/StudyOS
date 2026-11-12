@@ -23,7 +23,7 @@ import type { StreakStatus } from "@/lib/study/streak";
 import { StudySession, type ReviewItem, type StudyMode } from "./StudySession";
 import { useWorkspace } from "./WorkspaceContext";
 import { CatchUpBanner } from "./study/CatchUpBanner";
-import { applyGrade } from "./study/gradeEdit";
+import { applyGrade, gradeOptions } from "./study/gradeEdit";
 import { StudyStats } from "./study/StudyStats";
 import { STUDIED_EVENT, useReviewRecorder } from "./study/useReviewRecorder";
 import { openStudyKit } from "./materials/events";
@@ -102,11 +102,10 @@ export function StudyLauncher() {
 
   // Computed from the card as it is when the edit runs, and re-run (not
   // replayed) if the workspace changed elsewhere first (study/gradeEdit.ts).
-  const onGrade = (item: ReviewItem, grade: Grade, _next: Flashcard, at: Date) =>
-    update(
-      (d) => applyGrade(d, { pageId: item.pageId, blockId: item.blockId, cardId: item.card.id }, grade, at),
-      { rebase: "rerun" },
-    );
+  const onGrade = (item: ReviewItem, grade: Grade, _next: Flashcard, at: Date) => {
+    const ref = { pageId: item.pageId, blockId: item.blockId, cardId: item.card.id };
+    update((d) => applyGrade(d, ref, grade, at), gradeOptions(ref, grade, at));
+  };
 
   const spreadOut = () => {
     if (!catchUp) return;

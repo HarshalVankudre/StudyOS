@@ -172,7 +172,8 @@ function gradesToMarkdown(block: GradesBlock, ws: Pick<Workspace, "databases">, 
       `| ${tableCell(L.gradeWork)} | ${tableCell(L.gradeWeight)} | ${tableCell(L.gradeScore)} |`,
       "| --- | --- | --- |",
       ...rows.map((item) => {
-        const weight = item.counted && g.totalWeight > 0 ? pct((item.weight / g.totalWeight) * 100) : "—";
+        // As the syllabus gives it, never rescaled to a total of 100.
+        const weight = item.counted ? pct(item.weight) : "—";
         const score = item.percent === null ? L.gradeNotGraded : pct(item.percent);
         return `| ${tableCell(item.name)} | ${weight} | ${tableCell(score)} |`;
       }),

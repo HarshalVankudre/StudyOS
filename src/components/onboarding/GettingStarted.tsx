@@ -4,6 +4,7 @@ import { Check, ListChecks, X } from "lucide-react";
 import Link from "next/link";
 import { Popover } from "radix-ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { emit, OPEN_STUDY_HUB_EVENT, SHOW_GETTING_STARTED_EVENT } from "@/components/command/events";
 import { useWorkspace } from "@/components/workspace/WorkspaceContext";
 import { STUDIED_EVENT } from "@/components/workspace/study/useReviewRecorder";
@@ -58,23 +59,30 @@ function openDialogs(): HTMLElement[] {
   );
 }
 
-const otherDialogOpen = () => openDialogs().length > 0;
-
 /**
  * The first-run checklist, as a small progress button in the workspace
  * header that opens a non-modal panel. Items tick themselves as the student
  * does them; "Hide this guide" hides it on every device (it can be brought
- * back from the palette). It opens by itself once, on a large screen only,
- * and never covers the page on a phone unless tapped. It never opens by
- * itself when the student arrived through a deep link, and it steps aside
+ * back from the palette). It never opens by itself: on the first visit a
+ * slim line under the header (`nudgeContainer`, pushed into the layout, never
+ * over the page) offers it, and the student opens it when they want. No
+ * nudge when they arrived through a deep link, and the panel steps aside
  * whenever a dialog opens, so it never sits on top of one.
  */
-export function GettingStarted({ onAskAi }: { onAskAi: () => void }) {
+export function GettingStarted({
+  onAskAi,
+  nudgeContainer,
+}: {
+  onAskAi: () => void;
+  /** Where the first-visit line goes (under the header); none = no nudge. */
+  nudgeContainer?: HTMLElement | null;
+}) {
   const { dict, t } = useI18n();
   const G = dict.gettingStarted;
   const { workspace, agentBusy } = useWorkspace();
   const [server, setServer] = useState<OnboardingState | null>(null);
   const [open, setOpen] = useState(false);
+  const [nudge, setNudge] = useState(false);
   // Finished before this visit: nothing to show.
   const [hiddenForGood, setHiddenForGood] = useState(false);
   const [baseline] = useState(() => baselineOf(workspace));
@@ -86,7 +94,7 @@ export function GettingStarted({ onAskAi }: { onAskAi: () => void }) {
     return state;
   }, []);
 
-  // First load; open by itself the very first time on a large screen.
+  // First load; the very first time, offer the guide with a small nudge.
   useEffect(() => {
     let active = true;
     // Read now: the editor rewrites the URL once the linked target is shown.
@@ -100,12 +108,10 @@ export function GettingStarted({ onAskAi }: { onAskAi: () => void }) {
         else if (
           !state.dismissed &&
           !linked &&
-          window.matchMedia?.("(min-width: 1024px)").matches &&
-          !otherDialogOpen() &&
-          // Last: this records the one automatic opening as used.
+          // Last: this records the one first-visit nudge as used.
           !seenBefore()
         ) {
-          setOpen(true);
+          setNudge(true);
         }
       });
     return () => {
@@ -149,6 +155,7 @@ export function GettingStarted({ onAskAi }: { onAskAi: () => void }) {
     const onShow = () => {
       setHiddenForGood(false);
       setServer((s) => (s ? { ...s, dismissed: false } : s));
+      setNudge(false);
       setOpen(true);
       void setOnboardingDismissedAction(false);
     };
@@ -181,10 +188,42 @@ export function GettingStarted({ onAskAi }: { onAskAi: () => void }) {
   };
 
   const onOpenChange = (next: boolean) => {
+    if (next) setNudge(false);
     // Closing a finished checklist retires it.
     if (!next && allDone) dismiss();
     else setOpen(next);
   };
+
+  const nudgeLine =
+    nudge && !open && nudgeContainer
+      ? createPortal(
+          <div
+            data-print="hide"
+            data-testid="getting-started-nudge"
+            className="flex min-w-0 items-center gap-2 border-b border-line bg-lime-faint/40 px-3 py-1 text-xs text-ink sm:px-4 lg:px-6"
+          >
+            <ListChecks className="h-4 w-4 shrink-0 text-lime-deep" aria-hidden />
+            <p className="min-w-0 flex-1 truncate">{G.nudge}</p>
+            <button
+              type="button"
+              onClick={() => onOpenChange(true)}
+              className="min-h-11 shrink-0 rounded-md px-2 font-semibold text-ink underline-offset-2 transition hover:bg-hover hover:underline sm:min-h-8"
+            >
+              {G.nudgeOpen}
+            </button>
+            <button
+              type="button"
+              onClick={() => setNudge(false)}
+              aria-label={G.nudgeDismiss}
+              title={G.nudgeDismiss}
+              className="-me-2 grid h-11 w-11 shrink-0 place-items-center rounded-md text-ink-soft transition hover:bg-hover hover:text-ink sm:h-8 sm:w-8"
+            >
+              <X className="h-4 w-4" aria-hidden />
+            </button>
+          </div>,
+          nudgeContainer,
+        )
+      : null;
 
   const run = (fn: () => void) => () => {
     setOpen(false);
@@ -220,6 +259,8 @@ export function GettingStarted({ onAskAi }: { onAskAi: () => void }) {
   const pct = Math.round((count / total) * 100);
 
   return (
+    <>
+    {nudgeLine}
     <Popover.Root open={open} onOpenChange={onOpenChange}>
       <Popover.Trigger
         aria-label={`${G.button} · ${progressText}`}
@@ -339,5 +380,6 @@ export function GettingStarted({ onAskAi }: { onAskAi: () => void }) {
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>
+    </>
   );
 }

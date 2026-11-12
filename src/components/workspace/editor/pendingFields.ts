@@ -20,6 +20,12 @@ export interface FieldSync {
    * field then simply shows the stored value again.
    */
   rev: number;
+  /**
+   * A field's pending state may have changed (typed into, committed, reverted).
+   * The editor re-checks what is still held so the header never says "Saved"
+   * while a field (a date in a row dialog, say) holds a value not written yet.
+   */
+  changed?: () => void;
 }
 
 /** Null outside the editor (tests, previews): fields then just commit on blur. */

@@ -36,6 +36,25 @@ describe("environment validation", () => {
     expect(ENV_VARS.map((v) => v.name).filter((name) => !listed.has(name))).toEqual([]);
   });
 
+  it("warns in production when the public app URL still points at this machine", () => {
+    const local = (vars: Record<string, string>) =>
+      checkEnvironment({ ...BASE, ...vars }).warnings.filter((w) => /local address/.test(w));
+    expect(local({ NEXT_PUBLIC_APP_URL: "http://localhost:3000" })).toEqual([
+      expect.stringMatching(/^NEXT_PUBLIC_APP_URL points at http:\/\/localhost:3000.*rebuild/),
+    ]);
+    expect(local({ APP_URL: "http://127.0.0.1:8080/" })).toHaveLength(1);
+    expect(local({ APP_URL: "http://[::1]:3000", NEXT_PUBLIC_APP_URL: "0.0.0.0:3000" })).toHaveLength(2);
+    expect(local({ APP_URL: "https://studyos.app", NEXT_PUBLIC_APP_URL: "https://studyos.app" })).toEqual([]);
+    // A host that merely contains the word is fine.
+    expect(local({ APP_URL: "https://localhost-tools.example.com" })).toEqual([]);
+    // Development runs on localhost by design.
+    expect(
+      checkEnvironment({ ...BASE, NODE_ENV: "development", NEXT_PUBLIC_APP_URL: "http://localhost:3000" }).warnings.some((w) =>
+        /local address/.test(w),
+      ),
+    ).toBe(false);
+  });
+
   it("passes with the required variables set", () => {
     const report = checkEnvironment(BASE);
     expect(report.missingRequired).toEqual([]);

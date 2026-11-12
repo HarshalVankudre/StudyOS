@@ -3,6 +3,7 @@
  * language and grading scale. No React: unit-testable on its own.
  */
 import type { Dictionary } from "@/lib/i18n/dictionaries/en";
+import { plural } from "@/lib/i18n/plural";
 import {
   bandFor,
   bandName,
@@ -51,6 +52,11 @@ export function outlookText(
   const goal = targetText(target, scale, locale, g, t);
   switch (o.kind) {
     case "needed":
+      // With weights that don't add up to 100, "the remaining N% of the grade"
+      // would be a scaled figure the syllabus never gave: say "the rest" instead.
+      if (grade.decidedWeight > 0 && grade.notes.some((n) => n.code === "weights_sum")) {
+        return t(g.outlook.neededRest, { target: goal, average: formatPercent(o.average, locale) });
+      }
       return grade.decidedWeight > 0
         ? t(g.outlook.needed, {
             target: goal,
@@ -81,7 +87,7 @@ export function outlookText(
 export function noteText(note: GradeNote, locale: string, g: G, t: T): string {
   switch (note.code) {
     case "weights_sum":
-      return t(g.notes.weightsSum, { sum: formatPercent(note.sum, locale) });
+      return t(note.sum > 100 ? g.notes.weightsOver : g.notes.weightsUnder, { sum: formatPercent(note.sum, locale) });
     case "unweighted_split":
       return t(g.notes.unweightedSplit, { count: note.count, each: formatPercent(note.each, locale) });
     case "unweighted_ignored":
@@ -95,6 +101,6 @@ export function noteText(note: GradeNote, locale: string, g: G, t: T): string {
     case "invalid_max":
       return t(g.notes.invalidMax, { count: note.count });
     case "uncategorized":
-      return t(g.notes.uncategorized, { count: note.count });
+      return plural(locale, g.notes.uncategorized, note.count);
   }
 }

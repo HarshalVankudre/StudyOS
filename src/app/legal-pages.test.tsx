@@ -2,7 +2,13 @@ import { render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { fmt } from "@/lib/i18n/interpolate";
-import { FREE_MONTHLY_CREDITS, FREE_SIGNUP_CREDITS, PRO_MONTHLY_CREDITS } from "@/lib/credits";
+import {
+  ACTION_PRICES,
+  FREE_FAILURES_PER_DAY,
+  PRO_MONTHLY_CREDITS,
+  TRIAL_CREDITS,
+  TURN_CREDIT_CAP,
+} from "@/lib/price-list";
 
 const mocks = vi.hoisted(() => ({ getI18n: vi.fn() }));
 
@@ -21,9 +27,17 @@ describe("legal pages", () => {
   test("terms state the credit rules the code implements", async () => {
     const { container } = render(await TermsPage());
     const text = (container.textContent ?? "").replace(/\s+/g, " ");
-    expect(text).toContain(`New accounts receive ${FREE_SIGNUP_CREDITS} credits`);
-    expect(text).toContain(`below ${FREE_MONTHLY_CREDITS} credits receives ${FREE_MONTHLY_CREDITS} credits`);
+    expect(text).toContain(`New accounts receive a one-time trial of ${TRIAL_CREDITS} credits. The Free plan includes no further credits.`);
     expect(text).toContain(`${PRO_MONTHLY_CREDITS.toLocaleString("en-US")} credits for each paid month`);
+    expect(text).toContain("it does not unlock additional features");
+    expect(text).toContain(
+      `building a workspace (its setup questions included) costs ${ACTION_PRICES.build} credits, one assistant message ${ACTION_PRICES.message} credits, a study kit ${ACTION_PRICES.studyKitPart} credits for each part of your material it processes, and a rendered visual ${ACTION_PRICES.render} credits`,
+    );
+    expect(text).toContain(`never costs more than ${TURN_CREDIT_CAP.free} credits on Free or ${TURN_CREDIT_CAP.pro} credits on Pro`);
+    expect(text).toContain(`up to ${FREE_FAILURES_PER_DAY} failed messages a day`);
+    expect(text).toContain("that action is charged what it actually costs, and the most it can cost is shown before you start it");
+    expect(text).toContain("never more than its price");
+    expect(text).not.toMatch(/calendar month|below 150|Credit consumption scales/i);
     expect(text).toContain("nothing resets the balance");
     expect(text).not.toMatch(/do not stack/i);
   });

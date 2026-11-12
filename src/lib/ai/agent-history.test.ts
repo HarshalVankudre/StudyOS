@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Workspace } from "@/lib/workspace/types";
 
 const db = vi.hoisted(() => ({
   workspace: { findFirst: vi.fn() },
   agentChatMessage: { findMany: vi.fn(), create: vi.fn(), deleteMany: vi.fn() },
-  workspaceChange: { findMany: vi.fn() },
+  workspaceChange: { findMany: vi.fn(), findFirst: vi.fn() },
 }));
 vi.mock("@/lib/db", () => ({ prisma: db }));
 
@@ -12,6 +13,8 @@ import {
   clearChat,
   loadChat,
   loadModelHistory,
+  loadUndoStates,
+  revertStillApplies,
   toHistoryItem,
   undoStates,
   windowHistory,
@@ -121,5 +124,59 @@ describe("persistence (owner-scoped)", () => {
     db.agentChatMessage.deleteMany.mockResolvedValue({ count: 3 });
     expect(await clearChat("user_1", "ws_1")).toBe(3);
     expect(db.agentChatMessage.deleteMany).toHaveBeenCalledWith({ where: { userId: "user_1", workspaceId: "ws_1" } });
+  });
+});
+
+describe("Undo stays offered while the server can honour it", () => {
+  const doc = (agentText: string, other: string): Workspace => ({
+    id: "ws_1",
+    name: "W",
+    pages: [
+      {
+        id: "p1",
+        title: "Notes",
+        blocks: [
+          { id: "b1", type: "paragraph", text: agentText },
+          { id: "b2", type: "paragraph", text: other },
+        ],
+      },
+    ],
+    databases: [],
+  }) as unknown as Workspace;
+  const before = doc("Picture every force.", "Second paragraph.");
+  const after = doc("Draw every force.", "Second paragraph.");
+
+  it("a later edit elsewhere leaves the agent's change revertible", () => {
+    expect(revertStillApplies(before, after, doc("Draw every force.", "Second paragraph, edited."))).toBe(true);
+  });
+
+  it("the QA case: typing kept in place over the agent's edit (its version in a copy) is still revertible", () => {
+    // The student typed into the text the agent had not seen yet; the merge kept their version in place.
+    expect(revertStillApplies(before, after, doc("Picture every force TYPED-DURING-AGENT.", "Second paragraph."))).toBe(true);
+  });
+
+  it("a later change of the very words the agent changed is not", () => {
+    expect(revertStillApplies(before, after, doc("Sketch every force.", "Second paragraph."))).toBe(false);
+  });
+
+  it("the re-check reports the newest change available after unrelated saves", async () => {
+    db.workspace.findFirst
+      .mockResolvedValueOnce({ version: 6 }) // the live version
+      .mockResolvedValueOnce({ data: JSON.stringify(doc("Draw every force.", "Edited later.")) });
+    db.agentChatMessage.findMany.mockResolvedValue([row(2, "assistant", "Done.", { changeId: "c1" })]);
+    db.workspaceChange.findMany.mockResolvedValue([{ id: "c1", kind: "agent", undoneAt: null, afterVersion: 5 }]);
+    db.workspaceChange.findFirst.mockResolvedValue({ beforeData: JSON.stringify(before), afterData: JSON.stringify(after) });
+    expect(await loadUndoStates("user_1", "ws_1")).toEqual({ c1: "available" });
+    expect(db.workspaceChange.findFirst.mock.calls[0][0].where).toMatchObject({ id: "c1", ownerId: "user_1" });
+  });
+
+  it("and unavailable when what was saved since collides with it", async () => {
+    db.workspace.findFirst
+      .mockResolvedValueOnce({ version: 6 })
+      .mockResolvedValueOnce({ data: JSON.stringify(doc("Sketch every force.", "Second paragraph.")) });
+    db.agentChatMessage.findMany.mockResolvedValue([row(2, "assistant", "Done.", { changeId: "c1" })]);
+    db.workspaceChange.findMany.mockResolvedValue([{ id: "c1", kind: "agent", undoneAt: null, afterVersion: 5 }]);
+    db.workspaceChange.findFirst.mockResolvedValue({ beforeData: JSON.stringify(before), afterData: JSON.stringify(after) });
+    expect(await loadUndoStates("user_1", "ws_1")).toEqual({ c1: "unavailable" });
   });
 });

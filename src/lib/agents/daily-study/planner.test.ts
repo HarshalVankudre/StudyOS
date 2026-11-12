@@ -440,6 +440,65 @@ describe("planner: exams", () => {
     expect(typed(null, "Unit 5 assessment", 25)).toEqual({ isExam: true, major: true });
     expect(typed("exam", "Unit 5", 25)).toEqual({ isExam: true, major: true });
   });
+
+  // QA round 3: rows of a generated "Finals Planner" (study sessions) were listed as exams.
+  function finalsPlanner(): Database {
+    return {
+      id: "db-finals",
+      name: "Finals Planner",
+      properties: [
+        { id: "f-name", name: "Session", type: "text" },
+        { id: "f-date", name: "Date", type: "date" },
+        { id: "f-course", name: "Course", type: "select", options: [{ id: "fc-chem", label: "CHEM 210" }] },
+        { id: "f-done", name: "Done", type: "checkbox" },
+      ],
+      rows: [
+        { id: "s1", cells: { "f-name": "SN1/SN2 + E1/E2 mechanism drills", "f-date": addDays(TODAY, 2), "f-course": "fc-chem", "f-done": false } },
+        { id: "s2", cells: { "f-name": "NMR spectroscopy practice", "f-date": addDays(TODAY, 3), "f-course": "fc-chem", "f-done": false } },
+        { id: "s3", cells: { "f-name": "CHEM 210 final exam", "f-date": addDays(TODAY, 20), "f-course": "fc-chem", "f-done": false } },
+      ],
+      views: [{ id: "t", name: "Table", type: "table" }],
+    };
+  }
+
+  it("never makes a row an exam because of the name of its list", () => {
+    const db = finalsPlanner();
+    expect(classifyExam(db, db.rows[0], "SN1/SN2 + E1/E2 mechanism drills", null).isExam).toBe(false);
+    expect(classifyExam(db, db.rows[1], "NMR spectroscopy practice", null).isExam).toBe(false);
+    // A row that says it is an exam still is one, wherever it sits.
+    expect(classifyExam(db, db.rows[2], "CHEM 210 final exam", null)).toEqual({ isExam: true, major: true });
+
+    const result = plan([workspace({ pages: [trackerPage()], databases: [db] })]);
+    expect(result.details.exams.map((e) => e.title)).toEqual(["CHEM 210 final exam"]);
+    // The study sessions are planned as work, not exam countdowns.
+    expect(result.items.some((i) => i.title.includes("mechanism drills") && i.kind === "exam")).toBe(false);
+  });
+
+  it("reads an exam from the grading category a row counts in", () => {
+    const db: Database = {
+      id: "graded",
+      name: "Coursework",
+      properties: [
+        { id: "title", name: "Item", type: "text" },
+        { id: "due", name: "Due", type: "date" },
+        { id: "course", name: "Course", type: "select", options: [{ id: "phys", label: "PHYS 201" }] },
+      ],
+      rows: [
+        { id: "m", cells: { title: "Sitting 2 (ch. 7–10)", due: addDays(TODAY, 5), course: "phys" } },
+        { id: "p", cells: { title: "Problem Set 7", due: addDays(TODAY, 5), course: "phys" } },
+      ],
+      views: [{ id: "t", name: "Table", type: "table" }],
+      grading: {
+        categories: [
+          { id: "cat-mid", course: "phys", name: "Midterms", weight: 40, expectedCount: 2 },
+          { id: "cat-ps", course: "phys", name: "Problem sets", weight: 20 },
+        ],
+        assign: { m: "cat-mid" },
+      },
+    };
+    expect(classifyExam(db, db.rows[0], "Sitting 2 (ch. 7–10)", null).isExam).toBe(true);
+    expect(classifyExam(db, db.rows[1], "Problem Set 7", null).isExam).toBe(false);
+  });
 });
 
 describe("planner: knowing when a plan is out of date", () => {

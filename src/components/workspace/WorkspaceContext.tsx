@@ -2,9 +2,9 @@
 
 import { createContext, useContext } from "react";
 import type { Workspace } from "@/lib/workspace/types";
-import type { SaveStatus, UpdateOptions } from "./workspace-sync";
+import type { MergeNotice, SaveStatus, UpdateOptions } from "./workspace-sync";
 
-export type { SaveStatus, UpdateOptions };
+export type { MergeNotice, SaveStatus, UpdateOptions };
 
 export interface WorkspaceCtx {
   workspace: Workspace;
@@ -23,10 +23,12 @@ export interface WorkspaceCtx {
    * For an edit computed from the value it starts from (a flashcard grade, a
    * quiz score, a counter), pass `{ rebase: "rerun" }`: the mutator itself is
    * run again on the newer version. Such a mutator must also be idempotent
-   * (it can run on a document that already contains its effect, e.g. when a
-   * save's reply was lost): carry a natural key such as the answer's
-   * timestamp and do nothing when it is already there. See
-   * study/gradeEdit.ts for the pattern.
+   * and independent of the order devices sync in (it can run on a document
+   * that already contains its effect, or a later one's): carry a natural key
+   * such as the answer's timestamp and do nothing when it is already there.
+   * Give it a `replay` description too, so it is re-run (not patched) when
+   * recovered from the draft of a closed tab. See study/gradeEdit.ts for the
+   * pattern.
    */
   update: (mutator: (draft: Workspace) => void, options?: UpdateOptions) => void;
   status: SaveStatus;
@@ -58,6 +60,16 @@ export interface WorkspaceCtx {
   getVersion?: () => number | null;
   /** Try saving again now (the Retry button). */
   retrySave?: () => void;
+  /**
+   * What the banner at the top currently reports, or null: the last time this
+   * tab's edits met changes made elsewhere and something other than "saved as
+   * typed" happened. `report.overwritten`: values from elsewhere (the AI
+   * agent, another device) that the student's edits replaced; `replaced`:
+   * values this tab had saved that were changed elsewhere afterwards;
+   * `report.unapplied`: recovered values that were not applied; each with
+   * its path, the student's value (`mine`) and the other one (`theirs`).
+   */
+  merge?: MergeNotice | null;
 }
 
 const Ctx = createContext<WorkspaceCtx | null>(null);

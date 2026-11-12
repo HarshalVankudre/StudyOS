@@ -31,8 +31,10 @@ import {
   reserveCredits,
   settleCreditHold,
   usageToCredits,
+  usageToUsd,
 } from "@/lib/credits";
-import { buildCreditCost } from "@/lib/credits-info";
+import { buildQuote, buildTypicalUsd, chargeForCompleted, chargeForPartial } from "@/lib/price-list";
+import { belowBuildMinimumMessage, outOfCreditsMessage } from "@/lib/credit-messages";
 import {
   checkUsageLimit,
   claimOutcomeSlot,
@@ -143,9 +145,12 @@ export async function POST(request: Request) {
     async start(controller) {
       let closed = false;
       let ticker: ReturnType<typeof setInterval> | null = null;
-      // Tokens consumed so far: billed only on success, or (what was really
-      // consumed) on cancel. A failed generation is never billed.
+      // Tokens consumed so far. A build is charged its price on success
+      // (its real cost when higher), the share of its price it completed on
+      // cancel (lib/price-list.ts), and nothing when it fails.
       let usage: TokenUsage = NO_USAGE;
+      // The model the student's plan runs (set before any model work).
+      let model = "";
 
       const sendFinal = (event: GenerationEvent) => {
         if (closed) return;
@@ -187,22 +192,23 @@ export async function POST(request: Request) {
       try {
         const { prompt, answers } = parsed.data;
 
-        // What a build costs on the model that will run it (typical and at
-        // most, from its token rates). A build starts only with about one
-        // typical build's worth of credits: a run is charged at most the
+        // What a build costs on the model that will run it: its price
+        // (lib/price-list.ts, setup questions included), or the model's real
+        // cost when that is higher, at most `cost.max`. A build starts only
+        // when the balance covers its price: a run is charged at most the
         // remaining balance, so a near-empty account would otherwise get a
         // full build almost free.
-        const model = modelForPlan(await getUserPlan());
-        const cost = buildCreditCost(model);
+        model = modelForPlan(await getUserPlan());
+        const cost = buildQuote(model);
         const balance = await getCreditBalance(userId);
-        if (balance < cost.typical) {
+        if (balance < cost.price) {
           send({
             type: "error",
             code: "out_of_credits",
             message:
               balance <= 0
-                ? T.credits.outGenerate
-                : fmt(T.credits.belowGenerateMinimum, { min: cost.typical }),
+                ? outOfCreditsMessage(T, "generate")
+                : belowBuildMinimumMessage(T, cost.price),
           });
           finish();
           return;
@@ -243,21 +249,21 @@ export async function POST(request: Request) {
           return;
         }
 
-        // Reserve up to the most a build can cost (at least the typical
-        // cost) before any model work, so parallel builds cannot all start on
-        // the same balance and a large build is covered whenever the balance
-        // is. Settled to the real cost once the work is done; given back when
-        // it is free (a failure).
+        // Reserve the most a build can cost (exactly its price on a model
+        // whose real cost stays within it) before any model work, so
+        // parallel builds cannot all start on the same balance. Settled to
+        // the charge once the work is done; given back when it is free (a
+        // failure).
         hold = await reserveCredits(userId, {
           estimate: cost.max,
-          min: cost.typical,
+          min: cost.price,
           reason: "generate",
         });
         if (!hold) {
           send({
             type: "error",
             code: "out_of_credits",
-            message: fmt(T.credits.belowGenerateMinimum, { min: cost.typical }),
+            message: belowBuildMinimumMessage(T, cost.price),
           });
           finish();
           return;
@@ -364,9 +370,12 @@ export async function POST(request: Request) {
         // Last gate before anything irreversible: a cancelled run is never saved.
         throwIfCancelled();
         const workspaceId = await saveNewWorkspace(workspace);
-        // Charge only now that the student has a workspace: the real cost,
-        // through the hold.
-        const creditsCost = await settleCreditHold(hold, usageToCredits(usage)).catch((error) => {
+        // Charge only now that the student has a workspace: the build's
+        // price (its real cost when higher, never above cost.max).
+        const creditsCost = await settleCreditHold(
+          hold,
+          chargeForCompleted(cost, usageToCredits(usage, model)),
+        ).catch((error) => {
           reportError(error, { source: "api", route: "/api/generate", method: "POST", userId });
           return 0;
         });
@@ -380,10 +389,12 @@ export async function POST(request: Request) {
         finish();
       } catch (error) {
         if (error instanceof GenerationCancelledError || signal.aborted) {
-          // Stopped by the student: nothing saved, and only the tokens the
-          // model really consumed before the stop are billed.
+          // Stopped by the student: nothing saved, and only the share of the
+          // price for the work done before the stop is billed (its model
+          // spend against a typical build's), never more than the price.
+          // When no model ran, nothing.
           const charged = hold
-            ? await settleCreditHold(hold, usageToCredits(usage), {
+            ? await settleCreditHold(hold, cancelledBuildCredits(usage, model), {
                 reason: "generate_cancelled",
               }).catch(() => 0)
             : 0;
@@ -428,6 +439,18 @@ export async function POST(request: Request) {
       "X-Content-Type-Options": "nosniff",
     },
   });
+}
+
+/**
+ * What a stopped build is charged (lib/price-list.ts chargeForPartial): the
+ * share of its price that its model spend is of a typical build's on this
+ * model, never more than the price; its real cost when that is already
+ * higher (an expensive model); nothing when no model ran.
+ */
+function cancelledBuildCredits(usage: TokenUsage, model: string): number {
+  const real = usageToCredits(usage, model);
+  if (real <= 0) return 0;
+  return chargeForPartial(buildQuote(model), real, usageToUsd(usage, model) / buildTypicalUsd(model));
 }
 
 function componentDetail(

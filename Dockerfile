@@ -36,6 +36,10 @@ ARG NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
 # render sandbox switched off and a warning in the startup log (check-env.cjs).
 ARG ASSETS_BUCKET
 ENV ASSETS_BUCKET=$ASSETS_BUCKET
+# One id per build (next.config.ts `deploymentId`): lets a browser tab that
+# still runs the previous build be told apart during a rolling deploy.
+ARG DEPLOYMENT_VERSION
+ENV DEPLOYMENT_VERSION=$DEPLOYMENT_VERSION
 ENV NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY \
     NEXT_PUBLIC_CLERK_SIGN_IN_URL=$NEXT_PUBLIC_CLERK_SIGN_IN_URL \
     NEXT_PUBLIC_CLERK_SIGN_UP_URL=$NEXT_PUBLIC_CLERK_SIGN_UP_URL \

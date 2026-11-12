@@ -361,6 +361,27 @@ export interface Flashcard {
   learningStep?: number;
   /** Exact ISO datetime the card is due (minutes-precise for learning steps). */
   dueTime?: string;
+  /**
+   * The card's most recent reviews, oldest first; `id` is the ISO datetime of
+   * the answer. With `reviewBase` this makes recording a review independent
+   * of the order devices sync in (lib/study/review-log.ts).
+   */
+  reviews?: { id: string; grade: "again" | "hard" | "good" | "easy" }[];
+  /** The scheduling fields as they were before the oldest entry of `reviews`. */
+  reviewBase?: Pick<
+    Flashcard,
+    | "ease"
+    | "intervalDays"
+    | "reps"
+    | "dueAt"
+    | "lastReviewedAt"
+    | "stability"
+    | "difficulty"
+    | "state"
+    | "lapses"
+    | "learningStep"
+    | "dueTime"
+  >;
   /** Where this card came from in the student's own material. */
   source?: SourceRef;
 }
@@ -395,7 +416,13 @@ export interface QuizQuestion {
   topic?: string;
   source?: SourceRef;
   /** Running record of how the student has done on this question. */
-  stats?: { attempts: number; correct: number; lastAnsweredAt?: string };
+  stats?: {
+    attempts: number;
+    correct: number;
+    lastAnsweredAt?: string;
+    /** Moments (ISO) of the most recent answers counted, so each counts once. */
+    recent?: string[];
+  };
 }
 
 export interface QuizAttempt {

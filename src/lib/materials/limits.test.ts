@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { studyKitCost } from "@/lib/credits-info";
+import { studyKitQuote } from "@/lib/price-list";
 import {
   kitTargets,
   planRun,
@@ -90,13 +90,9 @@ describe("kitTargets and cost", () => {
     expect(kitTargets("few", { notes: false, flashcards: false, quiz: true }, 100).questions).toBe(3);
   });
 
-  it("states a typical cost and a hard cap per section", () => {
-    expect(studyKitCost(3)).toEqual({ estimate: 27, max: 60, minBalance: 27 });
-    expect(studyKitCost(0)).toEqual({ estimate: 0, max: 0, minBalance: 0 });
-  });
-
-  it("needs at least one section's full cap to start, so a few credits never buy a section", () => {
-    expect(studyKitCost(1)).toMatchObject({ estimate: 9, max: 20, minBalance: 20 });
-    expect(studyKitCost(2).minBalance).toBe(20);
+  it("a run costs the part price for each section it reads (lib/price-list.ts)", () => {
+    const run = planRun(Array.from({ length: 30 }, () => 2900));
+    expect(studyKitQuote(run.sections.length, "claude-haiku-5-5")).toEqual({ list: 80, price: 80, max: 80 });
+    expect(studyKitQuote(0, "claude-haiku-5-5")).toEqual({ list: 0, price: 0, max: 0 });
   });
 });

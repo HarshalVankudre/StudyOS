@@ -6,16 +6,25 @@
  */
 import type { Block, Page } from "@/lib/workspace/types";
 import { fmt } from "@/lib/i18n/interpolate";
+import { plural, type PluralForms } from "@/lib/i18n/plural";
 import type { KitResult } from "./types";
 
 export interface KitPageLabels {
   pageTitle: string; // "{title} · study kit"
-  summary: string; // "{cards} flashcards and {questions} …"
+  summary: string; // "Made from {title}, {range}: {cards} and {questions}."
   summaryNotesOnly: string;
   pagesRange: string; // "pages {from}–{to}"
   notesHeading: string;
   flashcardsHeading: string;
   quizHeading: string;
+  /**
+   * The counts with their nouns ("10 flashcards", "5 practice questions"),
+   * filled into {cards} and {questions}. Without them the bare numbers go in.
+   */
+  cardsCount?: PluralForms;
+  questionsCount?: PluralForms;
+  /** Locale for the plural rules and number format of the counts. */
+  locale?: string;
 }
 
 export function buildKitPage(
@@ -24,8 +33,15 @@ export function buildKitPage(
   newId: () => string = () => crypto.randomUUID(),
 ): Page {
   const blocks: Block[] = [];
+  const locale = labels.locale ?? "en";
   const range = fmt(labels.pagesRange, { from: result.from, to: result.to });
-  const counts = { cards: result.cards.length, questions: result.questions.length, title: result.title, range };
+  const counted = (forms: PluralForms | undefined, n: number) => (forms ? plural(locale, forms, n) : n);
+  const counts = {
+    cards: counted(labels.cardsCount, result.cards.length),
+    questions: counted(labels.questionsCount, result.questions.length),
+    title: result.title,
+    range,
+  };
   blocks.push({
     id: newId(),
     type: "callout",

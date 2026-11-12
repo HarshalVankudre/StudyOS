@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import type { PreparedQuestion, QuizAnswer } from "@/lib/study/quiz";
 import { usePendingFieldRegistry } from "../editor/pendingFields";
 
@@ -48,12 +48,24 @@ export function loadExamProgress(key: string): ExamProgress | null {
   }
 }
 
+/** Fired on this window when an exam's kept progress is written or forgotten. */
+export const EXAM_PROGRESS_EVENT = "studyos:exam-progress";
+
+function announce(key: string): void {
+  try {
+    window.dispatchEvent(new CustomEvent(EXAM_PROGRESS_EVENT, { detail: { key } }));
+  } catch {
+    // No window (tests without DOM): nothing listens.
+  }
+}
+
 export function clearExamProgress(key: string): void {
   try {
     storage()?.removeItem(key);
   } catch {
     // ignore
   }
+  announce(key);
 }
 
 function writeExamProgress(key: string, progress: Omit<ExamProgress, "v" | "savedAt">): void {
@@ -62,6 +74,63 @@ function writeExamProgress(key: string, progress: Omit<ExamProgress, "v" | "save
   } catch {
     // Storage full or blocked: the leave prompt still protects the exam.
   }
+  announce(key);
+}
+
+/** How far an exam kept on this device has got. */
+export interface ExamInProgress {
+  answered: number;
+  total: number;
+}
+
+function rawProgress(key: string | null): string | null {
+  if (!key) return null;
+  try {
+    return storage()?.getItem(key) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * An unfinished exam of this quiz kept on this device (a closed tab, a
+ * reload), or null: what the quiz block and the study hub show as "Exam in
+ * progress" with a way back in. Read after mount (storage is per device, so
+ * the server render never claims one) and again whenever the progress is
+ * written, forgotten, changed in another tab, or the tab comes back.
+ */
+export function useExamInProgress(key: string | null): ExamInProgress | null {
+  const subscribe = useCallback(
+    (changed: () => void) => {
+      if (!key) return () => {};
+      const onLocal = (ev: Event) => {
+        if ((ev as CustomEvent<{ key?: string }>).detail?.key === key) changed();
+      };
+      const onStorage = (ev: StorageEvent) => {
+        if (ev.key === null || ev.key === key) changed();
+      };
+      const onVisible = () => {
+        if (document.visibilityState === "visible") changed();
+      };
+      window.addEventListener(EXAM_PROGRESS_EVENT, onLocal);
+      window.addEventListener("storage", onStorage);
+      document.addEventListener("visibilitychange", onVisible);
+      return () => {
+        window.removeEventListener(EXAM_PROGRESS_EVENT, onLocal);
+        window.removeEventListener("storage", onStorage);
+        document.removeEventListener("visibilitychange", onVisible);
+      };
+    },
+    [key],
+  );
+  // The raw stored text is the snapshot (a string compares by value); the
+  // server render has none.
+  const raw = useSyncExternalStore(subscribe, () => rawProgress(key), () => null);
+  return useMemo(() => {
+    if (!key || raw === null) return null;
+    const saved = loadExamProgress(key);
+    return saved ? { answered: saved.answers.length, total: saved.questions.length } : null;
+  }, [key, raw]);
 }
 
 /**

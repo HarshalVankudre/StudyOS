@@ -30,10 +30,12 @@ model Workspace {
   icon      String?
   data      String
   version   Int       @default(1)
-  // The editor's recent save ids and the versions they produced (a small
-  // bounded JSON list, lib/workspace/save-ids.ts): lets a tab whose save
-  // landed without its reply (or a draft left by a closed tab) recognise
-  // its own write instead of applying it again over newer changes.
+  // The save log (JSON, lib/workspace/save-ids.ts): for each editor tab its
+  // latest save that landed and the version it produced, plus the version the
+  // log was last written at. Written in the same statement as `data`, so a
+  // tab whose save landed without its reply (or a draft left by a closed tab)
+  // can tell for certain, and is told when it cannot. No schema change since
+  // 20261114020000_workspace_save_ids: the column only holds another format.
   saveIds   String    @default("")
   deletedAt DateTime?
   createdAt DateTime  @default(now())

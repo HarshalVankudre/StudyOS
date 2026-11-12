@@ -10,6 +10,7 @@ import { useWorkspace } from "../WorkspaceContext";
 import { DraftInput } from "../editor/DraftInput";
 import { QuizEditor } from "./QuizEditor";
 import { QuizSession, type QuizMode } from "./QuizSession";
+import { examKey, useExamInProgress } from "./examProgress";
 
 /**
  * A practice quiz in a page: take it in practice or exam mode (never limited),
@@ -17,11 +18,13 @@ import { QuizSession, type QuizMode } from "./QuizSession";
  * block through the workspace update path.
  */
 export function QuizBlock({ pageId, block }: { pageId: string; block: QuizBlockData }) {
-  const { update } = useWorkspace();
+  const { update, workspace } = useWorkspace();
   const { dict, t, plural } = useI18n();
   const Q = dict.quiz;
   const [session, setSession] = useState<QuizMode | null>(null);
   const [editing, setEditing] = useState(false);
+  // An exam left unfinished on this device (closed tab, reload): offer it back.
+  const inProgress = useExamInProgress(examKey(workspace.id, pageId, block.id));
 
   const playable = block.questions.filter(isPlayableQuestion).length;
   const attempts = block.attempts ?? [];
@@ -69,7 +72,9 @@ export function QuizBlock({ pageId, block }: { pageId: string; block: QuizBlockD
         />
         <div className="flex flex-wrap items-center gap-1.5 font-mono text-[11px] text-ink-soft">
           <Chip label={plural(dict.counts.questions, playable)} />
-          {last ? (
+          {inProgress && playable > 0 ? (
+            <Chip label={Q.examInProgress} tone="progress" />
+          ) : last ? (
             <Chip label={t(Q.lastScore, { percent: percent(last.score, last.total) })} tone="score" />
           ) : (
             playable > 0 && <Chip label={Q.notTaken} />
@@ -79,8 +84,24 @@ export function QuizBlock({ pageId, block }: { pageId: string; block: QuizBlockD
       </div>
 
       <div data-print="hide" className="flex flex-col gap-2 px-3 py-3 sm:px-4">
+        {inProgress && playable > 0 && (
+          <p className="text-sm font-semibold text-ink" data-testid="quiz-exam-in-progress">
+            {t(Q.examInProgressAnswered, { answered: inProgress.answered, total: inProgress.total })}
+          </p>
+        )}
         <div className="flex flex-wrap items-center gap-2">
-          {playable > 0 ? (
+          {playable > 0 && inProgress ? (
+            <>
+              <button onClick={() => setSession("exam")} className={primary}>
+                <ClipboardCheck className="size-4" aria-hidden />
+                {Q.resumeExam}
+              </button>
+              <button onClick={() => setSession("practice")} className={secondary}>
+                <Dumbbell className="size-4" aria-hidden />
+                {Q.practice}
+              </button>
+            </>
+          ) : playable > 0 ? (
             <>
               <button onClick={() => setSession("practice")} className={primary}>
                 <Dumbbell className="size-4" aria-hidden />
@@ -122,10 +143,12 @@ export function QuizBlock({ pageId, block }: { pageId: string; block: QuizBlockD
   );
 }
 
-function Chip({ label, tone }: { label: string; tone?: "score" }) {
+function Chip({ label, tone }: { label: string; tone?: "score" | "progress" }) {
   const cls =
     tone === "score"
       ? "bg-lime-faint text-lime-deep ring-lime/30"
-      : "bg-hover text-ink-soft ring-line-strong";
+      : tone === "progress"
+        ? "bg-amber-400/15 text-amber-300 ring-amber-500/40 [.light_&]:text-amber-700"
+        : "bg-hover text-ink-soft ring-line-strong";
   return <span className={`rounded-full px-2 py-0.5 ring-1 ring-inset ${cls}`}>{label}</span>;
 }

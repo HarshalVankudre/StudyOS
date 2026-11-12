@@ -63,16 +63,65 @@ describe.skipIf(!enabled)("credits on Postgres", () => {
   });
 
   it("40 concurrent charges never drive the balance negative or over-charge", async () => {
-    const { chargeCredits, getCreditBalance, FREE_SIGNUP_CREDITS } = await import("./credits");
-    expect(await getCreditBalance(userId)).toBe(FREE_SIGNUP_CREDITS);
+    const { chargeCredits, getCreditBalance, TRIAL_CREDITS } = await import("./credits");
+    expect(await getCreditBalance(userId)).toBe(TRIAL_CREDITS);
 
     const charged = await Promise.all(
       Array.from({ length: 40 }, () => chargeCredits(userId, 13, "agent")),
     );
 
     const total = charged.reduce((a, b) => a + b, 0);
-    expect(total).toBe(FREE_SIGNUP_CREDITS); // 40 × 13 = 520 asked, 300 available
+    expect(total).toBe(TRIAL_CREDITS); // 40 × 13 = 520 asked, 300 available
     expect(await balanceAndLedger(userId)).toEqual({ balance: 0, ledger: 0 });
+  }, 60_000);
+
+  it("a new account gets exactly one trial grant, even when first seen concurrently", async () => {
+    const prisma = await db();
+    const { getCreditBalance, reserveCredits, TRIAL_CREDITS } = await import("./credits");
+    const id = user("trial");
+    const reads = await Promise.all([
+      ...Array.from({ length: 12 }, () => getCreditBalance(id)),
+      reserveCredits(id, { estimate: 1, reason: "agent" }).then(() => 0),
+    ]);
+    expect(reads.filter((b) => b !== 0).every((b) => b === TRIAL_CREDITS || b === TRIAL_CREDITS - 1)).toBe(true);
+    expect(await prisma.creditLedger.count({ where: { userId: id, reason: "free_signup" } })).toBe(1);
+    expect(await prisma.creditAccount.count({ where: { userId: id } })).toBe(1);
+  }, 60_000);
+
+  it("a depleted free account is never topped up, whatever month it is and whatever it got before", async () => {
+    const prisma = await db();
+    const { chargeCredits, getCreditBalance, grantCredits, TRIAL_CREDITS } = await import("./credits");
+    const id = user("notopup");
+    await getCreditBalance(id);
+    // A top-up the previous code wrote, in an earlier month.
+    await grantCredits(id, 150, "free_monthly", `free_monthly:${id}:2026-10`);
+    await chargeCredits(id, TRIAL_CREDITS + 150 - 4, "agent");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      for (const at of ["2026-12-01T00:00:05Z", "2027-01-01T00:00:00Z", "2027-07-31T23:59:00Z"]) {
+        vi.setSystemTime(new Date(at));
+        expect(await getCreditBalance(id)).toBe(4);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(await prisma.creditLedger.count({ where: { userId: id, reason: "free_monthly" } })).toBe(1);
+    expect(await balanceAndLedger(id)).toEqual({ balance: 4, ledger: 4 });
+  }, 60_000);
+
+  it("a build hold reserves the list price and settles to it, or goes back in full", async () => {
+    const { getCreditBalance, releaseCreditHold, reserveCredits, settleCreditHold } = await import("./credits");
+    const { buildQuote, chargeForCompleted } = await import("./price-list");
+    const id = user("listprice");
+    const quote = buildQuote("claude-haiku-5-5");
+    const start = await getCreditBalance(id);
+    const settled = await reserveCredits(id, { estimate: quote.max, min: quote.price, reason: "generate" });
+    expect(settled?.amount).toBe(30);
+    expect(await settleCreditHold(settled!, chargeForCompleted(quote, 2))).toBe(30);
+    expect(await releaseCreditHold(settled!)).toBe(false);
+    const failed = await reserveCredits(id, { estimate: quote.max, min: quote.price, reason: "generate" });
+    expect(await releaseCreditHold(failed!)).toBe(true);
+    expect(await balanceAndLedger(id)).toEqual({ balance: start - 30, ledger: start - 30 });
   }, 60_000);
 
   it("a keyed clawback applied concurrently happens once", async () => {

@@ -1,8 +1,8 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Workspace } from "@/lib/workspace/types";
-import { WorkspaceEditor } from "./WorkspaceEditor";
+import { saveLabelStatus, WorkspaceEditor } from "./WorkspaceEditor";
 
 const actions = vi.hoisted(() => ({
   saveWorkspaceAction: vi.fn(),
@@ -257,6 +257,7 @@ describe("WorkspaceEditor save safety", () => {
         expect.objectContaining({ icon: "📚!" }),
         2,
         expect.any(String), // the save id
+        expect.any(String), // the tab id
       ),
     );
     expect(await screen.findByRole("status", { name: "Saved" })).toBeInTheDocument();
@@ -269,6 +270,7 @@ describe("WorkspaceEditor save safety", () => {
           "workspace-1",
           expect.objectContaining({ icon: "🧪" }),
           3,
+          expect.any(String),
           expect.any(String),
         ),
       { timeout: 3000 },
@@ -296,6 +298,7 @@ describe("WorkspaceEditor save safety", () => {
           expect.objectContaining({ name: "My workspace 2026" }),
           2,
           expect.any(String),
+          expect.any(String),
         ),
       { timeout: 3000 },
     );
@@ -308,9 +311,55 @@ describe("WorkspaceEditor save safety", () => {
     renderEditor();
     await user.type(screen.getByRole("textbox", { name: "Test workspace" }), "1");
 
-    const retry = await screen.findByRole("button", { name: "Retry" }, { timeout: 2000 });
+    // The header's Retry (wide screens) and the phone's line under the header.
+    const [retry] = await screen.findAllByRole("button", { name: "Retry" }, { timeout: 2000 });
     await user.click(retry);
     expect(await screen.findByRole("status", { name: "Saved" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+
+  it("says Offline in words on phones (a line under the header with Retry)", async () => {
+    const user = userEvent.setup();
+    const online = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    try {
+      actions.saveWorkspaceAction.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+      renderEditor();
+      await user.type(screen.getByRole("textbox", { name: "Test workspace" }), "1");
+      const strip = await screen.findByTestId("save-strip", undefined, { timeout: 3000 });
+      expect(strip).toHaveTextContent("Offline · changes kept on this device");
+      expect(strip).toHaveClass("lg:hidden");
+      expect(within(strip).getByRole("button", { name: "Retry" })).toBeInTheDocument();
+      expect(screen.getByRole("status", { name: "Offline · changes kept on this device" })).toBeInTheDocument();
+    } finally {
+      online.mockRestore();
+    }
+  });
+
+  it("never says Saved while a field still holds a value not written yet", async () => {
+    const user = userEvent.setup();
+    renderEditor();
+    expect(screen.getByRole("status", { name: "Saved" })).toBeInTheDocument();
+    await user.type(screen.getByRole("textbox", { name: "Test workspace" }), "!");
+    // Typed but not written yet (it commits after a pause or on leaving the field).
+    expect(screen.getByRole("status", { name: "Not saved yet" })).toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: "Saved" })).toBeNull();
+    await user.tab();
+    expect(await screen.findByRole("status", { name: "Saved" }, { timeout: 3000 })).toBeInTheDocument();
+    // What was saved (the save's other arguments belong to the sync engine).
+    expect(actions.saveWorkspaceAction.mock.lastCall?.slice(0, 2)).toEqual([
+      "workspace-1",
+      expect.objectContaining({ name: "Test workspace!" }),
+    ]);
+  });
+});
+
+describe("saveLabelStatus", () => {
+  it("turns Saved and Saving into not-saved while a field holds a value", () => {
+    expect(saveLabelStatus("saved", true)).toBe("held");
+    expect(saveLabelStatus("saving", true)).toBe("held");
+    expect(saveLabelStatus("saved", false)).toBe("saved");
+    // Offline and failed saves keep saying so.
+    expect(saveLabelStatus("offline", true)).toBe("offline");
+    expect(saveLabelStatus("error", true)).toBe("error");
   });
 });

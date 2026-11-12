@@ -40,6 +40,7 @@ import {
   clearCopiedCategoryWeights,
   matchCategory,
   rowTypeLabels,
+  settleDoubleWeights,
   upsertCategory,
 } from "@/lib/grades/categories";
 import { matchAssessments } from "./assessment-match";
@@ -177,6 +178,8 @@ function addCategories(workspace: Workspace, db: Database, groups: SyllabusAsses
     if (twin) db.rows = db.rows.filter((row) => row !== twin);
   }
   clearCopiedCategoryWeights(db, columns, courseOf);
+  // "Two midterms, 20% each" as a category and again on the midterm rows would count twice.
+  settleDoubleWeights(db, columns, courseOf);
 }
 
 /** The course key when the list can only mean one course. */

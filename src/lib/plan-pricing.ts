@@ -11,19 +11,28 @@
  *
  * The configured settings are only the fallback for when billing is off (or
  * Stripe has never answered yet, and then nothing is offered for sale):
- *   STUDYOS_PRO_MONTHLY_PRICE  USD a month for monthly Pro   (default 5)
- *   STUDYOS_PRO_ANNUAL_PRICE   USD a year for annual Pro     (no default)
- * `proPricing` (synchronous) returns just those settings.
+ *   STUDYOS_PRO_MONTHLY_PRICE  USD a month for monthly Pro   (default 7.99)
+ *   STUDYOS_PRO_ANNUAL_PRICE   USD a year for annual Pro     (default 39.99)
+ * The defaults are the price list's (lib/price-list.ts). `proPricing`
+ * (synchronous) returns just those settings. While billing is off both are
+ * shown (nothing is sold); with billing on and Stripe unreadable, only the
+ * monthly figure is shown, since no annual price may exist in Stripe.
  *
- * Credit packs are priced in lib/credits.ts (CREDIT_PACK_PRICE_USD), which
- * is also what their checkout charges.
+ * Existing subscribers keep the Stripe price they subscribed at: nothing here
+ * changes what they are charged.
+ *
+ * Credit packs are priced in lib/price-list.ts (CREDIT_PACK_PRICE_USD),
+ * which is also what their checkout charges.
  */
 import { reportError } from "@/lib/ops/report-error";
+import { PRO_FALLBACK_ANNUAL_USD, PRO_FALLBACK_MONTHLY_USD } from "@/lib/price-list";
 
 type Env = Record<string, string | undefined>;
 
 /** Pro's monthly price when STUDYOS_PRO_MONTHLY_PRICE is not set. */
-export const DEFAULT_PRO_MONTHLY_USD = 5;
+export const DEFAULT_PRO_MONTHLY_USD = PRO_FALLBACK_MONTHLY_USD;
+/** Pro's yearly price when STUDYOS_PRO_ANNUAL_PRICE is not set. */
+export const DEFAULT_PRO_ANNUAL_USD = PRO_FALLBACK_ANNUAL_USD;
 
 /** A configured USD amount: positive, at most two decimals, below 10,000. */
 export function parseUsd(raw: string | undefined): number | null {
@@ -44,8 +53,8 @@ export interface AnnualOffer {
 
 export interface ProPricing {
   monthlyUsd: number;
-  /** Null when annual billing is not offered in this deployment. */
-  annual: AnnualOffer | null;
+  /** The configured yearly price (shown while billing is off; sold only through Stripe). */
+  annual: AnnualOffer;
 }
 
 /** Can annual Pro be bought here? Mirrors isAnnualBillingAvailable (lib/stripe.ts). */
@@ -59,8 +68,7 @@ const savingsPercent = (yearly: number, monthly: number) =>
 /** The CONFIGURED prices (the fallback; see the header). Pure. */
 export function proPricing(env: Env = process.env): ProPricing {
   const monthlyUsd = parseUsd(env.STUDYOS_PRO_MONTHLY_PRICE) ?? DEFAULT_PRO_MONTHLY_USD;
-  const annualTotal = parseUsd(env.STUDYOS_PRO_ANNUAL_PRICE);
-  if (!annualTotal || !annualCheckoutConfigured(env)) return { monthlyUsd, annual: null };
+  const annualTotal = parseUsd(env.STUDYOS_PRO_ANNUAL_PRICE) ?? DEFAULT_PRO_ANNUAL_USD;
   const perMonthUsd = Math.round((annualTotal / 12) * 100) / 100;
   return {
     monthlyUsd,
@@ -68,15 +76,30 @@ export function proPricing(env: Env = process.env): ProPricing {
   };
 }
 
-/** "$5", "4,17 €", "¥800" … an amount in `currency`, in the visitor's locale. */
+/** Right-to-left languages (of the ten, Arabic). */
+const RTL_LOCALE = /^(ar|he|fa|ur)(\b|-|_)/i;
+
+/**
+ * "$5", "4,17 €", "¥800" … an amount in `currency`, in the visitor's locale.
+ *
+ * In a right-to-left language a Latin currency sign ("US$") is wrapped in a
+ * left-to-right isolate: without it the bidi algorithm splits it and Arabic
+ * pages read "$US 5". With it the amount reads "5 US$" in Arabic order
+ * (shown as "US$ 5"), as Arabic price tags do.
+ */
 export function formatPrice(amount: number, currency: string, locale: string): string {
   const whole = Number.isInteger(amount);
-  return new Intl.NumberFormat(locale, {
+  const format = new Intl.NumberFormat(locale, {
     style: "currency",
     currency,
     minimumFractionDigits: whole ? 0 : undefined,
     maximumFractionDigits: whole ? 0 : undefined,
-  }).format(amount);
+  });
+  if (!RTL_LOCALE.test(locale)) return format.format(amount);
+  return format
+    .formatToParts(amount)
+    .map((part) => (part.type === "currency" && /[A-Za-z$]/.test(part.value) ? `⁦${part.value}⁩` : part.value))
+    .join("");
 }
 
 /** "$5", "$4.17", "5 $", "US$5" … in the visitor's locale (always USD). */
@@ -206,7 +229,17 @@ export async function getProPricing(
     source: "configured",
   };
   const monthlyId = env.STRIPE_PRICE_PRO;
-  if (!env.STRIPE_SECRET_KEY || !monthlyId) return fallback;
+  if (!env.STRIPE_SECRET_KEY || !monthlyId) {
+    // Billing is off: show both configured prices (nothing is offered).
+    return {
+      ...fallback,
+      annual: {
+        total: { amount: configured.annual.totalUsd, currency: "USD" },
+        perMonth: { amount: configured.annual.perMonthUsd, currency: "USD" },
+        savingsPercent: configured.annual.savingsPercent,
+      },
+    };
+  }
 
   const fetchPrice = opts.fetchPrice ?? defaultFetcher;
   const monthlyPrice = await cachedPrice(monthlyId, fetchPrice, now);

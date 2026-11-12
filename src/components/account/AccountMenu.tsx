@@ -11,6 +11,8 @@ import { balanceReadStarted, reportCreditsBalance, useLiveBalance } from "@/lib/
 interface AccountSummary {
   pro: boolean;
   credits: number;
+  /** Payments are switched on (absent from older servers: treated as on). */
+  billing?: boolean;
 }
 
 /**
@@ -69,6 +71,9 @@ export function AccountMenu({
   const name = user?.fullName || email || dict.account.fallbackName;
   const initial = (user?.firstName || name || "?").charAt(0).toUpperCase();
   const pro = summary?.pro ?? false;
+  // Purchase links only once the server said payments are on (never a
+  // "Buy credits" that ends in "payments aren't available").
+  const billing = summary ? summary.billing !== false : false;
   const isHeader = variant === "header";
 
   const menu = (
@@ -114,18 +119,22 @@ export function AccountMenu({
           href="/app/agents"
           onNavigate={() => setOpen(false)}
         />
-        <MenuLink
-          icon="💳"
-          label={dict.account.subscriptionPayments}
-          href="/app/settings#billing"
-          onNavigate={() => setOpen(false)}
-        />
-        <MenuLink
-          icon="✦"
-          label={dict.account.buyCredits}
-          href="/app/credits"
-          onNavigate={() => setOpen(false)}
-        />
+        {billing && (
+          <>
+            <MenuLink
+              icon="💳"
+              label={dict.account.subscriptionPayments}
+              href="/app/settings#billing"
+              onNavigate={() => setOpen(false)}
+            />
+            <MenuLink
+              icon="✦"
+              label={dict.account.buyCredits}
+              href="/app/credits"
+              onNavigate={() => setOpen(false)}
+            />
+          </>
+        )}
         <MenuLink
           icon="⚙"
           label={dict.account.settings}

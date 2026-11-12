@@ -160,25 +160,36 @@ const sourceRef = z.object({
   label: z.string().max(300).optional(),
 });
 
-// Blank sides are allowed: a student adds a card and then types into it, and
-// autosave runs in between. Study sessions skip cards with an empty side.
-const flashcard = z.object({
-  id: z.string(),
-  front: z.string().max(MAX_FLASHCARD_TEXT),
-  back: z.string().max(MAX_FLASHCARD_TEXT),
+/** A card's scheduling fields (lib/study/srs.ts), all optional. */
+const cardSchedule = {
   ease: z.number().optional(),
   intervalDays: z.number().optional(),
   reps: z.number().int().optional(),
   dueAt: z.string().optional(),
   lastReviewedAt: z.string().optional(),
-  // FSRS scheduling state (lib/study/srs.ts); optional so older decks and
-  // AI-authored cards stay valid.
+  // FSRS scheduling state; optional so older decks and AI-authored cards
+  // stay valid.
   stability: z.number().nonnegative().optional(),
   difficulty: z.number().optional(),
   state: z.enum(["new", "learning", "review", "relearning"]).optional(),
   lapses: z.number().int().nonnegative().optional(),
   learningStep: z.number().int().nonnegative().optional(),
   dueTime: z.string().optional(),
+};
+
+// Blank sides are allowed: a student adds a card and then types into it, and
+// autosave runs in between. Study sessions skip cards with an empty side.
+const flashcard = z.object({
+  id: z.string(),
+  front: z.string().max(MAX_FLASHCARD_TEXT),
+  back: z.string().max(MAX_FLASHCARD_TEXT),
+  ...cardSchedule,
+  // Recent reviews and the schedule before them (lib/study/review-log.ts).
+  reviews: z
+    .array(z.object({ id: z.string().max(40), grade: z.enum(["again", "hard", "good", "easy"]) }))
+    .max(32)
+    .optional(),
+  reviewBase: z.object(cardSchedule).optional(),
   source: sourceRef.optional(),
 });
 
@@ -201,6 +212,8 @@ const quizQuestion = z.object({
       attempts: z.number().int().nonnegative(),
       correct: z.number().int().nonnegative(),
       lastAnsweredAt: z.string().optional(),
+      // Moments of the most recent answers counted (lib/study/quiz.ts recordAnswer).
+      recent: z.array(z.string().max(40)).max(64).optional(),
     })
     .optional(),
 });

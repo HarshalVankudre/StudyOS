@@ -21,7 +21,18 @@ import {
   MAX_UPLOAD_BYTES,
 } from "@/lib/import/syllabus";
 import { useI18n } from "@/lib/i18n/client";
+import { refreshCreditsBalance, useLiveBalance } from "@/lib/credits-bus";
 import { planQuestionsAction } from "./actions";
+
+/**
+ * What a build costs on the student's model, setup questions included
+ * (priced by the server page from lib/price-list.ts): `build` is charged;
+ * `buildMax` above it means the model's real cost can be higher, up to it.
+ */
+export interface GeneratorCosts {
+  build: number;
+  buildMax: number;
+}
 
 type Stage = "describe" | "questions";
 
@@ -52,6 +63,10 @@ export function GeneratorClient({
   initialPrompt = "",
   outOfCredits: initiallyOutOfCredits = false,
   minCredits,
+  costs,
+  balance: serverBalance = null,
+  signupCredits,
+  billing = true,
 }: {
   initialPrompt?: string;
   /** Known before the student types anything, so they never invest effort first. */
@@ -62,9 +77,19 @@ export function GeneratorClient({
    * the configured model).
    */
   minCredits: number;
+  /** Typical costs of the questions and the build, shown before each is spent. */
+  costs?: GeneratorCosts;
+  /** The balance when the page was rendered (null = unknown); then the live one. */
+  balance?: number | null;
+  /** The one-time trial a new account starts with (the fine print says so). */
+  signupCredits?: number;
+  /** Payments are switched on: the out-of-credits panel may offer to buy. */
+  billing?: boolean;
 }) {
   const router = useRouter();
   const { dict } = useI18n();
+  const liveBalance = useLiveBalance(serverBalance ?? undefined);
+  const spend = costs && typeof liveBalance === "number" ? { ...costs, balance: liveBalance } : null;
   const [prompt, setPrompt] = useState(initialPrompt);
   const [sourceText, setSourceText] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -125,6 +150,8 @@ export function GeneratorClient({
         return;
       }
       setQuestions(result.questions);
+      // The questions were charged: the build step shows the balance after them.
+      void refreshCreditsBalance({ force: true });
       setSelected({});
       setCustomAnswers({});
       setOtherOpen({});
@@ -409,10 +436,14 @@ export function GeneratorClient({
       </header>
 
       <div className="mx-auto flex max-w-2xl flex-col px-6 pb-24 pt-14 sm:pt-20">
-        {outOfCredits && <OutOfCreditsPanel minCredits={minCredits} />}
+        {outOfCredits && (
+          <OutOfCreditsPanel minCredits={minCredits} billing={billing} />
+        )}
 
         {stage === "describe" ? (
           <DescribeStage
+            spend={spend}
+            signupCredits={signupCredits}
             prompt={prompt}
             setPrompt={setPrompt}
             sourceText={sourceText}
@@ -424,6 +455,7 @@ export function GeneratorClient({
           />
         ) : (
           <QuestionsStage
+            spend={spend}
             prompt={prompt}
             questions={questions}
             selected={selected}
@@ -458,9 +490,31 @@ export function GeneratorClient({
 // Out of credits / failed generation
 // ---------------------------------------------------------------------------
 
-function OutOfCreditsPanel({ minCredits }: { minCredits: number }) {
+function OutOfCreditsPanel({
+  minCredits,
+  billing,
+}: {
+  minCredits: number;
+  billing: boolean;
+}) {
   const { dict, t } = useI18n();
   const C = dict.generate.outOfCredits;
+  if (!billing) {
+    // Nothing can be bought here: say what still works, no buttons.
+    return (
+      <section role="alert" className="mb-10 rounded-xl border border-line-strong bg-card p-5 shadow-card">
+        <div className="flex items-start gap-3">
+          <Coins className="mt-0.5 h-5 w-5 shrink-0 text-lime-deep" aria-hidden />
+          <div className="min-w-0">
+            <h2 className="font-display text-lg font-bold text-ink">{C.title}</h2>
+            <p className="mt-1 text-sm leading-relaxed text-ink-soft">
+              {t(dict.spend.belowMinimum, { min: minCredits })}
+            </p>
+          </div>
+        </div>
+      </section>
+    );
+  }
   return (
     <section
       role="alert"
@@ -566,7 +620,29 @@ function FailurePanel({ message, onRetry }: { message: string; onRetry: () => vo
 // Stage 1 — describe your studies
 // ---------------------------------------------------------------------------
 
+type Spend = (GeneratorCosts & { balance: number }) | null;
+
+/**
+ * The cost line shown before the questions and before the build: the build's
+ * price, setup questions included, and when the model's real cost can be
+ * higher, how high (lib/price-list.ts).
+ */
+function useBuildCostHint() {
+  const { dict, plural, t } = useI18n();
+  const credits = (n: number) => plural(dict.counts.credits, n);
+  return (spend: GeneratorCosts & { balance: number }) =>
+    spend.buildMax > spend.build
+      ? t(dict.spend.generatorPriceRange, {
+          build: credits(spend.build),
+          max: credits(spend.buildMax),
+          balance: credits(spend.balance),
+        })
+      : t(dict.spend.generatorPrice, { build: credits(spend.build), balance: credits(spend.balance) });
+}
+
 function DescribeStage({
+  spend,
+  signupCredits,
   prompt,
   setPrompt,
   sourceText,
@@ -576,6 +652,9 @@ function DescribeStage({
   onContinue,
   onExample,
 }: {
+  /** Costs and balance, said before Continue spends anything (null = unknown). */
+  spend: Spend;
+  signupCredits?: number;
   prompt: string;
   setPrompt: (v: string) => void;
   sourceText: string;
@@ -586,7 +665,8 @@ function DescribeStage({
   onContinue: () => void;
   onExample: (text: string) => void;
 }) {
-  const { dict } = useI18n();
+  const { dict, t, locale } = useI18n();
+  const buildCostHint = useBuildCostHint();
   return (
     <>
       <p className="text-sm font-medium text-ink-soft">{dict.generate.describe.step}</p>
@@ -623,6 +703,11 @@ function DescribeStage({
           </button>
         </div>
       </div>
+      {spend && (
+        <p className="mt-2 px-1 text-xs text-ink-soft" data-testid="cost-hint">
+          {buildCostHint(spend)}
+        </p>
+      )}
 
       <SyllabusImport
         sourceText={sourceText}
@@ -649,9 +734,11 @@ function DescribeStage({
         </div>
       </div>
 
-      <p className="mt-10 text-sm text-ink-soft/70">
-        {dict.generate.describe.finePrint}
-      </p>
+      {signupCredits !== undefined && (
+        <p className="mt-10 text-sm text-ink-soft/70">
+          {t(dict.generate.describe.finePrint, { credits: signupCredits.toLocaleString(locale) })}
+        </p>
+      )}
     </>
   );
 }
@@ -850,6 +937,7 @@ export function SyllabusImport({
 // ---------------------------------------------------------------------------
 
 function QuestionsStage({
+  spend,
   prompt,
   questions,
   selected,
@@ -864,6 +952,8 @@ function QuestionsStage({
   onBack,
   onBuild,
 }: {
+  /** Cost of the build and the balance, said before Build spends anything. */
+  spend: Spend;
   prompt: string;
   questions: GenQuestion[];
   selected: Record<string, string[]>;
@@ -879,6 +969,7 @@ function QuestionsStage({
   onBuild: () => void;
 }) {
   const { dict, t } = useI18n();
+  const buildCostHint = useBuildCostHint();
   return (
     <>
       <button
@@ -995,6 +1086,11 @@ function QuestionsStage({
               })}
         </span>
       </div>
+      {spend && (
+        <p className="mt-3 text-xs text-ink-soft" data-testid="cost-hint">
+          {buildCostHint(spend)}
+        </p>
+      )}
     </>
   );
 }

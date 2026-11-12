@@ -3,13 +3,13 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { isPro } from "@/lib/billing";
+import { getCreditBalance } from "@/lib/credits";
 import {
   CREDIT_PACK_PRICE_USD,
   CREDIT_PACK_SIZE,
-  FREE_MONTHLY_CREDITS,
   PRO_MONTHLY_CREDITS,
-  getCreditBalance,
-} from "@/lib/credits";
+  TRIAL_CREDITS,
+} from "@/lib/price-list";
 import { getI18n } from "@/lib/i18n/server";
 import { DeleteAccountButton } from "@/components/account/DeleteAccountButton";
 import { formatUsd } from "@/lib/plan-pricing";
@@ -25,6 +25,8 @@ import {
   manageBillingAction,
   startCheckoutAction,
 } from "../billing-actions";
+import { isBillingConfigured } from "@/lib/stripe";
+import { ComingSoon } from "@/components/account/ComingSoon";
 
 export async function generateMetadata(): Promise<Metadata> {
   const { dict } = await getI18n();
@@ -46,6 +48,8 @@ export default async function SettingsPage() {
       getNotificationSettings(userId).catch(() => null),
     ]);
   const S = dict.settings;
+  // Without payments switched on, upgrading and packs are shown as coming soon.
+  const billing = isBillingConfigured();
 
   const email = user?.emailAddresses?.[0]?.emailAddress;
   const name =
@@ -116,7 +120,10 @@ export default async function SettingsPage() {
           </div>
 
           <p className="mt-3 text-sm text-ink-soft">
-            {pro ? S.proDesc : S.freeDesc}
+            {t(pro ? S.proDesc : S.freeDesc, {
+              monthly: PRO_MONTHLY_CREDITS.toLocaleString(locale),
+              trial: TRIAL_CREDITS.toLocaleString(locale),
+            })}
           </p>
 
           <div className="mt-5 flex flex-wrap gap-3">
@@ -131,14 +138,18 @@ export default async function SettingsPage() {
               </form>
             ) : (
               <>
-                <form action={startCheckoutAction}>
-                  <button
-                    type="submit"
-                    className="rounded-lg bg-ink px-5 py-2.5 text-sm font-semibold text-paper transition hover:bg-ink/90"
-                  >
-                    {S.upgrade}
-                  </button>
-                </form>
+                {billing ? (
+                  <form action={startCheckoutAction}>
+                    <button
+                      type="submit"
+                      className="rounded-lg bg-ink px-5 py-2.5 text-sm font-semibold text-paper transition hover:bg-ink/90"
+                    >
+                      {S.upgrade}
+                    </button>
+                  </form>
+                ) : (
+                  <ComingSoon messages={dict.spend} note className="w-full sm:max-w-sm" />
+                )}
                 <Link
                   href="/pricing"
                   className="rounded-lg border border-ink/15 bg-card px-5 py-2.5 text-sm font-semibold text-ink transition hover:border-ink/40"
@@ -166,20 +177,24 @@ export default async function SettingsPage() {
           <p className="mt-3 text-sm text-ink-soft">
             {pro
               ? t(S.creditsDescPro, { monthly: PRO_MONTHLY_CREDITS.toLocaleString(locale) })
-              : t(S.creditsDescFree, { monthly: FREE_MONTHLY_CREDITS.toLocaleString(locale) })}
+              : S.creditsDescFree}
           </p>
           <div className="mt-5 flex flex-wrap gap-3">
-            <form action={buyCreditsAction}>
-              <button
-                type="submit"
-                className="rounded-lg bg-ink px-5 py-2.5 text-sm font-semibold text-paper transition hover:bg-ink/90"
-              >
-                {t(S.buyPack, {
-                  count: CREDIT_PACK_SIZE.toLocaleString(locale),
-                  price: formatUsd(CREDIT_PACK_PRICE_USD, locale),
-                })}
-              </button>
-            </form>
+            {billing ? (
+              <form action={buyCreditsAction}>
+                <button
+                  type="submit"
+                  className="rounded-lg bg-ink px-5 py-2.5 text-sm font-semibold text-paper transition hover:bg-ink/90"
+                >
+                  {t(S.buyPack, {
+                    count: CREDIT_PACK_SIZE.toLocaleString(locale),
+                    price: formatUsd(CREDIT_PACK_PRICE_USD, locale),
+                  })}
+                </button>
+              </form>
+            ) : (
+              <ComingSoon messages={dict.spend} className="w-full sm:max-w-sm" />
+            )}
             <Link
               href="/pricing#credits"
               className="rounded-lg border border-ink/15 bg-card px-5 py-2.5 text-sm font-semibold text-ink transition hover:border-ink/40"

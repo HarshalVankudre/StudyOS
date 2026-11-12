@@ -1,14 +1,17 @@
 "use client";
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { unstable_isUnrecognizedActionError } from "next/navigation";
 import {
   getWorkspaceStateAction,
   getWorkspaceVersionAction,
   saveWorkspaceAction,
 } from "@/app/app/actions";
+import { RUN_RESULTS_REPLAY, runResultsReplayer } from "@/lib/study/quiz";
 import type { Removal } from "@/lib/workspace/history";
 import type { Workspace } from "@/lib/workspace/types";
-import { TAB_ALIVE_MS, WorkspaceSync, tabKey, type Notice } from "./workspace-sync";
+import { gradeReplayer } from "./study/gradeEdit";
+import { WorkspaceSync, type Notice } from "./workspace-sync";
 
 const POLL_MS = 30_000;
 /** How often an open tab says it is alive (its draft is not to be adopted). */
@@ -60,52 +63,15 @@ function safeLocalStorage(): Storage | null {
   }
 }
 
-const TAB_ID_KEY = "studyos:tab-id";
-
 /**
- * This tab's id, kept for the tab's lifetime (sessionStorage survives a
- * reload, so a reloaded tab finds its own draft). A duplicated tab copies
- * sessionStorage; it gets a fresh id when the original is still alive.
+ * The server no longer knows the action this tab called: a newer build was
+ * deployed and this tab still runs the previous one. Nothing it sends will be
+ * accepted any more, so the engine stops and the student is asked to reload
+ * (their unsaved edits are in the local draft).
  */
-function tabIdFor(storage: Storage | null): string {
-  const fresh = () =>
-    globalThis.crypto?.randomUUID?.() ?? `t-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+function isOutdatedBuild(error: unknown): boolean {
   try {
-    const session = typeof window !== "undefined" ? window.sessionStorage : null;
-    const saved = session?.getItem(TAB_ID_KEY);
-    const aliveAt = saved ? Number(storage?.getItem(tabKey(saved))) : NaN;
-    const id = saved && !(Date.now() - aliveAt < TAB_ALIVE_MS) ? saved : fresh();
-    session?.setItem(TAB_ID_KEY, id);
-    return id;
-  } catch {
-    return fresh();
-  }
-}
-
-/**
- * Hand the closing tab's last edits to the browser with a request that
- * outlives the page (the route applies them through the version-checked save
- * gate under the tab's save id, see /api/workspace/save).
- */
-function sendWhileClosing(body: string): boolean {
-  try {
-    if (typeof fetch === "function") {
-      void fetch("/api/workspace/save", {
-        method: "POST",
-        keepalive: true,
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
-        body,
-      }).catch(() => {});
-      return true;
-    }
-  } catch {
-    // fall through to sendBeacon
-  }
-  try {
-    return typeof navigator !== "undefined" && typeof navigator.sendBeacon === "function"
-      ? navigator.sendBeacon("/api/workspace/save", new Blob([body], { type: "application/json" }))
-      : false;
+    return unstable_isUnrecognizedActionError(error);
   } catch {
     return false;
   }
@@ -132,15 +98,27 @@ export function useWorkspaceSync(
     callbacksRef.current = callbacks;
   });
 
-  const [sync] = useState(
-    () =>
-      new WorkspaceSync(id, initialWorkspace, initialVersion, {
-        save: saveWorkspaceAction,
-        fetchState: getWorkspaceStateAction,
-        fetchVersion: getWorkspaceVersionAction,
-        tabId: tabIdFor(safeLocalStorage()),
-      }),
-  );
+  // A fresh engine (and tab id) per page load: a reloaded or duplicated tab is
+  // a new tab; what the previous one left behind is recovered from its draft.
+  const [sync] = useState(() => {
+    const guarded =
+      <A extends unknown[], R>(call: (...args: A) => Promise<R>) =>
+      async (...args: A): Promise<R> => {
+        try {
+          return await call(...args);
+        } catch (error) {
+          if (isOutdatedBuild(error)) engine.markOutdated();
+          throw error;
+        }
+      };
+    const engine: WorkspaceSync = new WorkspaceSync(id, initialWorkspace, initialVersion, {
+      save: guarded(saveWorkspaceAction),
+      fetchState: guarded(getWorkspaceStateAction),
+      fetchVersion: guarded(getWorkspaceVersionAction),
+      replayers: { grade: gradeReplayer, [RUN_RESULTS_REPLAY]: runResultsReplayer },
+    });
+    return engine;
+  });
   const snapshot = useSyncExternalStore(
     sync.subscribe,
     sync.getSnapshot,
@@ -168,7 +146,6 @@ export function useWorkspaceSync(
       onRemoval: (removal, entryId) =>
         callbacksRef.current.onRemoval(removal, entryId),
       onNotice: (notice) => callbacksRef.current.onNotice(notice),
-      beacon: sendWhileClosing,
     });
     sync.start();
 
@@ -180,7 +157,10 @@ export function useWorkspaceSync(
 
     // Leaving the tab (switching apps on a phone, closing it): write what is
     // still typed in a field and the local copy synchronously (the page may
-    // be frozen right after), then save right away instead of waiting.
+    // be frozen or gone right after), then save right away instead of
+    // waiting. Nothing else is sent while closing: what the save does not
+    // get through stays in this browser's draft and is merged the next time
+    // the workspace is opened here.
     const onVisibility = () => {
       if (document.visibilityState === "hidden") sync.prepareToLeave();
       else {
@@ -189,22 +169,25 @@ export function useWorkspaceSync(
       }
     };
     const onPageHide = () => {
-      // Closing: the last edits go to the server with a request that
-      // outlives the page; the local draft stays as the fallback.
-      sync.prepareToLeave(true);
+      sync.prepareToLeave();
       // A clean exit: its draft may be recovered by the next tab at once;
       // `pageshow` marks it alive again if it comes back (back/forward cache).
       sync.releaseTab();
     };
-    const onPageShow = () => sync.heartbeat();
+    const onPageShow = () => {
+      // Shown again (also restored from the back/forward cache): alive, and
+      // whatever happened meanwhile (another tab taking the draft over, saves
+      // from other devices) is read before anything else is built on top.
+      sync.heartbeat();
+      void sync.checkRemote();
+    };
     const onFocus = () => void sync.checkRemote();
     const onOnline = () => sync.retry();
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
-      // Ask "leave site?" only when something would not reach the server:
-      // offline, a patch too large to send while closing, saving stuck, or
-      // work that is not a document edit yet (an exam in progress).
-      const sent = sync.prepareToLeave(true);
-      if (!sync.hasUnsavedChanges || (sent && !sync.hasBufferedWork())) return;
+      // Ask "leave site?" whenever something has not reached the server yet
+      // (the edits would stay on this device only until it is opened again).
+      sync.prepareToLeave();
+      if (!sync.hasUnsavedChanges) return;
       event.preventDefault();
       // Legacy browsers need returnValue set to show the "leave site?" prompt.
       event.returnValue = "";
@@ -237,6 +220,11 @@ export function useWorkspaceSync(
       channel?.removeEventListener("message", onChannel);
       channel?.close();
       sync.dispose();
+      // The editor is gone from this page (navigated elsewhere in the app):
+      // what it could not save is in its draft, free to be taken over at once
+      // by the editor that opens next (`start` marks this one alive again if
+      // it is the same one remounting).
+      sync.releaseTab();
     };
   }, [id, sync]);
 

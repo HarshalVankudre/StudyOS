@@ -237,7 +237,7 @@ export function CommandPalette({
         group: "languages" as const,
         label: l.nativeName,
         detail: l.englishName,
-        icon: <span aria-hidden>{l.flag}</span>,
+        icon: <Languages className="size-4" aria-hidden />,
         selected: l.code === locale,
         run: () => {
           close();

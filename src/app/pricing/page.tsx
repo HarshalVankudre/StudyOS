@@ -4,28 +4,23 @@ import { auth } from "@clerk/nextjs/server";
 import { UserButton } from "@clerk/nextjs";
 import { Check } from "lucide-react";
 import { isPro } from "@/lib/billing";
+import { getCreditBalance } from "@/lib/credits";
 import {
   CREDIT_PACK_PRICE_USD,
   CREDIT_PACK_SIZE,
-  FREE_MONTHLY_CREDITS,
-  FREE_SIGNUP_CREDITS,
-  getCreditBalance,
+  creditExamples,
+  FREE_FAILURES_PER_DAY,
+  isFixedPrice,
   PRO_MONTHLY_CREDITS,
-} from "@/lib/credits";
-import {
-  CREDITS_PER_EDIT,
-  CREDITS_PER_GENERATION,
-  CREDITS_PER_QUESTIONS,
-  MIN_GENERATION_BALANCE,
-  STUDY_KIT_CREDITS_PER_SECTION,
-  STUDY_KIT_MAX_CREDITS_PER_SECTION,
-  estimatedEdits,
-  estimatedGenerations,
-} from "@/lib/credits-info";
+  publicQuotes,
+  TRIAL_CREDITS,
+  TURN_CREDIT_CAP,
+  USAGE_LIMITS,
+  type PriceQuote,
+} from "@/lib/price-list";
 import { MAX_SECTIONS_PER_RUN, SECTION_TARGET_CHARS } from "@/lib/materials/limits";
-import { TURN_CREDIT_CAP } from "@/lib/ai/budgets";
 import { modelForPlan } from "@/lib/ai/plans";
-import { USAGE_LIMITS } from "@/lib/usage-limits";
+import { agentSandboxEnabled } from "@/lib/flags";
 import { formatPrice, formatUsd, getProPricing, type PriceAmount } from "@/lib/plan-pricing";
 import { supportEmail } from "@/lib/site";
 import {
@@ -34,6 +29,8 @@ import {
   startCheckoutAction,
 } from "@/app/app/billing-actions";
 import { getI18n } from "@/lib/i18n/server";
+import { isBillingConfigured } from "@/lib/stripe";
+import { ComingSoon } from "@/components/account/ComingSoon";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { ProPriceSwitch } from "@/components/pricing/ProPriceSwitch";
@@ -47,6 +44,12 @@ export async function generateMetadata(): Promise<Metadata> {
   return { title: dict.meta.pricingTitle, description: dict.meta.pricingDescription };
 }
 
+/*
+ * Every number on this page comes from the price list (lib/price-list.ts):
+ * the trial and Pro grants, the price of each action on the configured
+ * models, the limits, the examples. src/lib/price-list.pages.test.tsx builds
+ * the price list with other numbers and checks this page follows.
+ */
 export default async function PricingPage({
   searchParams,
 }: {
@@ -59,50 +62,59 @@ export default async function PricingPage({
   const signedIn = Boolean(userId);
   const pro = signedIn ? await isPro() : false;
   const credits = userId ? await getCreditBalance(userId) : 0;
+  // Without payments switched on, plans and packs are shown as coming soon.
+  const billing = isBillingConfigured();
 
   const n = (value: number) => value.toLocaleString(locale);
+  const creditCount = (value: number) => plural(dict.counts.credits, value);
   // What Stripe charges, in its currency (lib/plan-pricing.ts).
   const pricing = await getProPricing();
   const price = (p: PriceAmount) => formatPrice(p.amount, p.currency, locale);
   const monthlyPrice = price(pricing.monthly);
   const annual = pricing.annual;
   const email = supportEmail();
-  const sameModel = modelForPlan("free") === modelForPlan("pro");
+  const models = { free: modelForPlan("free"), pro: modelForPlan("pro") };
+  const sameModel = models.free === models.pro;
   const signUpForPro = `/sign-up?redirect_url=${encodeURIComponent("/pricing")}`;
 
-  const freeBullets = P.free.bullets.map((b) =>
-    t(b, { signup: n(FREE_SIGNUP_CREDITS), monthly: n(FREE_MONTHLY_CREDITS) }),
-  );
+  // Each action at the higher of the two plans' models.
+  const q = publicQuotes(models);
+  const quoted = (quote: PriceQuote) =>
+    isFixedPrice(quote) ? creditCount(quote.list) : t(P.costs.range, { price: n(quote.price), max: n(quote.max) });
+  const realCostApplies =
+    !isFixedPrice(q.build) || !isFixedPrice(q.studyKitPart) || q.message.price > q.message.list;
+
+  const freeBullets = P.free.bullets.map((b) => t(b, { trial: n(TRIAL_CREDITS) }));
   const proBullets = P.pro.bullets.map((b) => t(b, { count: n(PRO_MONTHLY_CREDITS) }));
 
   const costRows = [
     {
       action: P.costs.rows.build.action,
-      cost: t(P.costs.about, { count: n(CREDITS_PER_GENERATION) }),
-      details: t(P.costs.rows.build.details, { min: n(MIN_GENERATION_BALANCE) }),
-    },
-    {
-      action: P.costs.rows.questions.action,
-      cost: t(P.costs.about, { count: n(CREDITS_PER_QUESTIONS) }),
-      details: P.costs.rows.questions.details,
+      cost: quoted(q.build),
+      details: P.costs.rows.build.details,
     },
     {
       action: P.costs.rows.assistant.action,
-      cost: t(P.costs.about, { count: n(CREDITS_PER_EDIT) }),
+      cost: creditCount(q.message.price),
       details: t(P.costs.rows.assistant.details, {
         free: n(TURN_CREDIT_CAP.free),
         pro: n(TURN_CREDIT_CAP.pro),
+        failures: n(FREE_FAILURES_PER_DAY),
       }),
     },
     {
       action: P.costs.rows.studyKit.action,
-      cost: t(P.costs.perPart, { count: n(STUDY_KIT_CREDITS_PER_SECTION) }),
+      cost: isFixedPrice(q.studyKitPart)
+        ? t(P.costs.perPart, { count: n(q.studyKitPart.list) })
+        : t(P.costs.perPartRange, { price: n(q.studyKitPart.price), max: n(q.studyKitPart.max) }),
       details: t(P.costs.rows.studyKit.details, {
         chars: n(SECTION_TARGET_CHARS),
         parts: n(MAX_SECTIONS_PER_RUN),
-        max: n(STUDY_KIT_MAX_CREDITS_PER_SECTION),
       }),
     },
+    ...(agentSandboxEnabled()
+      ? [{ action: P.costs.rows.render.action, cost: creditCount(q.render), details: P.costs.rows.render.details }]
+      : []),
     {
       action: P.costs.rows.studying.action,
       cost: P.costs.zero,
@@ -110,14 +122,24 @@ export default async function PricingPage({
     },
   ];
 
+  // What a month of Pro, and the trial, cover at these prices.
+  const month = creditExamples(PRO_MONTHLY_CREDITS, q);
+  const trial = creditExamples(TRIAL_CREDITS, q);
+  const E = P.examples;
+  const counts = (e: { builds: number; parts: number; messages: number }) => ({
+    builds: plural(dict.counts.workspaceBuilds, e.builds),
+    parts: plural(dict.counts.kitParts, e.parts),
+    messages: plural(dict.counts.assistantMessages, e.messages),
+  });
+
   const limitRows: { label: string; free: string; pro: string }[] = [
-    { label: P.limits.signup, free: n(FREE_SIGNUP_CREDITS), pro: n(FREE_SIGNUP_CREDITS) },
     {
-      label: P.limits.monthly,
-      free: t(P.limits.monthlyFree, { count: n(FREE_MONTHLY_CREDITS) }),
-      pro: t(P.limits.monthlyPro, { count: n(PRO_MONTHLY_CREDITS) }),
+      label: P.limits.credits,
+      free: t(P.limits.creditsFree, { count: n(TRIAL_CREDITS) }),
+      pro: t(P.limits.creditsPro, { count: n(PRO_MONTHLY_CREDITS) }),
     },
     { label: P.limits.rollover, free: P.limits.yes, pro: P.limits.yes },
+    { label: P.limits.features, free: P.limits.allFeatures, pro: P.limits.allFeatures },
     { label: P.limits.builds, free: n(USAGE_LIMITS.generate.free), pro: n(USAGE_LIMITS.generate.pro) },
     { label: P.limits.messages, free: n(USAGE_LIMITS.agent.free), pro: n(USAGE_LIMITS.agent.pro) },
     { label: P.limits.kits, free: n(USAGE_LIMITS.study_kit.free), pro: n(USAGE_LIMITS.study_kit.pro) },
@@ -132,7 +154,8 @@ export default async function PricingPage({
   ].map((item) => ({
     q: item.q,
     a: t(item.a, {
-      monthly: n(FREE_MONTHLY_CREDITS),
+      trial: n(TRIAL_CREDITS),
+      failures: n(FREE_FAILURES_PER_DAY),
       email,
       count: n(PRO_MONTHLY_CREDITS),
       total: annual ? price(annual.total) : "",
@@ -168,7 +191,7 @@ export default async function PricingPage({
                 </Link>
                 <Link
                   href="/sign-up"
-                  className="flex min-h-10 items-center rounded-md bg-ink px-4 text-sm font-semibold text-paper shadow-card transition hover:opacity-90"
+                  className="flex min-h-10 items-center whitespace-nowrap rounded-md bg-ink px-3 text-sm font-semibold text-paper shadow-card transition hover:opacity-90 sm:px-4"
                 >
                   {P.free.ctaSignedOut}
                 </Link>
@@ -184,10 +207,17 @@ export default async function PricingPage({
           <h1 className="mt-4 font-display text-4xl font-extrabold tracking-tight text-balance sm:text-5xl">
             {P.title}
           </h1>
-          <p className="mx-auto mt-4 max-w-2xl text-lg leading-relaxed text-ink-soft">{P.subtitle}</p>
+          <p className="mx-auto mt-4 max-w-2xl text-lg leading-relaxed text-ink-soft">
+            {t(P.subtitle, { trial: n(TRIAL_CREDITS), monthly: n(PRO_MONTHLY_CREDITS) })}
+          </p>
         </div>
 
         <BillingNotice code={billingNotice} messages={dict.billingNotice} className="mx-auto mt-8 max-w-xl" />
+        {!billing && (
+          <p role="note" className="mx-auto mt-6 max-w-xl text-center text-sm text-ink-soft">
+            {dict.spend.purchasesComingSoon}
+          </p>
+        )}
 
         {/* Plans */}
         <div className="mt-12 grid items-start gap-5 md:grid-cols-2">
@@ -197,9 +227,8 @@ export default async function PricingPage({
             </h2>
             <p className="mt-3.5 flex items-baseline gap-1 font-display text-5xl font-extrabold tracking-tight">
               {formatPrice(0, pricing.monthly.currency, locale)}
-              <span className="text-base font-medium text-ink-faint">{P.free.perMonth}</span>
             </p>
-            <p className="mt-1.5 text-sm text-ink-soft">{P.free.tagline}</p>
+            <p className="mt-1.5 text-sm text-ink-soft">{t(P.free.tagline, { trial: n(TRIAL_CREDITS) })}</p>
             <div className="mt-6">
               <Link
                 href={signedIn ? "/app" : "/sign-up"}
@@ -217,14 +246,13 @@ export default async function PricingPage({
               {P.pro.name}
             </h2>
             {pro ? (
+              // A subscriber keeps the Stripe price they subscribed at, so
+              // today's list price is not shown as theirs.
               <div className="space-y-3">
-                <p className="font-display text-5xl font-extrabold tracking-tight">
-                  {monthlyPrice}
-                  <span className="text-base font-medium text-ink-faint">{P.pro.perMonth}</span>
-                </p>
                 <p className="rounded-md bg-lime-faint px-4 py-3 text-center text-sm font-semibold text-ink ring-1 ring-inset ring-lime/30">
                   {P.pro.currentPlan}
                 </p>
+                <p className="text-sm text-ink-soft">{P.pro.currentPrice}</p>
                 <form action={manageBillingAction}>
                   <button
                     type="submit"
@@ -233,6 +261,19 @@ export default async function PricingPage({
                     {P.pro.manageBilling}
                   </button>
                 </form>
+              </div>
+            ) : !billing ? (
+              <div className="space-y-3">
+                <p className="font-display text-5xl font-extrabold tracking-tight">
+                  {monthlyPrice}
+                  <span className="text-base font-medium text-ink-faint">{P.pro.perMonth}</span>
+                </p>
+                {annual && (
+                  <p className="text-sm text-ink-soft">
+                    {t(P.pro.orYearly, { total: price(annual.total), perMonth: price(annual.perMonth) })}
+                  </p>
+                )}
+                <ComingSoon messages={dict.spend} />
               </div>
             ) : (
               <ProPriceSwitch
@@ -269,6 +310,11 @@ export default async function PricingPage({
         <section aria-labelledby="costs" className="mt-20">
           <h2 id="costs" className="font-display text-2xl font-bold tracking-tight sm:text-3xl">{P.costs.title}</h2>
           <p className="mt-3 max-w-3xl text-ink-soft">{P.costs.intro}</p>
+          {realCostApplies && (
+            <p className="mt-2 max-w-3xl text-sm text-ink-soft" data-testid="real-cost-note">
+              {P.costs.realCost}
+            </p>
+          )}
           <div className="mt-6 overflow-hidden rounded-md border border-line bg-card">
             <table className="w-full border-collapse text-start text-sm">
               <thead className="hidden sm:table-header-group">
@@ -294,6 +340,22 @@ export default async function PricingPage({
               </tbody>
             </table>
           </div>
+        </section>
+
+        {/* What the credits cover, computed from the prices above */}
+        <section aria-labelledby="examples" className="mt-20" data-testid="credit-examples">
+          <h2 id="examples" className="font-display text-2xl font-bold tracking-tight sm:text-3xl">{E.title}</h2>
+          <p className="mt-3 max-w-3xl text-ink-soft">{t(E.intro, { count: n(PRO_MONTHLY_CREDITS) })}</p>
+          <ul className="mt-6 grid gap-3 sm:grid-cols-3">
+            {[counts(month).builds, counts(month).parts, counts(month).messages].map((line, i) => (
+              <li key={line} className="rounded-md border border-line bg-card p-5">
+                {i > 0 && <span className="sr-only">{E.or} </span>}
+                <span className="font-display text-lg font-bold text-ink">{line}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-4 text-sm text-ink-soft">{t(E.mix, counts(month.mix))}</p>
+          <p className="mt-2 text-sm text-ink-soft">{t(E.trial, { trial: n(TRIAL_CREDITS), ...counts(trial.mix) })}</p>
         </section>
 
         {/* Free and Pro side by side */}
@@ -343,12 +405,14 @@ export default async function PricingPage({
               <p className="mt-3 font-display text-2xl font-bold">{formatUsd(CREDIT_PACK_PRICE_USD, locale)}</p>
               <p className="mt-1 text-xs text-ink-soft">
                 {t(dict.credits.buysApprox, {
-                  gens: n(estimatedGenerations(CREDIT_PACK_SIZE)),
-                  edits: n(estimatedEdits(CREDIT_PACK_SIZE)),
+                  gens: n(creditExamples(CREDIT_PACK_SIZE, q).builds),
+                  edits: n(creditExamples(CREDIT_PACK_SIZE, q).messages),
                 })}
               </p>
               <div className="mt-5">
-                {signedIn ? (
+                {!billing ? (
+                  <ComingSoon messages={dict.spend} />
+                ) : signedIn ? (
                   <form action={buyCreditsAction}>
                     <button type="submit" className="min-h-12 w-full rounded-md bg-ink px-5 text-sm font-semibold text-paper transition hover:opacity-90">
                       {t(P.credits.buy, { count: n(CREDIT_PACK_SIZE) })}

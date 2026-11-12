@@ -516,7 +516,7 @@ function CourseCard({
   onTarget: (target: number | null) => void;
   actions: CategoryActions;
 }) {
-  const { dict, t, locale } = useI18n();
+  const { dict, t, locale, plural } = useI18n();
   const g = dict.grades;
   const c = g.categories;
   const [open, setOpen] = useState(false);
@@ -569,6 +569,7 @@ function CourseCard({
         return (
           <>
             <span>{t(c.inCategory, { name: nameOf.get(item.category) ?? "" })}</span>
+            {item.ownWeight && <span>{t(g.weightOf, { weight: pct(item.weight) })}</span>}
             {item.dropped && <span className="font-semibold">{c.droppedItem}</span>}
           </>
         );
@@ -577,8 +578,10 @@ function CourseCard({
         return <span className="font-semibold text-amber-300 [.light_&]:text-amber-700">{c.uncategorized}</span>;
       }
     }
+    // The weight as the syllabus gives it, never rescaled: when the weights
+    // don't add up to 100, the note under the outlook says so once.
     return item.counted ? (
-      <span>{t(g.weightOf, { weight: pct((item.weight / grade.totalWeight) * 100) })}</span>
+      <span>{t(g.weightOf, { weight: pct(item.weight) })}</span>
     ) : (
       <span>{g.notCounted}</span>
     );
@@ -661,7 +664,7 @@ function CourseCard({
             className="flex flex-col gap-2 rounded-lg border border-amber-500/40 bg-amber-400/10 p-3"
             data-testid="grades-uncategorized"
           >
-            <p className="text-sm font-semibold text-ink">{t(g.notes.uncategorized, { count: uncategorized.length })}</p>
+            <p className="text-sm font-semibold text-ink">{plural(g.notes.uncategorized, uncategorized.length)}</p>
             <ul className="flex flex-col gap-3">
               {uncategorized.map((item) => {
                 const name = item.name || g.untitledItem;
@@ -863,15 +866,22 @@ function CategoryLine({
   name: string;
   onCount: (count: number | null) => void;
 }) {
-  const { dict, t, locale } = useI18n();
+  const { dict, t, locale, plural } = useI18n();
   const c = dict.grades.categories;
   const pct = (n: number) => formatPercent(n, locale);
+  // One weight per item: what the category carries itself, and (when some of
+  // its items carry their own weight) how many count on their own.
+  const average = result.combinedPercent ?? result.percent;
   return (
     <li className="flex items-start gap-3 px-3 py-2" data-testid="grades-category">
       <div className="min-w-0 flex-1">
         <p dir="auto" className="break-words text-sm font-semibold text-ink">{name}</p>
         <p className="flex flex-wrap gap-x-2 text-xs text-ink-soft">
-          <span>{t(c.weight, { weight: pct(result.weight) })}</span>
+          {result.covered ? (
+            <span>{plural(c.covered, result.ownWeighted, { weight: pct(result.ownWeightSum) })}</span>
+          ) : (
+            <span>{t(c.weight, { weight: pct(result.weight) })}</span>
+          )}
           <span aria-hidden>·</span>
           <span>{t(c.scored, { scored: result.scored, count: result.count })}</span>
           {result.dropLowest > 0 && (
@@ -881,7 +891,12 @@ function CategoryLine({
             </>
           )}
         </p>
-        {result.countAssumed && (
+        {result.ownWeighted > 0 && !result.covered && (
+          <p className="mt-1 text-xs text-ink-soft" data-testid="grades-own-weighted">
+            {plural(c.ownPart, result.ownWeighted)}
+          </p>
+        )}
+        {result.countAssumed && !result.covered && (
           <p className="mt-1 text-xs text-ink-soft" data-testid="grades-count-assumed">
             {result.listed > 0 ? t(c.countAssumed, { count: result.count }) : c.countEmpty}
           </p>
@@ -889,9 +904,9 @@ function CategoryLine({
       </div>
       <div className="flex shrink-0 flex-col items-end gap-1">
         <span className="text-sm font-semibold tabular-nums text-ink" data-testid="grades-category-average">
-          {result.percent === null ? "—" : pct(result.percent)}
+          {average === null ? "—" : pct(average)}
         </span>
-        <label className="flex items-center gap-1.5 text-xs text-ink-soft">
+        {!result.covered && <label className="flex items-center gap-1.5 text-xs text-ink-soft">
           <span>{c.countLabel}</span>
           <ScoreInput
             value={result.countAssumed ? "" : String(result.count)}
@@ -910,7 +925,7 @@ function CategoryLine({
               return true;
             }}
           />
-        </label>
+        </label>}
       </div>
     </li>
   );

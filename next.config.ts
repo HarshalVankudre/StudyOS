@@ -20,10 +20,20 @@ const APP_CSP = buildAppCsp({
   clerkProxyUrl: process.env.NEXT_PUBLIC_CLERK_PROXY_URL,
 });
 
+// One id per build (a Docker build argument, the Cloud Build id). With it,
+// Next.js notices a browser tab that still runs the previous build and
+// reloads it on its next navigation instead of mixing two versions; the
+// editor handles the tab that never navigates (it stops saving, keeps the
+// edits in its local draft and asks for a reload, see workspace-sync.ts).
+const DEPLOYMENT_VERSION = process.env.DEPLOYMENT_VERSION?.trim() || undefined;
+
 const nextConfig: NextConfig = {
+  ...(DEPLOYMENT_VERSION ? { deploymentId: DEPLOYMENT_VERSION } : {}),
   // The bucket the CSP above was built for, so the startup check can refuse a
   // build whose img-src does not match the bucket in use (lib/ops/env.ts).
   env: { STUDYOS_BUILD_ASSETS_BUCKET: ASSETS_BUCKET ?? "" },
+  // No "X-Powered-By: Next.js" header: it tells attackers what to probe for.
+  poweredByHeader: false,
   // Emit a self-contained server (.next/standalone) for the Docker/Cloud Run image.
   output: "standalone",
   // The Prisma client + query-engine binary live under src/generated/prisma.

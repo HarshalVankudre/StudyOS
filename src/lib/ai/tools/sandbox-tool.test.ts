@@ -1,6 +1,6 @@
 // src/lib/ai/tools/sandbox-tool.test.ts
 import { describe, expect, it } from "vitest";
-import { createSandboxTool } from "./sandbox-tool";
+import { createSandboxTool, RENDER_UNAVAILABLE } from "./sandbox-tool";
 import { FakeSandboxRunner } from "@/lib/ai/sandbox/runner.fake";
 import type { CreateAssetFn } from "@/lib/assets/service";
 
@@ -21,7 +21,7 @@ function deps(result = {
 const baseInput = {
   inputs: [{ path: "main.tex", content: "\\documentclass{article}" }],
   setup: [],
-  run: ["tectonic main.tex", "pdftoppm -png main.pdf out/page"],
+  run: ["pdflatex -interaction=nonstopmode -halt-on-error -no-shell-escape main.tex", "pdftoppm -png main.pdf out/page"],
   outputs: ["out/page-1.png"],
   timeoutSec: 60,
 };
@@ -206,5 +206,89 @@ describe("run_in_sandbox: renders counted toward the agent turn's cap", () => {
     await createSandboxTool({ ...failed, enabled: true, quota }).handler(baseInput, { taskId: "t_tally", ownerId: "u" });
     expect(takeSandboxCreditsCharged("t_tally")).toBe(2);
     expect(takeSandboxCreditsCharged("t_tally")).toBe(0);
+  });
+});
+
+describe("run_in_sandbox: offline only, and failures that say what to do", () => {
+  function counting() {
+    const calls = { reserve: 0, settle: 0, release: 0 };
+    return {
+      calls,
+      quota: {
+        reserve: async () => {
+          calls.reserve += 1;
+          return {
+            ok: true as const,
+            charge: { settle: async () => void (calls.settle += 1), release: async () => void (calls.release += 1) },
+          };
+        },
+      },
+    };
+  }
+  const ok = { exitCode: 0, logTail: "", artifacts: [{ path: "out/a.png", bytes: new Uint8Array([1]) }] };
+
+  it.each([
+    ["apt-get install -y texlive"],
+    ["pip install matplotlib"],
+    ["python3 -m pip install numpy"],
+    ["npm install -g @mermaid-js/mermaid-cli"],
+    ["tectonic main.tex"],
+    ["tlmgr install siunitx"],
+    ["curl -O https://example.com/x.sty"],
+  ])("refuses %s before reserving anything or starting a sandbox", async (command) => {
+    const { createAsset } = deps();
+    let ran = false;
+    const runner = { run: async () => ((ran = true), ok) };
+    const q = counting();
+    const tool = createSandboxTool({ runner, createAsset, enabled: true, quota: q.quota });
+    await expect(
+      Promise.resolve(tool.handler({ ...baseInput, setup: [command] }, { taskId: "t", ownerId: "u" })),
+    ).rejects.toThrow(/no network and nothing can be installed.*Nothing was charged/);
+    expect(q.calls.reserve).toBe(0);
+    expect(ran).toBe(false);
+  });
+
+  it("does not refuse the offline toolchain's own commands", async () => {
+    const { createAsset } = deps();
+    const q = counting();
+    const tool = createSandboxTool({ runner: { run: async () => ok }, createAsset, enabled: true, quota: q.quota });
+    const input = {
+      ...baseInput,
+      run: ["python3 plot.py", "dot -Tpng -Gdpi=200 graph.dot -o out/a.png", "xelatex -no-shell-escape cjk.tex"],
+      outputs: ["out/a.png"],
+    };
+    await tool.handler(input, { taskId: "t", ownerId: "u" });
+    expect(q.calls).toEqual({ reserve: 1, settle: 1, release: 1 });
+  });
+
+  it("while the image lacks the toolchain, refuses before reserving, with a message the agent can pass on", async () => {
+    const { createAsset } = deps();
+    const q = counting();
+    const runner = { available: () => false, run: async () => ok };
+    const tool = createSandboxTool({ runner, createAsset, enabled: true, quota: q.quota });
+    await expect(Promise.resolve(tool.handler(baseInput, { taskId: "t", ownerId: "u" }))).rejects.toThrow(RENDER_UNAVAILABLE);
+    expect(q.calls.reserve).toBe(0);
+  });
+
+  it("meeting an outdated image mid-run gives the credits back and says rendering is unavailable", async () => {
+    const { createAsset } = deps();
+    const q = counting();
+    const outdated = Object.assign(new Error("old image"), { name: "SandboxImageOutdatedError" });
+    const runner = { run: async () => { throw outdated; } };
+    const tool = createSandboxTool({ runner, createAsset, enabled: true, quota: q.quota });
+    await expect(Promise.resolve(tool.handler(baseInput, { taskId: "t", ownerId: "u" }))).rejects.toThrow(RENDER_UNAVAILABLE);
+    expect(q.calls).toEqual({ reserve: 1, settle: 0, release: 1 });
+  });
+
+  it("a render that failed returns its log and a note: not charged, fix once or tell the student", async () => {
+    const { createAsset } = deps();
+    const q = counting();
+    const runner = { run: async () => ({ exitCode: 1, logTail: "! Undefined control sequence.", artifacts: [] }) };
+    const tool = createSandboxTool({ runner, createAsset, enabled: true, quota: q.quota });
+    const out = (await tool.handler(baseInput, { taskId: "t", ownerId: "u" })) as { note?: string; logTail: string };
+    expect(out.logTail).toContain("Undefined control sequence");
+    expect(out.note).toMatch(/failed \(exit code 1\) and was not charged/);
+    expect(out.note).toMatch(/tell the student/);
+    expect(q.calls.settle).toBe(0);
   });
 });

@@ -16,6 +16,12 @@ async function headersFor(path: string): Promise<Record<string, string>> {
   return out;
 }
 
+describe("server fingerprint", () => {
+  it("does not send X-Powered-By", () => {
+    expect(nextConfig.poweredByHeader).toBe(false);
+  });
+});
+
 describe("app Content-Security-Policy", () => {
   it.each(["/", "/app", "/app/settings", "/privacy", "/sign-in", "/api/health"])(
     "restricts frames on %s",

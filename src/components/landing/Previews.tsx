@@ -46,7 +46,8 @@ import {
 import { TODAY_MINUTES_OPTIONS, type DailyStudyPlanItem } from "@/lib/agents/daily-study/types";
 import { formatGrade, formatPercent, resolveScale } from "@/lib/grades/scales";
 import { outlookText, targetText } from "@/components/workspace/grades/text";
-import { studyKitCost } from "@/lib/credits-info";
+import { modelForPlan } from "@/lib/ai/plans";
+import { isFixedPrice, studyKitPartQuote, studyKitQuote } from "@/lib/price-list";
 import { cn } from "@/lib/utils";
 import {
   sampleExams,
@@ -352,7 +353,9 @@ export function StudyKitPreview({ dict, locale }: Omit<PreviewProps, "today">) {
   const M = dict.materials;
   const S = dict.landing.samples;
   const page = (n: number) => fmt(dict.quiz.sourcePage, { page: n });
-  const cost = studyKitCost(3);
+  // Three parts at the price the configured model is charged (lib/price-list.ts).
+  const part = studyKitPartQuote(modelForPlan("free"));
+  const cost = studyKitQuote(3, part);
 
   return (
     <Frame label={fmt(M.kitPageTitle, { title: S.card.material })} sample={S.tag}>
@@ -393,7 +396,9 @@ export function StudyKitPreview({ dict, locale }: Omit<PreviewProps, "today">) {
           </p>
           <p className="flex items-start gap-1.5">
             <Clock3 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ink-faint" aria-hidden />
-            {plural(locale, M.cost, cost.estimate, { max: cost.max.toLocaleString(locale) })}{" "}
+            {isFixedPrice(part)
+              ? plural(locale, M.costFixed, cost.list, { each: part.list.toLocaleString(locale) })
+              : plural(locale, M.costRange, cost.price, { max: cost.max.toLocaleString(locale) })}{" "}
             {M.costNote}
           </p>
         </div>
@@ -433,9 +438,16 @@ export function GradesPreview({ dict, locale }: Omit<PreviewProps, "today">) {
   const S = dict.landing.samples;
   const { rows, grade, target } = sampleGrade(S);
   const us = resolveScale("us_letter");
+  const ukValue = formatGrade(grade.current ?? 0, resolveScale("uk_degree", undefined, G.uk), locale);
   const scales = [
     { label: G.presets.us_letter, value: formatGrade(grade.current ?? 0, resolveScale("us_letter"), locale) },
-    { label: G.presets.uk_degree, value: formatGrade(grade.current ?? 0, resolveScale("uk_degree", undefined, G.uk), locale) },
+    {
+      label: G.presets.uk_degree,
+      value: ukValue,
+      // UK degree classes ("First", "Third") stay in English in other
+      // languages: a proper noun, marked as English (and set in italics).
+      foreign: locale !== "en" && /[A-Za-z]/.test(ukValue) ? "en" : undefined,
+    },
     { label: G.presets.de_grade, value: formatGrade(grade.current ?? 0, resolveScale("de_grade"), locale) },
   ];
 
@@ -471,7 +483,12 @@ export function GradesPreview({ dict, locale }: Omit<PreviewProps, "today">) {
           {scales.map((s) => (
             <li key={s.label} className="rounded-lg border border-line bg-surface px-3 py-2">
               <p className="truncate text-[11px] text-ink-faint">{s.label}</p>
-              <p className="font-display text-xl font-bold text-ink">{s.value}</p>
+              <p
+                lang={"foreign" in s ? s.foreign : undefined}
+                className={cn("font-display text-xl font-bold text-ink", "foreign" in s && s.foreign && "italic")}
+              >
+                {s.value}
+              </p>
             </li>
           ))}
         </ul>

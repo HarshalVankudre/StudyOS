@@ -90,16 +90,37 @@ export interface ItemResult {
   uncategorized?: boolean;
   /** Its category drops the lowest scores and this is one of them (for now). */
   dropped?: boolean;
+  /**
+   * It belongs to `category` but carries its own weight, so it counts on
+   * that weight and the category's weight covers only the rest of its items.
+   */
+  ownWeight?: boolean;
 }
 
 /** How one grading category is doing. */
 export interface CategoryResult {
   id: string;
   name: string;
-  /** Percent of the course grade, as configured. */
+  /**
+   * Percent of the course grade the category itself carries: as configured,
+   * less the weights its items carry on their own rows (see `ownWeighted`).
+   */
   weight: number;
+  /** Percent of the course grade, as configured. */
+  configuredWeight: number;
+  /** Items of the category that carry their own weight (they count on it, not on the category's). */
+  ownWeighted: number;
+  /** Sum of those items' own weights. */
+  ownWeightSum: number;
+  /**
+   * Every item of the category carries its own weight and they cover its
+   * weight: the category only describes them and adds nothing to the grade.
+   */
+  covered: boolean;
   /** Average of its scored items (after drops), or null with none scored. */
   percent: number | null;
+  /** Average over everything in it, items with their own weight included (for display). */
+  combinedPercent: number | null;
   /** Listed items with a score (real, or hypothetical in what-if). */
   scored: number;
   /** Items listed in it. */
@@ -347,10 +368,14 @@ interface Slot {
 
 interface CategoryState {
   def: GradeCategoryInput;
+  /** The weight the category itself carries (configured, less its items' own weights). */
+  weight: number;
   slots: Slot[];
   drop: number;
   listed: number;
   countAssumed: boolean;
+  /** Items of the category on their own weight: id, weight, percentage. */
+  own: { id: string; w: number; p: number | null }[];
 }
 
 /** Weighted average of a category's slots, `fill` for unscored ones; null when nothing is known. */
@@ -370,7 +395,7 @@ function categoryAverage(state: CategoryState, fill: number | null): { average: 
   return { average, dropped: removed.flatMap((s) => (s.id ? [s.id] : [])) };
 }
 
-type Placement = "category" | "single" | "excluded" | "uncategorized";
+type Placement = "category" | "own" | "single" | "excluded" | "uncategorized";
 
 /**
  * The course grade when part of it is shared by categories: each category's
@@ -380,6 +405,14 @@ type Placement = "category" | "single" | "excluded" | "uncategorized";
  * Items a category will still get (its expected count beyond the listed
  * ones) count as not scored yet, so "what do I need" spreads what is left
  * over every item still to come, each in proportion to its weight.
+ *
+ * One weight per item, never two. An item's own weight wins: an item of a
+ * category that carries a weight of its own ("Midterm 1 20%" in "Midterms
+ * 40%") counts on that weight, and the category's weight covers only the
+ * rest of its items (40 - 20 for the other midterm). A category whose items
+ * all carry their own weights only describes them and adds nothing, so a
+ * course built as "Midterms 40%" plus two 20% midterm rows adds up to 40,
+ * not 80.
  */
 function computeCategorizedGrade(
   inputs: readonly GradeItemInput[],
@@ -407,7 +440,7 @@ function computeCategorizedGrade(
   if (invalid > 0) notes.push({ code: "invalid_max", count: invalid });
 
   const placement = (item: GradeItemInput): Placement => {
-    if (item.category && byId.has(item.category)) return "category";
+    if (item.category && byId.has(item.category)) return finite(item.weight) && item.weight > 0 ? "own" : "category";
     if (finite(item.weight) && item.weight > 0) return "single";
     if (item.excluded || finite(item.weight)) return "excluded";
     return "uncategorized";
@@ -416,29 +449,40 @@ function computeCategorizedGrade(
   const states = new Map<string, CategoryState>();
   for (const def of defs) {
     const members = scored.filter((s) => placement(s.item) === "category" && s.item.category === def.id);
+    const own = scored
+      .filter((s) => placement(s.item) === "own" && s.item.category === def.id)
+      .map((s) => ({ id: s.item.id, w: s.item.weight as number, p: s.percent }));
+    const ownSum = own.reduce((sum, x) => sum + x.w, 0);
+    // What the category itself still carries once its items' own weights are taken out.
+    const weight = def.weight - ownSum > 0.01 ? def.weight - ownSum : 0;
     const maxes = members.map((m) => m.item.maxScore).filter((m): m is number => finite(m) && m > 0);
     const points = maxes.length > 0;
     const meanMax = points ? maxes.reduce((a, b) => a + b, 0) / maxes.length : 1;
     const w = (item: GradeItemInput) => (points ? (finite(item.maxScore) && item.maxScore > 0 ? item.maxScore : meanMax) : 1);
     const slots: Slot[] = members.map((m) => ({ id: m.item.id, w: w(m.item), p: m.percent }));
-    const expected = finite(def.expectedCount) && def.expectedCount > 0 ? Math.round(def.expectedCount) : 0;
-    const count = Math.max(expected, slots.length, 1);
+    // The expected count is of every item in the category, those on their own weight included.
+    const expectedAll = finite(def.expectedCount) && def.expectedCount > 0 ? Math.round(def.expectedCount) : 0;
+    const expected = Math.max(0, expectedAll - own.length);
+    const count = weight > 0 ? Math.max(expected, slots.length, 1) : slots.length;
     for (let i = slots.length; i < count; i += 1) slots.push({ id: null, w: meanMax, p: fill });
     states.set(def.id, {
       def,
+      weight,
       slots,
       drop: finite(def.dropLowest) ? Math.max(0, Math.floor(def.dropLowest)) : 0,
       listed: members.length,
-      countAssumed: expected === 0,
+      countAssumed: expectedAll === 0,
+      own,
     });
   }
 
-  const singles = scored.filter((s) => placement(s.item) === "single");
+  // Items on their own weight, whether or not they belong to a category.
+  const singles = scored.filter((s) => placement(s.item) === "single" || placement(s.item) === "own");
   const uncategorized = scored.filter((s) => placement(s.item) === "uncategorized").map((s) => s.item.id);
   if (uncategorized.length > 0) notes.push({ code: "uncategorized", count: uncategorized.length });
 
   const totalWeight =
-    defs.reduce((s, c) => s + c.weight, 0) + singles.reduce((s, x) => s + (x.item.weight as number), 0);
+    [...states.values()].reduce((s, c) => s + c.weight, 0) + singles.reduce((s, x) => s + (x.item.weight as number), 0);
 
   const currentByCat = new Map<string, { average: number | null; dropped: string[] }>();
   for (const [id, state] of states) currentByCat.set(id, categoryAverage(state, null));
@@ -447,12 +491,12 @@ function computeCategorizedGrade(
   const items: ItemResult[] = scored.map((s) => {
     const place = placement(s.item);
     let weight = 0;
-    if (place === "single") weight = s.item.weight as number;
+    if (place === "single" || place === "own") weight = s.item.weight as number;
     else if (place === "category") {
       const state = states.get(s.item.category as string)!;
       const totalW = state.slots.reduce((sum, x) => sum + x.w, 0);
       const slot = state.slots.find((x) => x.id === s.item.id);
-      weight = totalW > 0 && slot ? (state.def.weight * slot.w) / totalW : 0;
+      weight = totalW > 0 && slot ? (state.weight * slot.w) / totalW : 0;
     }
     return {
       id: s.item.id,
@@ -463,7 +507,8 @@ function computeCategorizedGrade(
       hypothetical: s.hypothetical,
       weight,
       counted: weight > 0,
-      ...(place === "category" ? { category: s.item.category } : {}),
+      ...(place === "category" || place === "own" ? { category: s.item.category } : {}),
+      ...(place === "own" ? { ownWeight: true } : {}),
       ...(place === "uncategorized" ? { uncategorized: true } : {}),
       ...(droppedIds.has(s.item.id) ? { dropped: true } : {}),
     };
@@ -471,23 +516,36 @@ function computeCategorizedGrade(
 
   const categoryResults: CategoryResult[] = [...states.values()].map((state) => {
     const current = currentByCat.get(state.def.id)!;
+    const ownScored = state.own.filter((x) => x.p !== null);
+    const ownSum = state.own.reduce((s, x) => s + x.w, 0);
+    // For display: the category's own share and its items on their own weight, by weight.
+    const parts = [
+      ...(current.average !== null && state.weight > 0 ? [{ w: state.weight, p: current.average }] : []),
+      ...ownScored.map((x) => ({ w: x.w, p: x.p as number })),
+    ];
+    const partsW = parts.reduce((s, x) => s + x.w, 0);
     return {
       id: state.def.id,
       name: state.def.name,
-      weight: state.def.weight,
+      weight: state.weight,
+      configuredWeight: state.def.weight,
+      ownWeighted: state.own.length,
+      ownWeightSum: ownSum,
+      covered: state.own.length > 0 && state.weight === 0,
       percent: current.average,
-      scored: state.slots.filter((x) => x.id !== null && x.p !== null).length,
-      listed: state.listed,
-      count: state.slots.length,
+      combinedPercent: partsW > 0 ? parts.reduce((s, x) => s + x.w * x.p, 0) / partsW : null,
+      scored: state.slots.filter((x) => x.id !== null && x.p !== null).length + ownScored.length,
+      listed: state.listed + state.own.length,
+      count: state.slots.length + state.own.length,
       countAssumed: state.countAssumed,
       dropLowest: state.drop,
       dropped: current.dropped,
-      decidedShare: state.slots.filter((x) => x.p !== null).length / state.slots.length,
+      decidedShare: state.slots.length > 0 ? state.slots.filter((x) => x.p !== null).length / state.slots.length : 0,
     };
   });
 
   if (totalWeight > 0 && Math.abs(totalWeight - 100) > 0.01) notes.push({ code: "weights_sum", sum: totalWeight });
-  const counts = (s: (typeof scored)[number]) => placement(s.item) === "category" || placement(s.item) === "single";
+  const counts = (s: (typeof scored)[number]) => placement(s.item) !== "excluded" && placement(s.item) !== "uncategorized";
   if (scored.some((s) => counts(s) && s.percent !== null && s.percent > 100 + EPS)) notes.push({ code: "extra_credit" });
 
   const remainingCount =
@@ -517,7 +575,9 @@ function computeCategorizedGrade(
   /** The course grade if everything not scored yet scores `rest`. */
   const courseAt = (rest: number): number => {
     let sum = 0;
-    for (const state of states.values()) sum += state.def.weight * (categoryAverage(state, rest).average ?? rest);
+    for (const state of states.values()) {
+      if (state.weight > 0) sum += state.weight * (categoryAverage(state, rest).average ?? rest);
+    }
     for (const s of singles) sum += (s.item.weight as number) * (s.percent ?? rest);
     return sum / totalWeight;
   };
@@ -525,7 +585,7 @@ function computeCategorizedGrade(
   let earnedWeight = 0;
   let earned = 0;
   for (const result of categoryResults) {
-    if (result.percent === null) continue;
+    if (result.percent === null || result.weight <= 0) continue;
     earnedWeight += result.weight;
     earned += result.weight * result.percent;
   }

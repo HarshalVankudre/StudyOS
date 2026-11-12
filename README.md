@@ -47,26 +47,43 @@ in on their own. Miss a day and the plan rebuilds around what's left.
 ## Pricing
 
 Studying is free on every plan: flashcard reviews, quizzes, Today, the grade tracker,
-deadline sync, export and undo never use credits. Credits pay for AI work (building
-a workspace, study kits, assistant messages).
+editing, deadline sync, export and undo never use credits. Credits pay for AI work.
+There are no feature gates: every feature is on both plans.
 
-- **Free:** 300 credits at sign-up; once a month, if the balance is under 150,
-  150 credits are added.
-- **Pro:** $5 a month by default, with 1,000 credits for every paid month, higher
-  hourly limits and a higher per-message ceiling. Both plans use the same AI model
-  unless `STUDYOS_FREE_MODEL` / `STUDYOS_PRO_MODEL` say otherwise.
+- **Free** is a trial: a new account gets 300 credits once, to try everything. There
+  is no monthly top-up.
+- **Pro:** $7.99 a month or $39.99 a year (the prices shown while billing is off;
+  with billing on, the pages show what the Stripe prices charge). Pro gives 1,000
+  credits for every paid month, higher hourly limits and a higher per-message ceiling
+  (30 credits on Free, 100 on Pro).
 - **Credit packs:** 1,000 credits for $10, one-time, on either plan.
 - Credits never expire and unused credits carry over.
 
-The numbers above are the defaults in code. The source of truth is:
+Every AI action has a fixed, published price, shown before the student starts it:
 
-- displayed Pro prices: `src/lib/plan-pricing.ts`, configured with
-  `STUDYOS_PRO_MONTHLY_PRICE` (default `5`) and `STUDYOS_PRO_ANNUAL_PRICE`
-  (no default; the yearly option appears only when it and `STRIPE_PRICE_PRO_ANNUAL`
-  are set). They must match the Stripe prices `STRIPE_PRICE_PRO` and
-  `STRIPE_PRICE_PRO_ANNUAL`.
-- credits and packs: `src/lib/credits.ts` and `src/lib/credits-info.ts`;
-  hourly limits: `src/lib/usage-limits.ts`; per-message ceilings: `src/lib/ai/budgets.ts`.
+| Action | Credits |
+| :--- | ---: |
+| Build a workspace (setup questions included) | 30 |
+| One assistant message | 3 |
+| Study kit, per part of the material processed | 10 |
+| A rendered visual from the sandbox | 2 |
+
+What is charged equals what was shown, except that a failure that delivered nothing
+is free (for assistant messages, up to 3 a day) and a stopped run pays only the share
+it completed, never more than the price. If the configured model is expensive enough
+that an action's real cost exceeds its price, the action is charged its real cost and
+the pages show the higher figure (and the most it can cost) up front: the list price
+is a floor, not a promise the code cannot keep. A long assistant request can likewise
+cost more than 3, never more than the per-message ceiling.
+
+One module holds all of it: `src/lib/price-list.ts` (trial and Pro grants, action
+prices, per-message ceilings, hourly limits, the fallback Pro prices). The pricing,
+landing, credits, settings, generator and terms pages, the assistant chat and the
+study-kit dialog read it; `src/lib/price-list.test.ts` checks this README against it.
+Displayed Pro prices with billing on come from Stripe (`src/lib/plan-pricing.ts`,
+`STRIPE_PRICE_PRO`, `STRIPE_PRICE_PRO_ANNUAL`); `STUDYOS_PRO_MONTHLY_PRICE` /
+`STUDYOS_PRO_ANNUAL_PRICE` override the fallback shown while billing is off. Existing
+subscribers keep the Stripe price they subscribed at.
 
 ## Development
 

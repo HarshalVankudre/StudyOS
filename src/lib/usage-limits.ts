@@ -11,67 +11,11 @@
  */
 import { prisma } from "@/lib/db";
 import { userLockKey, withKeyLock } from "@/lib/db-lock";
+import { USAGE_LIMITS, type LimitedKind } from "@/lib/price-list";
 
-export type LimitedKind =
-  | "generate"
-  | "generate_questions"
-  | "agent"
-  | "sandbox_run"
-  | "search"
-  | "study_kit"
-  | "material_upload"
-  | "feed_sync"
-  | "generate_failed"
-  | "study_kit_failed"
-  | "workspace_duplicate"
-  | "syllabus_upload"
-  | "daily_plan";
-
-const HOUR = 60 * 60 * 1000;
-const DAY = 24 * HOUR;
-
-/** Per-window request caps. Generous for real users, hard walls for abuse. */
-export const USAGE_LIMITS: Record<
-  LimitedKind,
-  { free: number; pro: number; windowMs: number }
-> = {
-  // Workspace generations are the most expensive request (~100s of model time).
-  generate: { free: 10, pro: 30, windowMs: HOUR },
-  // Onboarding questions before a generation (one small model call each).
-  generate_questions: { free: 20, pro: 60, windowMs: HOUR },
-  // Agent chat turns.
-  agent: { free: 60, pro: 180, windowMs: HOUR },
-  // Sandbox runs cost real Daytona compute per call — cap per day.
-  sandbox_run: { free: 20, pro: 60, windowMs: DAY },
-  // Command-palette searches (debounced as the student types). Not a paid
-  // feature, so the same cap for everyone; only a runaway client hits it.
-  search: { free: 600, pro: 600, windowMs: HOUR },
-  // Study kits from the student's material (up to 10 model calls each).
-  study_kit: { free: 10, pro: 30, windowMs: HOUR },
-  // Material uploads and pastes (text extraction is CPU work, no model call).
-  material_upload: { free: 30, pro: 90, windowMs: HOUR },
-  // Calendar feed fetches (previews and syncs; an outbound request each).
-  // Sync-on-open runs at most every few hours per feed, so this only stops
-  // a runaway client or someone using StudyOS as a fetch proxy.
-  feed_sync: { free: 30, pro: 30, windowMs: HOUR },
-  // Workspace generations that FAILED (nothing delivered, nothing charged).
-  // Counted separately so honest failures stay free for students while
-  // provoking failures on purpose (two long model calls each, never billed)
-  // is bounded: past this, new generations wait. Checked with
-  // isUsageLimitReached and recorded with recordUsageEvent.
-  generate_failed: { free: 3, pro: 6, windowMs: DAY },
-  // Study kits that FAILED (nothing verifiable made, nothing charged): the
-  // same bound for the same reason (up to 10 model calls each, never billed).
-  study_kit_failed: { free: 3, pro: 6, windowMs: DAY },
-  // Workspace copies (each up to 2 MB of storage).
-  workspace_duplicate: { free: 20, pro: 40, windowMs: HOUR },
-  // Syllabus file uploads (POST /api/import/syllabus): each starts a capped
-  // extraction process. A student uploads a handful; retries fit easily.
-  syllabus_upload: { free: 20, pro: 60, windowMs: HOUR },
-  // "Plan my day" / "Rebuild from today": no model call, but each one loads
-  // and plans across every workspace the student owns.
-  daily_plan: { free: 30, pro: 30, windowMs: HOUR },
-};
+// The caps per plan are part of the plan definitions (lib/price-list.ts),
+// which the pricing page reads too.
+export { USAGE_LIMITS, type LimitedKind };
 
 /**
  * Workspaces one account may store, trash included (trashed ones still take

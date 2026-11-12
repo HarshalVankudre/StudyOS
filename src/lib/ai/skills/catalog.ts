@@ -5,6 +5,7 @@ import "../tools/component-tools";  // check_component (interactive artifacts)
 import { skillRegistry, type SkillRegistry } from "./registry";
 import { agentSandboxEnabled } from "@/lib/flags";
 import { PRACTICE_INTEGRITY_NOTE, SKILL_INTEGRITY_NOTE } from "../integrity";
+import { RENDER_SKILL_INSTRUCTIONS } from "../sandbox/toolchain";
 
 const INSPECT = ["summarize_workspace", "find_entities", "read_area", "inspect_workspace"];
 
@@ -63,9 +64,9 @@ export function registerStage1Skills(registry: SkillRegistry = skillRegistry): v
   if (agentSandboxEnabled()) {
     registry.register({
       id: "render-visual",
-      version: "1.0.0",
-      instructions:
-        "Use when the request needs a rendered image (LaTeX, a diagram, a plot). Write the source with run_in_sandbox (inputs + run commands that write files under out/, list them in outputs). For each returned artifact, read the target page and call apply_ops with set_page_blocks that appends a media block { type:'media', assetId:<handle.assetId>, mediaKind:'image', mime:<handle.mime>, caption:<short> }. Keep ids exact; never inline the image yourself.",
+      version: "2.0.0",
+      // Only the offline tools the sandbox image provides (lib/ai/sandbox/toolchain.ts).
+      instructions: RENDER_SKILL_INSTRUCTIONS,
       toolIds: [...INSPECT, "apply_ops", "run_in_sandbox"],
     });
   }

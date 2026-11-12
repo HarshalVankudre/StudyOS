@@ -81,10 +81,20 @@ describe("merge3", () => {
   });
 
   // Browser QA: two tabs each appended a sentence to one paragraph.
-  it("keeps both sentences when two people append to the same paragraph", () => {
+  it("keeps both sentences when two people append unrelated sentences to the same paragraph", () => {
+    expect(
+      merge3("Cells are small.", "Cells are small. Most divide.", "Cells are small. Plants have walls."),
+    ).toEqual({ ok: true, text: "Cells are small. Plants have walls. Most divide." });
+  });
+
+  // Third review: two additions at one spot that begin with the same new word
+  // may be the same typing seen twice (one side already holding the other's
+  // first words). That cannot be told, so it is a conflict (both versions are
+  // kept as blocks), never a guess.
+  it("does not combine two additions at the same spot that share a new word", () => {
     expect(
       merge3("Cells are small.", "Cells are small. They divide.", "Cells are small. They have a nucleus."),
-    ).toEqual({ ok: true, text: "Cells are small. They have a nucleus. They divide." });
+    ).toEqual({ ok: false });
   });
 
   it("combines a deletion with an insertion right next to it", () => {

@@ -12,7 +12,8 @@ import { remoteAssetImagesAvailable } from "@/lib/ops/env";
 
 // All imports are static (ES2017 target forbids top-level await).
 // Construction of the Daytona client and asset service is guarded behind the
-// flag so that when AGENT_SANDBOX is off (the default, including prod) no
+// flag so that when AGENT_SANDBOX is off (the default; the public deployment
+// turns it on, see infra/sandbox/README.md) no
 // Daytona client is instantiated and the tool is not registered. It also stays
 // off when the build cannot show its images (ASSETS_BUCKET missing or not the
 // bucket the image CSP was built for, see lib/ops/env.ts).

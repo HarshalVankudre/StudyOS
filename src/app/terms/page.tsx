@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
 import { LegalLayout } from "@/components/LegalLayout";
 import {
-  FREE_MONTHLY_CREDITS,
-  FREE_SIGNUP_CREDITS,
+  ACTION_PRICES,
+  FREE_FAILURES_PER_DAY,
   PRO_MONTHLY_CREDITS,
-} from "@/lib/credits";
+  TRIAL_CREDITS,
+  TURN_CREDIT_CAP,
+} from "@/lib/price-list";
 import { getI18n } from "@/lib/i18n/server";
 import { supportEmail } from "@/lib/site";
 
@@ -14,8 +16,9 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 /*
- * Section 3 states the credit rules lib/credits.ts implements; the numbers
- * are read from there so the two cannot drift apart.
+ * Section 3 states the credit rules lib/credits.ts and the charging paths
+ * implement; every number is read from the price list (lib/price-list.ts),
+ * so the two cannot drift apart.
  */
 export default async function TermsPage() {
   const { dict, locale } = await getI18n();
@@ -65,19 +68,48 @@ export default async function TermsPage() {
         <h2>3. Plans, credits & billing</h2>
         <ul>
           <li>
-            AI features consume <strong>credits</strong>. New accounts receive{" "}
-            {n(FREE_SIGNUP_CREDITS)} credits. Once each calendar month, a Free
-            account whose balance is below {n(FREE_MONTHLY_CREDITS)} credits
-            receives {n(FREE_MONTHLY_CREDITS)} credits. The Pro subscription
-            includes {n(PRO_MONTHLY_CREDITS)} credits for each paid month (with
-            yearly billing, for each month of the paid year). Every grant is
-            added to your balance; credits do not expire and nothing resets the
-            balance. Separately purchased credit packs never expire.
+            New accounts receive a one-time trial of {n(TRIAL_CREDITS)}{" "}
+            <strong>credits</strong>. The Free plan includes no further
+            credits. The Pro subscription includes {n(PRO_MONTHLY_CREDITS)}{" "}
+            credits for each paid month (with yearly billing, for each month of
+            the paid year), higher hourly limits and a higher limit on what one
+            assistant message may spend; it does not unlock additional
+            features. Every grant is added to your balance; credits do not
+            expire and nothing resets the balance. Separately purchased credit
+            packs never expire.
+          </li>
+          <li>
+            AI features consume credits at the published price of each action,
+            which is shown in the Service before you start the action: building
+            a workspace (its setup questions included) costs{" "}
+            {n(ACTION_PRICES.build)} credits, one assistant message{" "}
+            {n(ACTION_PRICES.message)} credits, a study kit{" "}
+            {n(ACTION_PRICES.studyKitPart)} credits for each part of your
+            material it processes, and a rendered visual{" "}
+            {n(ACTION_PRICES.render)} credits.
+          </li>
+          <li>
+            If the AI model in use makes an action cost more than its listed
+            price, that action is charged what it actually costs, and the most
+            it can cost is shown before you start it. One assistant message
+            never costs more than {n(TURN_CREDIT_CAP.free)} credits on Free or{" "}
+            {n(TURN_CREDIT_CAP.pro)} credits on Pro, its rendered visuals
+            included.
+          </li>
+          <li>
+            An action that fails and delivers nothing is not charged; for
+            assistant messages this applies to up to{" "}
+            {n(FREE_FAILURES_PER_DAY)} failed messages a day, and a further
+            failed message is charged like a stopped one. If you stop an
+            action, you are charged the share of its price for the work done
+            before you stopped it, never more than its price; a stopped study
+            kit is charged for each part it had finished. A study-kit part that
+            fails is not charged.
           </li>
           <li>
             Studying itself — reviewing flashcards, taking quizzes, the daily
-            plan, grade tracking, deadline import and sync, and export — does not
-            consume credits.
+            plan, grade tracking, editing your workspaces, deadline import and
+            sync, and export — does not consume credits on any plan.
           </li>
           <li>
             Payments and subscriptions are processed by Stripe. Subscriptions
@@ -87,9 +119,7 @@ export default async function TermsPage() {
             any subscription immediately.
           </li>
           <li>
-            Credit consumption scales with how much work the AI performs for a
-            request. Rate limits apply to keep the Service reliable for
-            everyone.
+            Rate limits apply to keep the Service reliable for everyone.
           </li>
           <li>
             A second subscription created by mistake, and any payment taken

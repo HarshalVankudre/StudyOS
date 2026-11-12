@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/compone
 import { useI18n } from "@/lib/i18n/client";
 import {
   applyRunResults,
+  runResultsReplay,
   isCorrect,
   prepareRun,
   scoreRun,
@@ -171,7 +172,10 @@ export function QuizSession({
       if (results.length === 0 && !attempt) return;
       if (attempt) savedAttempt.current.set(r.id, score.score);
       const runMoment = at;
-      update((d) => applyRunResults(d, results, attempt, runMoment), { rebase: "rerun" });
+      update((d) => applyRunResults(d, results, attempt, runMoment), {
+        rebase: "rerun",
+        replay: runResultsReplay(results, attempt, runMoment),
+      });
     },
     [record, update],
   );

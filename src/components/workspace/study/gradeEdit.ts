@@ -1,5 +1,7 @@
-import { assignSchedule, reviewCard, type Grade } from "@/lib/study/srs";
+import { recordReview } from "@/lib/study/review-log";
+import { GRADES, type Grade } from "@/lib/study/srs";
 import type { Flashcard, Workspace } from "@/lib/workspace/types";
+import type { UpdateOptions } from "../workspace-sync";
 
 /** Where a reviewed card lives. */
 export interface CardRef {
@@ -19,27 +21,54 @@ export function findCard(workspace: Workspace, ref: CardRef): Flashcard | undefi
 /**
  * Record one grade on a card, in a workspace draft. This is the pattern for
  * any edit computed from the value it starts from (pass it to `update` with
- * `{ rebase: "rerun" }`):
+ * `gradeOptions`, i.e. `{ rebase: "rerun" }`):
  *  - it finds the card by id, so it lands on the right card wherever the
  *    card is now, and does nothing if the card was deleted;
- *  - it computes the next schedule from the card as it is NOW in the
- *    document it runs on, so a grade given on another device (or an edit by
- *    the AI agent) in the meantime is built upon, not overwritten;
- *  - it is idempotent: `at` (the moment of the answer) becomes the card's
- *    `lastReviewedAt`, and a grade at or before the card's last review is
- *    not applied again. So running it again on a document that already holds
- *    this answer (a save whose reply was lost) changes nothing, even when the
- *    card was graded once more after it ("again", then "good" ten minutes
- *    later): the check is monotonic, not "is it the latest one".
- *
- * A grade older than the card's last review (the same card graded on two
- * devices, the older one arriving later) is not applied either: reviews are
- * only ever applied in time order, and the card keeps the most recent one.
+ *  - it is idempotent: the review is keyed by `at` (the moment of the
+ *    answer), and a review already in the card's log is not recorded again.
+ *    So running it again on a document that already holds this answer (a
+ *    save whose reply was lost, a recovered draft) changes nothing;
+ *  - it does not depend on the order devices sync in: the card's schedule is
+ *    rebuilt from its logged reviews in time order (lib/study/review-log.ts),
+ *    so a review made earlier on a device that syncs later (failed on an
+ *    offline phone in the morning, passed on the laptop in the evening) is
+ *    still counted, in its place.
  */
 export function applyGrade(draft: Workspace, ref: CardRef, grade: Grade, at: Date): void {
   const card = findCard(draft, ref);
   if (!card) return;
-  const last = card.lastReviewedAt ? Date.parse(card.lastReviewedAt) : NaN;
-  if (Number.isFinite(last) && last >= at.getTime()) return;
-  assignSchedule(card, reviewCard(card, grade, at));
+  recordReview(card, grade, at);
+}
+
+/**
+ * The `update` options of a grade: re-run on a newer document, and described
+ * as data so a draft recovered after the tab was closed re-runs it too.
+ */
+export function gradeOptions(ref: CardRef, grade: Grade, at: Date): UpdateOptions {
+  return {
+    rebase: "rerun",
+    replay: {
+      name: "grade",
+      args: { pageId: ref.pageId, blockId: ref.blockId, cardId: ref.cardId, grade, at: at.toISOString() },
+    },
+  };
+}
+
+/** The grade described by `gradeOptions`, as an edit again (null if `args` is not one). */
+export function gradeReplayer(args: unknown): ((draft: Workspace) => void) | null {
+  if (typeof args !== "object" || args === null) return null;
+  const a = args as Record<string, unknown>;
+  const at = typeof a.at === "string" ? new Date(a.at) : null;
+  if (
+    typeof a.pageId !== "string" ||
+    typeof a.blockId !== "string" ||
+    typeof a.cardId !== "string" ||
+    !GRADES.includes(a.grade as Grade) ||
+    !at ||
+    Number.isNaN(at.getTime())
+  ) {
+    return null;
+  }
+  const ref: CardRef = { pageId: a.pageId, blockId: a.blockId, cardId: a.cardId };
+  return (draft) => applyGrade(draft, ref, a.grade as Grade, at);
 }

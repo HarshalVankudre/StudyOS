@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   annualCheckoutConfigured,
   clearProPriceCache,
+  DEFAULT_PRO_ANNUAL_USD,
   DEFAULT_PRO_MONTHLY_USD,
   formatPrice,
   formatUsd,
@@ -32,22 +33,19 @@ describe("parseUsd", () => {
 });
 
 describe("proPricing", () => {
-  it("defaults to $5 a month and no annual offer", () => {
-    expect(proPricing({})).toEqual({ monthlyUsd: DEFAULT_PRO_MONTHLY_USD, annual: null });
-    expect(DEFAULT_PRO_MONTHLY_USD).toBe(5);
+  it("defaults to the price list's $7.99 a month and $39.99 a year", () => {
+    expect(DEFAULT_PRO_MONTHLY_USD).toBe(7.99);
+    expect(DEFAULT_PRO_ANNUAL_USD).toBe(39.99);
+    expect(proPricing({})).toEqual({
+      monthlyUsd: 7.99,
+      annual: { totalUsd: 39.99, perMonthUsd: 3.33, savingsPercent: 58 },
+    });
   });
 
-  it("reads the monthly price from STUDYOS_PRO_MONTHLY_PRICE", () => {
+  it("reads the prices from STUDYOS_PRO_MONTHLY_PRICE and STUDYOS_PRO_ANNUAL_PRICE", () => {
     expect(proPricing({ STUDYOS_PRO_MONTHLY_PRICE: "7" }).monthlyUsd).toBe(7);
-    expect(proPricing({ STUDYOS_PRO_MONTHLY_PRICE: "nonsense" }).monthlyUsd).toBe(5);
-  });
-
-  it("offers annual only when Stripe can sell it AND its displayed price is set", () => {
-    const annualId = { ...BILLING, STRIPE_PRICE_PRO_ANNUAL: "price_y" };
-    expect(proPricing({ ...annualId }).annual).toBeNull(); // no displayed price: never guessed
-    expect(proPricing({ ...BILLING, STUDYOS_PRO_ANNUAL_PRICE: "48" }).annual).toBeNull(); // no Stripe price
-    expect(proPricing({ STRIPE_PRICE_PRO_ANNUAL: "price_y", STUDYOS_PRO_ANNUAL_PRICE: "48" }).annual).toBeNull();
-    expect(proPricing({ ...annualId, STUDYOS_PRO_ANNUAL_PRICE: "48" }).annual).toEqual({
+    expect(proPricing({ STUDYOS_PRO_MONTHLY_PRICE: "nonsense" }).monthlyUsd).toBe(7.99);
+    expect(proPricing({ STUDYOS_PRO_MONTHLY_PRICE: "5", STUDYOS_PRO_ANNUAL_PRICE: "48" }).annual).toEqual({
       totalUsd: 48,
       perMonthUsd: 4,
       savingsPercent: 20,
@@ -55,11 +53,27 @@ describe("proPricing", () => {
   });
 
   it("never shows a negative saving", () => {
-    const env = { ...BILLING, STRIPE_PRICE_PRO_ANNUAL: "price_y", STUDYOS_PRO_ANNUAL_PRICE: "70" };
-    expect(proPricing(env).annual?.savingsPercent).toBe(0);
+    expect(proPricing({ STUDYOS_PRO_MONTHLY_PRICE: "5", STUDYOS_PRO_ANNUAL_PRICE: "70" }).annual.savingsPercent).toBe(0);
   });
 });
 
+describe("the fallback while billing is off", () => {
+  it("shows both configured prices and offers nothing", async () => {
+    const shown = await getProPricing({ env: {} });
+    expect(shown).toEqual({
+      monthly: { amount: 7.99, currency: "USD" },
+      annual: {
+        total: { amount: 39.99, currency: "USD" },
+        perMonth: { amount: 3.33, currency: "USD" },
+        savingsPercent: 58,
+      },
+      offered: { month: false, year: false },
+      source: "configured",
+    });
+    expect(formatPrice(shown.monthly.amount, "USD", "en")).toBe("$7.99");
+    expect(formatPrice(shown.annual!.total.amount, "USD", "en")).toBe("$39.99");
+  });
+});
 describe("annualCheckoutConfigured", () => {
   afterEach(() => vi.unstubAllEnvs());
 
@@ -186,5 +200,37 @@ describe("round 2, finding 7: Stripe is the source of truth for the displayed pr
       fetchPrice: fetcher({ price_m: price(), price_y: yearly({ currency: "eur" }) }),
     });
     expect(out.annual?.savingsPercent).toBe(0);
+  });
+});
+
+describe("prices in each of the ten languages (QA round 3)", () => {
+  const LOCALES = ["en", "es", "de", "fr", "it", "pt", "nl", "zh", "ja", "ar"];
+
+  it("shows the amount and a dollar sign or USD code in every language", () => {
+    for (const locale of LOCALES) {
+      for (const amount of [0, 5, 10, 4.17]) {
+        const text = formatUsd(amount, locale);
+        expect(text, `${locale} ${amount}`).toMatch(/\$|USD/);
+        const digits = text.replace(/[^\d٠-٩]/g, "");
+        expect(digits.length, `${locale} ${amount}`).toBeGreaterThan(0);
+      }
+    }
+    // Whole amounts carry no ".00"; cents keep both decimals.
+    expect(formatUsd(10, "fr")).not.toMatch(/,00/);
+    expect(formatUsd(4.17, "fr")).toMatch(/4,17/);
+  });
+
+  it("keeps a Latin currency sign in one piece in Arabic (no \"$US 0\")", () => {
+    const text = formatUsd(0, "ar");
+    // The sign is isolated left-to-right, so bidi cannot split "US" from "$".
+    expect(text).toMatch(/\u2066[^\u2069]*\$[^\u2069]*\u2069/);
+    const visibleOrder = text.replace(/[\u2066\u2069\u200f\u200e]/g, "");
+    expect(visibleOrder).not.toContain("$US");
+  });
+
+  it("adds no direction marks in left-to-right languages", () => {
+    for (const locale of LOCALES.filter((l) => l !== "ar")) {
+      expect(formatUsd(5, locale), locale).not.toMatch(/[\u2066\u2069]/);
+    }
   });
 });

@@ -15,9 +15,12 @@ import { useLiveBalance } from "@/lib/credits-bus";
 export function CreditChip({
   credits: initial,
   locale,
+  billing = true,
 }: {
   credits: number;
   locale?: string;
+  /** Payments are switched on; without them the popover offers no "Buy credits". */
+  billing?: boolean;
 }) {
   const credits = useLiveBalance(initial);
   const [open, setOpen] = useState(false);
@@ -71,13 +74,15 @@ export function CreditChip({
             {label}
           </p>
           <p className="mt-1 text-xs text-ink-soft">{dict.credits.spentOn}</p>
-          <Link
-            href="/app/credits"
-            onClick={() => setOpen(false)}
-            className="mt-4 block rounded-lg bg-ink px-4 py-2.5 text-center text-sm font-semibold text-paper transition hover:bg-ink/90"
-          >
-            {dict.credits.buy}
-          </Link>
+          {billing && (
+            <Link
+              href="/app/credits"
+              onClick={() => setOpen(false)}
+              className="mt-4 block rounded-lg bg-ink px-4 py-2.5 text-center text-sm font-semibold text-paper transition hover:bg-ink/90"
+            >
+              {dict.credits.buy}
+            </Link>
+          )}
         </div>
       )}
     </div>

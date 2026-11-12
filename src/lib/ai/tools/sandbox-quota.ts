@@ -3,7 +3,7 @@ import "server-only";
 import {
   releaseCreditHold,
   reserveCredits,
-  SANDBOX_RUN_CREDITS,
+  RENDER_CREDITS as SANDBOX_RUN_CREDITS,
   settleCreditHold,
 } from "@/lib/credits";
 import { checkUsageLimit } from "@/lib/usage-limits";

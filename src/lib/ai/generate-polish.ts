@@ -26,6 +26,7 @@ import { getDictionary } from "@/lib/i18n/dictionaries";
 import type { Locale } from "@/lib/i18n/config";
 import { gradeDatabaseScore, detectGradeColumns } from "@/lib/grades/workspace";
 import { assessmentKey, nameStems } from "@/lib/import/assessment-match";
+import { statesCount } from "@/lib/import/syllabus-facts";
 import { titleProperty } from "@/lib/workspace/helpers";
 import type {
   Block,
@@ -962,7 +963,8 @@ function unsupportedGrading(workspace: Workspace, evidence: InputEvidence) {
     }
     for (const category of db.grading.categories) {
       if (category.dropLowest && !dropGiven) delete category.dropLowest;
-      if (category.expectedCount && !new RegExp(`(?<!\\d)${category.expectedCount}(?!\\d)`).test(evidence.text)) {
+      // "Two midterms" states the count as much as "2 midterms" does.
+      if (category.expectedCount && !statesCount(evidence.text, category.expectedCount)) {
         delete category.expectedCount;
       }
     }

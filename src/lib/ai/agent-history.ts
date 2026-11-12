@@ -12,7 +12,9 @@
 import "server-only";
 
 import { prisma } from "@/lib/db";
-import { NOT_TRASHED } from "@/lib/workspace/store";
+import { applyPatch, diff } from "@/lib/workspace/changes";
+import { NOT_TRASHED, parseStoredWorkspace } from "@/lib/workspace/store";
+import type { Workspace } from "@/lib/workspace/types";
 import type {
   AgentArea,
   AgentChatHistoryItem,
@@ -186,6 +188,20 @@ async function recentRows(userId: string, workspaceId: string, take: number): Pr
   return rows.reverse();
 }
 
+/**
+ * Whether undoing an agent change (before -> after) still applies on top of
+ * `current`: the same strict revert the Undo itself runs
+ * (lib/workspace/version-service.ts undoAgentWorkspaceChange), as a dry run.
+ * True when what was saved since does not touch what the change did.
+ */
+export function revertStillApplies(before: Workspace, after: Workspace, current: Workspace): boolean {
+  try {
+    return applyPatch(current, diff(after, before), { mode: "strict" }).report.conflicts === 0;
+  } catch {
+    return false;
+  }
+}
+
 async function undoStatesForRows(
   userId: string,
   workspaceId: string,
@@ -198,7 +214,35 @@ async function undoStatesForRows(
     where: { id: { in: ids }, ownerId: userId, workspaceId },
     select: { id: true, kind: true, undoneAt: true, afterVersion: true },
   });
-  return undoStates(changes, version);
+  const states = undoStates(changes, version);
+
+  // The newest agent change stays undoable after later saves (the student's
+  // own typing, the editor's merge) as long as the Undo can still revert it
+  // on top of them: say so, instead of hiding an Undo the server would honour.
+  const newest = changes
+    .filter((c) => c.kind === "agent" && !c.undoneAt)
+    .sort((a, b) => b.afterVersion - a.afterVersion)[0];
+  if (newest && newest.afterVersion < version && states[newest.id] === "unavailable") {
+    try {
+      const [change, current] = await Promise.all([
+        prisma.workspaceChange.findFirst({
+          where: { id: newest.id, ownerId: userId, workspaceId },
+          select: { beforeData: true, afterData: true },
+        }),
+        prisma.workspace.findFirst({
+          where: { id: workspaceId, ownerId: userId, ...NOT_TRASHED },
+          select: { data: true },
+        }),
+      ]);
+      const before = change && parseStoredWorkspace({ id: workspaceId, data: change.beforeData });
+      const after = change && parseStoredWorkspace({ id: workspaceId, data: change.afterData });
+      const now = current && parseStoredWorkspace({ id: workspaceId, data: current.data });
+      if (before && after && now && revertStillApplies(before, after, now)) states[newest.id] = "available";
+    } catch {
+      // Keep "unavailable": a refused Undo explains itself anyway.
+    }
+  }
+  return states;
 }
 
 /** The chat to redraw, or null when the workspace is missing or trashed. */

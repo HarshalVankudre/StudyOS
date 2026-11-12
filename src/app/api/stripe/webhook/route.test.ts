@@ -35,7 +35,7 @@ import {
   reconcileCheckoutSession,
   runBillingMaintenance,
 } from "@/lib/billing";
-import { FREE_SIGNUP_CREDITS, getCreditBalance, PRO_MONTHLY_CREDITS } from "@/lib/credits";
+import { TRIAL_CREDITS, getCreditBalance, PRO_MONTHLY_CREDITS } from "@/lib/credits";
 
 const USER = "user_1";
 const DAY = 86400;
@@ -138,7 +138,7 @@ describe("invoice.paid credit grants", () => {
     await send("invoice.paid", invoice);
     await send("invoice.paid", invoice); // Stripe retry
     expect(proGrants()).toHaveLength(1);
-    expect(h.db.balance(USER)).toBe(FREE_SIGNUP_CREDITS + PRO_MONTHLY_CREDITS);
+    expect(h.db.balance(USER)).toBe(TRIAL_CREDITS + PRO_MONTHLY_CREDITS);
   });
 
   it("handles the invoice arriving before the subscription row exists", async () => {
@@ -281,7 +281,7 @@ describe("credit packs", () => {
     const { session } = await buyPack();
     await send("checkout.session.completed", session);
     await send("checkout.session.completed", session);
-    expect(h.db.balance(USER)).toBe(FREE_SIGNUP_CREDITS + 1000);
+    expect(h.db.balance(USER)).toBe(TRIAL_CREDITS + 1000);
     expect(h.funnel).toHaveBeenCalledWith(USER, "purchase_credits");
   });
 
@@ -315,9 +315,9 @@ describe("refunds and disputes", () => {
     const { session, chargeId, amount } = await buyPack();
     await send("checkout.session.completed", session);
     await send("charge.refunded", h.stripe.refundCharge(chargeId, amount / 2));
-    expect(h.db.balance(USER)).toBe(FREE_SIGNUP_CREDITS + 500);
+    expect(h.db.balance(USER)).toBe(TRIAL_CREDITS + 500);
     await send("charge.refunded", h.stripe.refundCharge(chargeId, amount / 2));
-    expect(h.db.balance(USER)).toBe(FREE_SIGNUP_CREDITS);
+    expect(h.db.balance(USER)).toBe(TRIAL_CREDITS);
   });
 
   it("a pack refunded in full before the grant landed adds nothing", async () => {
@@ -325,7 +325,7 @@ describe("refunds and disputes", () => {
     await send("charge.refunded", h.stripe.refundCharge(chargeId));
     await send("checkout.session.completed", session); // delayed delivery
     await send("checkout.session.completed", session); // retry
-    expect(h.db.balance(USER)).toBe(FREE_SIGNUP_CREDITS);
+    expect(h.db.balance(USER)).toBe(TRIAL_CREDITS);
     expect(h.db.ledgerSum(USER)).toBe(h.db.balance(USER));
   });
 
@@ -335,10 +335,10 @@ describe("refunds and disputes", () => {
     const dispute = { id: "dp_1", charge: chargeId, payment_intent: paymentIntent, amount, reason: "fraudulent", status: "needs_response" };
     await send("charge.dispute.created", dispute);
     await send("charge.dispute.created", dispute);
-    expect(h.db.balance(USER)).toBe(FREE_SIGNUP_CREDITS);
+    expect(h.db.balance(USER)).toBe(TRIAL_CREDITS);
     await send("charge.dispute.closed", { ...dispute, status: "won" });
     await send("charge.dispute.closed", { ...dispute, status: "won" });
-    expect(h.db.balance(USER)).toBe(FREE_SIGNUP_CREDITS + 1000);
+    expect(h.db.balance(USER)).toBe(TRIAL_CREDITS + 1000);
   });
 
   it("only records subscription refunds (no clawback of monthly credits)", async () => {
@@ -585,10 +585,10 @@ describe("finding 9: refunds and disputes", () => {
     await send("checkout.session.completed", session);
     const inquiry = h.stripe.dispute(chargeId, { status: "warning_needs_response" });
     await send("charge.dispute.created", inquiry);
-    expect(h.db.balance(USER)).toBe(FREE_SIGNUP_CREDITS);
+    expect(h.db.balance(USER)).toBe(TRIAL_CREDITS);
     await send("charge.dispute.closed", { ...inquiry, status: "warning_closed" });
     await send("charge.dispute.closed", { ...inquiry, status: "warning_closed" });
-    expect(h.db.balance(USER)).toBe(FREE_SIGNUP_CREDITS + 1000);
+    expect(h.db.balance(USER)).toBe(TRIAL_CREDITS + 1000);
     expect(h.db.ledgerSum(USER)).toBe(h.db.balance(USER));
   });
 
@@ -599,14 +599,14 @@ describe("finding 9: refunds and disputes", () => {
     const dispute = h.stripe.dispute(chargeId, { amount: 500 });
     await send("charge.dispute.created", dispute);
     await send("charge.dispute.closed", { ...dispute, status: "lost" });
-    expect(h.db.balance(USER)).toBe(FREE_SIGNUP_CREDITS);
+    expect(h.db.balance(USER)).toBe(TRIAL_CREDITS);
   });
 
   it("(b) a lost dispute is counted even when its 'created' event never arrived", async () => {
     const { session, chargeId } = await buyPack();
     await send("checkout.session.completed", session);
     await send("charge.dispute.closed", h.stripe.dispute(chargeId, { status: "lost" }));
-    expect(h.db.balance(USER)).toBe(FREE_SIGNUP_CREDITS);
+    expect(h.db.balance(USER)).toBe(TRIAL_CREDITS);
   });
 
   it("(c) a $1 partial refund before the grant: the pack is granted net (900)", async () => {
@@ -614,7 +614,7 @@ describe("finding 9: refunds and disputes", () => {
     await send("charge.refunded", h.stripe.refundCharge(chargeId, 100));
     await send("checkout.session.completed", session);
     await send("checkout.session.completed", session);
-    expect(h.db.balance(USER)).toBe(FREE_SIGNUP_CREDITS + 900);
+    expect(h.db.balance(USER)).toBe(TRIAL_CREDITS + 900);
   });
 
   it("(c) a dispute before the grant that is then won ends with the full pack", async () => {
@@ -622,9 +622,9 @@ describe("finding 9: refunds and disputes", () => {
     const dispute = h.stripe.dispute(chargeId);
     await send("charge.dispute.created", dispute);
     await send("checkout.session.completed", session);
-    expect(h.db.balance(USER)).toBe(FREE_SIGNUP_CREDITS);
+    expect(h.db.balance(USER)).toBe(TRIAL_CREDITS);
     await send("charge.dispute.closed", { ...dispute, status: "won" });
-    expect(h.db.balance(USER)).toBe(FREE_SIGNUP_CREDITS + 1000);
+    expect(h.db.balance(USER)).toBe(TRIAL_CREDITS + 1000);
   });
 
   it("(d) a dispute on the annual payment stops Pro and accrual; winning it restores both", async () => {

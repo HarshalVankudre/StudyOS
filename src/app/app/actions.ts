@@ -26,7 +26,8 @@ export type SaveWorkspaceActionResult =
   | { status: "saved"; version: number }
   /**
    * Someone (another tab, the AI agent) saved a newer version first. `saves`
-   * lists recent editor saves, so the tab can see if one of its own landed.
+   * says which editor save produced which version, so the tab can tell
+   * whether one of its own landed (lib/workspace/save-ids.ts).
    */
   | { status: "conflict"; version: number; saves?: SaveLog }
   /** The workspace no longer exists or was moved to the trash. */
@@ -38,19 +39,23 @@ export type SaveWorkspaceActionResult =
  * Save edits to a workspace (called by the editor's autosave). The document
  * is validated (and repaired where safe) on the server before it is written,
  * and only written if `baseVersion` is still the latest saved version.
- * `saveId` (optional, from the editor) is recorded with the new version.
+ * `saveId` and `tabId` (from the editor) are recorded with the new version.
  */
 export async function saveWorkspaceAction(
   id: string,
   ws: Workspace,
   baseVersion: number,
   saveId?: string,
+  tabId?: string,
 ): Promise<SaveWorkspaceActionResult> {
   if (typeof id !== "string" || !Number.isInteger(baseVersion)) {
     return { status: "invalid" };
   }
   try {
-    return await store.saveWorkspace(id, ws, baseVersion, saveId);
+    // An editor's save always names itself to the save log. One that does not
+    // (a tab of a build from before the log) must not look like a server-side
+    // write: "" makes its version one of unknown origin (save-ids.ts).
+    return await store.saveWorkspace(id, ws, baseVersion, saveId ?? "", tabId ?? "");
   } catch (error) {
     if (error instanceof WorkspaceTooLargeError) return { status: "too_large" };
     if (error instanceof InvalidWorkspaceError) return { status: "invalid" };

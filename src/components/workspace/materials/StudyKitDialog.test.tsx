@@ -106,7 +106,8 @@ describe("StudyKitDialog", () => {
     expect(await screen.findByText("Lecture 3: Enzymes")).toBeInTheDocument();
     // 30 pages of 2,900 characters (plus page markers): 8 sections of 4 pages (the last has 2).
     expect(screen.getByText(plural("en", M.coverage, 8, { from: 1, to: 30 }))).toBeInTheDocument();
-    expect(screen.getByText(plural("en", M.cost, 72, { max: 160 }))).toBeInTheDocument();
+    // The total before starting: 8 parts at the list price of 10.
+    expect(screen.getByTestId("kit-cost")).toHaveTextContent(plural("en", M.costFixed, 80, { each: 10 }));
 
     await user.click(screen.getByRole("button", { name: M.start }));
     expect(await screen.findByText(M.doneTitle)).toBeInTheDocument();
@@ -133,13 +134,24 @@ describe("StudyKitDialog", () => {
     material.pageChars = Array.from({ length: 30 }, () => 2900);
   });
 
-  it("prices the run for the student's model, from the figure the server passes", async () => {
-    // Claude Haiku: about 1 credit a section; the cap per section stays 20.
-    render(
-      <StudyKitDialog intent={{ mode: "material" }} onClose={() => {}} onCreated={() => {}} creditsPerSection={1} />,
+  it("prices the run for the student's model, from the quote the server passes", async () => {
+    // On a model whose real cost per part is higher than the list price.
+    const view = render(
+      <StudyKitDialog
+        intent={{ mode: "material" }}
+        onClose={() => {}}
+        onCreated={() => {}}
+        partQuote={{ list: 10, price: 12, max: 47 }}
+      />,
     );
     expect(await screen.findByText(plural("en", M.coverage, 8, { from: 1, to: 30 }))).toBeInTheDocument();
-    expect(screen.getByText(plural("en", M.cost, 8, { max: 160 }))).toBeInTheDocument();
+    expect(screen.getByTestId("kit-cost")).toHaveTextContent(plural("en", M.costRange, 96, { max: 376 }));
+    view.unmount();
+    // The configured model: exactly the list price.
+    render(
+      <StudyKitDialog intent={{ mode: "material" }} onClose={() => {}} onCreated={() => {}} partQuote={{ list: 10, price: 10, max: 10 }} />,
+    );
+    expect(await screen.findByTestId("kit-cost")).toHaveTextContent(plural("en", M.costFixed, 80, { each: 10 }));
   });
 
   it("asks before deleting a material", async () => {

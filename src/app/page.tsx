@@ -16,8 +16,8 @@ import {
   TodayPreview,
 } from "@/components/landing/Previews";
 import { renderDay } from "@/components/landing/samples";
-import { TURN_CREDIT_CAP } from "@/lib/ai/budgets";
-import { FREE_MONTHLY_CREDITS, FREE_SIGNUP_CREDITS, PRO_MONTHLY_CREDITS } from "@/lib/credits";
+import { modelForPlan } from "@/lib/ai/plans";
+import { PRO_MONTHLY_CREDITS, publicQuotes, TRIAL_CREDITS, TURN_CREDIT_CAP } from "@/lib/price-list";
 import type { Dictionary } from "@/lib/i18n/dictionaries/en";
 import { getI18n } from "@/lib/i18n/server";
 import { formatPrice, getProPricing } from "@/lib/plan-pricing";
@@ -38,6 +38,8 @@ export default async function Home() {
   const n = (value: number) => value.toLocaleString(locale);
   const email = supportEmail();
   const start = userId ? "/generate" : "/sign-up";
+  // A message's price on the configured models (lib/price-list.ts).
+  const message = publicQuotes({ free: modelForPlan("free"), pro: modelForPlan("pro") }).message.price;
 
   const chapters: {
     id: string;
@@ -54,7 +56,7 @@ export default async function Home() {
       copy: {
         ...L.chapters.assistant,
         points: L.chapters.assistant.points.map((p) =>
-          t(p, { free: n(TURN_CREDIT_CAP.free), pro: n(TURN_CREDIT_CAP.pro) }),
+          t(p, { message: n(message), free: n(TURN_CREDIT_CAP.free), pro: n(TURN_CREDIT_CAP.pro) }),
         ),
       },
       preview: <AssistantPreview dict={dict} locale={locale} today={today} />,
@@ -228,7 +230,7 @@ export default async function Home() {
                     <Check className="h-4 w-4 shrink-0 text-lime-deep" aria-hidden />
                     {item.title}
                   </h3>
-                  <p className="mt-2 text-sm leading-6 text-ink-soft">{t(item.body, { price })}</p>
+                  <p className="mt-2 text-sm leading-6 text-ink-soft">{t(item.body, { price, trial: n(TRIAL_CREDITS) })}</p>
                 </li>
               ))}
             </ul>
@@ -247,7 +249,7 @@ export default async function Home() {
                 price={formatPrice(0, monthly.currency, locale)}
                 per={L.plans.perMonth}
                 bullets={L.plans.freeBullets.map((b) =>
-                  t(b, { signup: n(FREE_SIGNUP_CREDITS), monthly: n(FREE_MONTHLY_CREDITS) }),
+                  t(b, { trial: n(TRIAL_CREDITS) }),
                 )}
               />
               <PlanSummary

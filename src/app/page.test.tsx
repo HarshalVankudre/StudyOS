@@ -5,7 +5,7 @@ import { getDictionary } from "@/lib/i18n/dictionaries";
 import { en } from "@/lib/i18n/dictionaries/en";
 import { fmt } from "@/lib/i18n/interpolate";
 import { formatLongDay } from "@/lib/agents/daily-study/present";
-import { FREE_SIGNUP_CREDITS } from "@/lib/credits";
+import { TRIAL_CREDITS } from "@/lib/price-list";
 import { clearProPriceCache } from "@/lib/plan-pricing";
 import type { createFakeStripe } from "@/test/billing-fakes";
 
@@ -98,7 +98,10 @@ describe("landing page", () => {
     // Says what the assistant is built to do, not that it never could.
     expect(text).toContain("It won’t do your work for you.");
     expect(text).not.toMatch(/never writes your work/i);
-    expect(text).toContain(`${FREE_SIGNUP_CREDITS} AI credits when you sign up`);
+    // Free is a trial: the one-time grant, and no promise of a monthly top-up.
+    expect(text).toContain(`${TRIAL_CREDITS} AI credits once, to try everything`);
+    expect(text).toContain(`it’s ${TRIAL_CREDITS} trial credits, once`);
+    expect(text).not.toMatch(/each month your balance|when you sign up/);
   });
 
   test("sample dates follow the day the page is rendered", async () => {
@@ -110,7 +113,7 @@ describe("landing page", () => {
 
   test("prices and the support address come from configuration", async () => {
     let { container, unmount } = render(await Home());
-    expect(container.textContent).toContain("$5/month");
+    expect(container.textContent).toContain("$7.99/month");
     expect(screen.getByRole("link", { name: en.landing.footer.support })).toHaveAttribute(
       "href",
       "mailto:harshalvankudre@gmail.com",
@@ -118,10 +121,11 @@ describe("landing page", () => {
     unmount();
 
     vi.stubEnv("STUDYOS_PRO_MONTHLY_PRICE", "7");
+    // (the configured fallback, shown only while billing is off)
     vi.stubEnv("STUDYOS_SUPPORT_EMAIL", "help@studyos.app");
     ({ container, unmount } = render(await Home()));
     expect(container.textContent).toContain("$7/month");
-    expect(container.textContent).not.toContain("$5");
+    expect(container.textContent).not.toContain("$7.99");
     expect(screen.getByRole("link", { name: en.landing.footer.support })).toHaveAttribute(
       "href",
       "mailto:help@studyos.app",

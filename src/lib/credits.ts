@@ -1,49 +1,41 @@
 /**
- * StudyOS credit system (server-only).
+ * StudyOS credit system (server-only): balances, grants, debits and the
+ * hold-and-settle mechanism every AI action is paid through.
  *
- * Every AI request spends credits in proportion to what its tokens really
- * cost on the model that served them (per-model rates, cache reads and
- * writes included: see lib/ai/model-pricing.ts). The peg the product is
- * priced around:
+ * What an action costs is set in lib/price-list.ts: each AI action has a
+ * fixed, published credit price, reserved before the work starts
+ * (reserveCredits) and settled when it ends (settleCreditHold, or
+ * releaseCreditHold when the outcome is free). Model spend is still measured
+ * here (usageToCredits, at the peg of lib/credits-info.ts, 1000 credits ===
+ * $3.00 of token spend), because an action whose real cost on the configured
+ * model exceeds its list price is charged that real cost instead.
  *
- *     1000 credits === $3.00 of token spend   →   1 credit = $0.003
- *
- * So a request that cost $0.03 of tokens spends ~10 credits, and a big,
- * complex request that cost $0.12 spends ~40 — "based on how complex it is"
- * falls out naturally from real token usage.
+ * Grants: a new account receives the one-time trial (TRIAL_CREDITS) and
+ * nothing more; Pro adds PRO_MONTHLY_CREDITS for each paid month; packs add
+ * CREDIT_PACK_SIZE. There is no free monthly top-up.
  */
 import { prisma } from "@/lib/db";
 import type { Prisma } from "@/generated/prisma";
 import type { TokenUsage } from "@/lib/ai/usage-meter";
 import { callCostUsd, MODEL_PRICES } from "@/lib/ai/model-pricing";
 import { usdToCredits } from "@/lib/credits-info";
+import { PRO_MONTHLY_CREDITS, TRIAL_CREDITS } from "@/lib/price-list";
 
-// The peg and the conversions live in the client-safe credits-info.
-export { creditsToUsd, SANDBOX_RUN_CREDITS, USD_PER_1000_CREDITS, usdToCredits } from "@/lib/credits-info";
+// The peg and the conversions live in the client-safe credits-info; the
+// grants and the action prices in the client-safe price list.
+export { creditsToUsd, USD_PER_1000_CREDITS, usdToCredits } from "@/lib/credits-info";
+export {
+  CREDIT_PACK_PRICE_USD,
+  CREDIT_PACK_SIZE,
+  PRO_MONTHLY_CREDITS,
+  RENDER_CREDITS,
+  TRIAL_CREDITS,
+} from "@/lib/price-list";
 
 // GLM 5.2 list price on OpenRouter, USD per 1,000,000 tokens (the legacy
 // single rate, still used for usage that does not say which model ran).
 export const GLM_INPUT_USD_PER_MTOK = MODEL_PRICES["z-ai/glm-5.2"].inputPerMTok;
 export const GLM_OUTPUT_USD_PER_MTOK = MODEL_PRICES["z-ai/glm-5.2"].outputPerMTok;
-
-/** Credits granted automatically the first time a user is seen (free tier). */
-export const FREE_SIGNUP_CREDITS = 300;
-/**
- * Free users refresh to at least this many credits each calendar month (only
- * granted when the balance has dropped below it — no stockpiling). Keeps free
- * users alive to return at exam season instead of dying at zero forever.
- */
-export const FREE_MONTHLY_CREDITS = 150;
-/**
- * Credits granted for each paid month of Pro: on every paid monthly invoice,
- * and for annual plans on the paid invoice plus each monthly anniversary of
- * the paid year (see accrueProAllowance). Unused credits roll over (they add
- * to the balance; nothing resets it).
- */
-export const PRO_MONTHLY_CREDITS = 1000;
-/** The buyable credit pack. */
-export const CREDIT_PACK_SIZE = 1000;
-export const CREDIT_PACK_PRICE_USD = 10;
 
 /**
  * Dollar cost of a request's tokens. The usage meter prices every call with
@@ -110,8 +102,10 @@ async function isTombstoned(tx: CreditsDb, userId: string): Promise<boolean> {
 }
 
 /**
- * With the user lock held: make sure the account exists, seeding the signup
- * grant once. False (and nothing written) for a deleted account.
+ * With the user lock held: make sure the account exists, seeding the one-time
+ * trial grant (TRIAL_CREDITS) once. False (and nothing written) for a deleted
+ * account. The ledger reason and key stay "free_signup", so rows written
+ * before the trial was named keep meaning the same single grant.
  */
 async function ensureAccountTx(tx: CreditsDb, userId: string): Promise<boolean> {
   const existing = await tx.creditAccount.findUnique({
@@ -120,11 +114,11 @@ async function ensureAccountTx(tx: CreditsDb, userId: string): Promise<boolean> 
   });
   if (existing) return true;
   if (await isTombstoned(tx, userId)) return false;
-  await tx.creditAccount.create({ data: { userId, balance: FREE_SIGNUP_CREDITS } });
+  await tx.creditAccount.create({ data: { userId, balance: TRIAL_CREDITS } });
   await tx.creditLedger.create({
     data: {
       userId,
-      delta: FREE_SIGNUP_CREDITS,
+      delta: TRIAL_CREDITS,
       reason: "free_signup",
       idempotencyKey: `free_signup:${userId}`,
     },
@@ -133,7 +127,7 @@ async function ensureAccountTx(tx: CreditsDb, userId: string): Promise<boolean> 
 }
 
 /**
- * The account, created on first sight with the free starter grant. Null for
+ * The account, created on first sight with the trial grant. Null for
  * an account that was deleted: an AI request still in flight while the
  * account is erased never recreates it (or its signup credits).
  */
@@ -201,40 +195,6 @@ export const ALLOWANCE_ROW_SELECT = {
   allowanceStopAt: true,
   disputedAt: true,
 } as const;
-
-/**
- * Monthly free-tier refresh, applied lazily on any balance read: when a
- * non-Pro user's balance has fallen below FREE_MONTHLY_CREDITS, grant the
- * month's refresh once (idempotent per calendar month). Pro users get their
- * monthly credits from paid invoices instead. Returns true when it granted.
- */
-async function maybeMonthlyRefresh(
-  userId: string,
-  balance: number,
-  sub: AllowanceRow | null,
-): Promise<boolean> {
-  if (balance >= FREE_MONTHLY_CREDITS) return false;
-  if (subscriptionGrantsPro(sub)) return false;
-  // Credits held by a request in flight are still the user's.
-  const held = await prisma.creditHold.aggregate({
-    _sum: { amount: true },
-    where: { userId, state: "held" },
-  });
-  if (balance + (held._sum.amount ?? 0) >= FREE_MONTHLY_CREDITS) return false;
-  const monthKey = new Date().toISOString().slice(0, 7); // YYYY-MM
-  const idempotencyKey = `free_monthly:${userId}:${monthKey}`;
-  // Hot path: getCreditBalance runs on every credit gate, agent charge, and
-  // meter render. Once this month's refresh exists, skip the doomed grant.
-  const already = await prisma.creditLedger.findUnique({
-    where: { idempotencyKey },
-    select: { id: true },
-  });
-  if (already) return false;
-  return (
-    (await grantCredits(userId, FREE_MONTHLY_CREDITS, "free_monthly", idempotencyKey)) ===
-    "granted"
-  );
-}
 
 /**
  * `date` plus `months` calendar months in UTC, clamping the day to the target
@@ -322,7 +282,13 @@ export function proMonthKey(userId: string, month: Date, subscriptionId: string)
   return `${proMonthPrefix(userId, month)}:${subscriptionId}`;
 }
 
-/** Grant one subscription's Pro allowance for the calendar month containing `month`, once. */
+/**
+ * Grant one subscription's Pro allowance (PRO_MONTHLY_CREDITS) for the
+ * calendar month containing `month`, once: on every paid monthly invoice,
+ * and for annual plans on the paid invoice plus each monthly anniversary of
+ * the paid year (see accrueProAllowance). Unused credits roll over (they add
+ * to the balance; nothing resets it).
+ */
 export async function grantProMonth(
   userId: string,
   month: Date,
@@ -390,10 +356,9 @@ export async function getCreditBalance(userId: string): Promise<number> {
     where: { userId },
     select: ALLOWANCE_ROW_SELECT,
   });
-  const accrued = await accrueProAllowance(userId, sub);
-  const refreshed =
-    !accrued && (await maybeMonthlyRefresh(userId, account.balance, sub));
-  if (!accrued && !refreshed) return account.balance;
+  // Yearly Pro accrues its monthly allowances on a read. Nothing else is
+  // ever granted here: Free is the one-time trial, with no monthly top-up.
+  if (!(await accrueProAllowance(userId, sub))) return account.balance;
   const fresh = await prisma.creditAccount.findUnique({ where: { userId } });
   return fresh?.balance ?? account.balance;
 }

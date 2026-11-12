@@ -14,7 +14,14 @@ import {
   settleCreditHold,
   usageToCredits,
 } from "@/lib/credits";
-import { studyKitCost, studyKitSectionCredits } from "@/lib/credits-info";
+import {
+  chargeForCompleted,
+  chargeForPartial,
+  studyKitPartQuote,
+  studyKitQuote,
+  type PriceQuote,
+} from "@/lib/price-list";
+import { isBillingConfigured } from "@/lib/stripe";
 import { englishName } from "@/lib/i18n/config";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { fmt } from "@/lib/i18n/interpolate";
@@ -69,14 +76,17 @@ const NO_USAGE: TokenUsage = { promptTokens: 0, completionTokens: 0 };
  * returned to the editor, which adds it as a page through its normal
  * (undoable, autosaved) edit path.
  *
- * Billing follows workspace generation: a run starts only with its typical
- * cost and at least one section's cap in the balance, and reserves its cap
- * (a credit hold) before any model call, so parallel runs cannot all start on
- * the same credits. A successful run is charged for the model calls that
- * produced its sections, never more than the cap shown to the student before
- * they started; a cancelled run only what the model had consumed when it was
- * stopped; a run that delivers nothing is free, and such failures are
- * bounded by a small daily quota (study_kit_failed) instead.
+ * Billing follows the price list (lib/price-list.ts): a kit costs a fixed
+ * price per part (section) of the material it processes, the total shown in
+ * the dialog before the student starts. A run starts only when the balance
+ * covers that total, and reserves the most it can cost (a credit hold)
+ * before any model call, so parallel runs cannot all start on the same
+ * credits. A successful run is charged the price of the parts that delivered
+ * something (parts that failed are free); a cancelled run the price of the
+ * parts it had finished; on a model whose real cost exceeds the price, the
+ * real cost, never more than the most shown up front. A run that delivers
+ * nothing is free, and such failures are bounded by a small daily quota
+ * (study_kit_failed) instead.
  */
 export async function POST(request: Request) {
   const crossSite = rejectCrossSite(request);
@@ -114,8 +124,14 @@ export async function POST(request: Request) {
     async start(controller) {
       let closed = false;
       let usage: TokenUsage = NO_USAGE;
-      let maxCredits = 0;
       let model: string | undefined;
+      // One part's price on the run's model, and the whole run's quote.
+      let partQuote: PriceQuote | null = null;
+      let runQuote: PriceQuote | null = null;
+      // Parts the run reads, and those the pipeline finished (a cancelled
+      // run pays for these).
+      let partsPlanned = 0;
+      let partsDone = 0;
       // The run's credits, reserved before any model work.
       let hold: CreditHold | null = null;
       // Set once every gate passed and model work began: only such a run
@@ -163,15 +179,22 @@ export async function POST(request: Request) {
           return fail("not_configured", T.errors.failedNoCharge);
         }
 
-        // A run is charged at most the balance, so require its typical cost
-        // and at least one section's cap up front (otherwise a nearly empty
-        // account would get a kit for a few credits).
-        // Priced for the model this run uses, as the dialog showed it.
-        const cost = studyKitCost(plan.sections.length, studyKitSectionCredits(planModel));
-        maxCredits = cost.max;
-        const minBalance = Math.max(1, cost.minBalance);
+        // A run is charged at most the balance, so require its whole price up
+        // front (otherwise a nearly empty account would get a kit for a few
+        // credits). Priced for the model this run uses, as the dialog
+        // showed it.
+        partQuote = studyKitPartQuote(planModel);
+        const cost = studyKitQuote(plan.sections.length, partQuote);
+        runQuote = cost;
+        partsPlanned = plan.sections.length;
+        const minBalance = Math.max(1, cost.price);
         const outOfCredits = () =>
-          fail("out_of_credits", fmt(T.errors.outOfCredits, { estimate: minBalance }));
+          fail(
+            "out_of_credits",
+            fmt(isBillingConfigured() ? T.errors.outOfCredits : T.errors.outOfCreditsNoBilling, {
+              estimate: minBalance,
+            }),
+          );
         if ((await getCreditBalance(userId)) < minBalance) return outOfCredits();
         // Failed runs are never charged, so they are bounded separately.
         // Claimed up front and atomically (a run in flight counts as a
@@ -185,9 +208,10 @@ export async function POST(request: Request) {
         if (!(await checkUsageLimit(userId, "study_kit")).allowed) {
           return fail("rate_limited", T.errors.rateLimited);
         }
-        // Reserve up to the promised cap (at least the minimum) atomically: a
-        // parallel run sees the balance without it. Settled to the real cost,
-        // given back in full when the run is free.
+        // Reserve the most the run can cost (exactly its price on a model
+        // whose real cost stays within it) atomically: a parallel run sees
+        // the balance without it. Settled to the charge, given back in full
+        // when the run is free.
         hold = await reserveCredits(userId, {
           estimate: cost.max,
           min: minBalance,
@@ -201,9 +225,13 @@ export async function POST(request: Request) {
           sections: plan.sections.map((s) => ({ from: s.from, to: s.to })),
           from: plan.from,
           to: plan.to,
-          estimate: cost.estimate,
+          estimate: cost.price,
           maxCredits: cost.max,
         });
+        const onEvent = (event: KitEvent) => {
+          if (event.type === "section" && event.status === "done") partsDone += 1;
+          send(event);
+        };
 
         const metered = await withUsageMeter(async () => {
           try {
@@ -216,7 +244,7 @@ export async function POST(request: Request) {
               complete: configured ? modelComplete(planModel) : mockComplete,
               signal,
               deadline: requestStartedAt + GENERATION_BUDGET_MS,
-              onEvent: send,
+              onEvent,
             });
             return { ok: true as const, result };
           } catch (error) {
@@ -227,11 +255,15 @@ export async function POST(request: Request) {
         if (!metered.result.ok) throw metered.result.error;
         if (signal.aborted) throw new KitCancelledError();
 
-        // Charge only now that the student has something, and never more
-        // than the cap they were shown.
+        // Charge only now that the student has something: the price of the
+        // parts that delivered (failed parts are free), its real cost when
+        // higher, never more than the most shown before the run.
+        const { stats } = metered.result.result;
+        const delivered = Math.min(plan.sections.length, Math.max(0, stats.sections - stats.failedSections));
+        const deliveredQuote = studyKitQuote(delivered, partQuote);
         const credits = await settleCreditHold(
           hold,
-          Math.min(usageToCredits(usage, model), maxCredits),
+          Math.min(cost.max, chargeForCompleted(deliveredQuote, usageToCredits(usage, model))),
         ).catch((error) => {
           reportError(error, { route: "/api/materials/generate", userId });
           return 0;
@@ -246,12 +278,14 @@ export async function POST(request: Request) {
         finish();
       } catch (error) {
         if (error instanceof KitCancelledError || signal.aborted) {
-          // Stopped by the student: nothing delivered; only what the model
-          // really consumed before the stop is billed (capped as promised).
-          if (hold) {
-            await settleCreditHold(hold, Math.min(usageToCredits(usage, model), maxCredits), {
-              reason: "study_kit_cancelled",
-            }).catch(() => 0);
+          // Stopped by the student: only the parts finished before the stop
+          // are billed, at their price (the real cost when that is already
+          // higher), never more than the most shown up front.
+          if (hold && runQuote) {
+            const real = usageToCredits(usage, model);
+            const fraction = partsPlanned > 0 ? partsDone / partsPlanned : 0;
+            const charge = real > 0 ? chargeForPartial(runQuote, real, fraction) : 0;
+            await settleCreditHold(hold, charge, { reason: "study_kit_cancelled" }).catch(() => 0);
           }
           finish();
           return;

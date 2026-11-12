@@ -7,7 +7,11 @@ import { en } from "@/lib/i18n/dictionaries/en";
 const mocks = vi.hoisted(() => ({
   planQuestionsAction: vi.fn(),
   push: vi.fn(),
+  summary: vi.fn(),
 }));
+
+// The live balance (lib/credits-bus) re-reads it from the server.
+vi.mock("@/app/app/account-actions", () => ({ getAccountSummaryAction: mocks.summary }));
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: mocks.push }) }));
 vi.mock("./actions", () => ({ planQuestionsAction: mocks.planQuestionsAction }));
@@ -20,6 +24,7 @@ vi.mock("@/components/GenerationActivity", () => ({
 }));
 
 import { GeneratorClient } from "./GeneratorClient";
+import { resetCreditsBusForTests } from "@/lib/credits-bus";
 
 const QUESTIONS = [
   { id: "q", question: "Level?", type: "single", options: [{ id: "a", label: "Undergrad" }, { id: "b", label: "Grad" }] },
@@ -46,6 +51,8 @@ beforeEach(() => {
   fetchMock = vi.fn();
   vi.stubGlobal("fetch", fetchMock);
   mocks.planQuestionsAction.mockResolvedValue({ ok: true, questions: QUESTIONS });
+  mocks.summary.mockReturnValue(new Promise(() => {}));
+  resetCreditsBusForTests();
 });
 
 afterEach(() => {
@@ -60,12 +67,70 @@ async function goToQuestions() {
   return user;
 }
 
+describe("GeneratorClient: what it costs, said before spending", () => {
+  const costs = { build: 30, buildMax: 30 };
+
+  it("step 1 says what a build costs, questions included, and the balance", () => {
+    render(
+      <I18nProvider locale="en" dictionary={en}>
+        <GeneratorClient initialPrompt="x" minCredits={30} costs={costs} balance={286} signupCredits={300} />
+      </I18nProvider>,
+    );
+    expect(screen.getByTestId("cost-hint")).toHaveTextContent(
+      "Building a workspace costs 30 credits, setup questions included. You have 286 credits.",
+    );
+    // The true version of "Free · no credit card": a one-time trial.
+    expect(screen.getByText(/New accounts get 300 trial credits, once/)).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("Free · no credit card");
+  });
+
+  it("step 2 repeats the price, and the balance after the questions", async () => {
+    mocks.summary.mockResolvedValue({ pro: false, credits: 286, billing: false });
+    const user = userEvent.setup();
+    render(
+      <I18nProvider locale="en" dictionary={en}>
+        <GeneratorClient initialPrompt="x" minCredits={30} costs={costs} balance={286} />
+      </I18nProvider>,
+    );
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+    await screen.findByRole("button", { name: /build my workspace/i });
+    await waitFor(() =>
+      expect(screen.getByTestId("cost-hint")).toHaveTextContent(
+        "Building a workspace costs 30 credits, setup questions included. You have 286 credits.",
+      ),
+    );
+  });
+
+  it("on a model whose real cost is higher, says how much and the most it can cost", () => {
+    render(
+      <I18nProvider locale="en" dictionary={en}>
+        <GeneratorClient initialPrompt="x" minCredits={44} costs={{ build: 44, buildMax: 92 }} balance={286} />
+      </I18nProvider>,
+    );
+    expect(screen.getByTestId("cost-hint")).toHaveTextContent(
+      "On this AI model, building a workspace costs about 44 credits, at most 92 credits, setup questions included. You have 286 credits.",
+    );
+  });
+
+  it("without payments, being short of credits offers nothing to buy and says what still works", () => {
+    render(
+      <I18nProvider locale="en" dictionary={en}>
+        <GeneratorClient initialPrompt="x" outOfCredits minCredits={30} billing={false} />
+      </I18nProvider>,
+    );
+    expect(screen.getByText(/costs 30 credits/)).toHaveTextContent(/studying keeps working/);
+    expect(document.body.textContent).not.toMatch(/credits are added|once a month/);
+    expect(screen.queryByRole("link", { name: en.generate.outOfCredits.buy })).toBeNull();
+    expect(screen.queryByRole("link", { name: en.generate.outOfCredits.plans })).toBeNull();
+  });
+});
+
 describe("GeneratorClient", () => {
   it("shows the out-of-credits path before the student invests any effort", () => {
     renderClient({ outOfCredits: true, minCredits: 3 });
     expect(screen.getByText(en.generate.outOfCredits.title)).toBeInTheDocument();
     // The minimum is the server's figure for the student's model, not a constant.
-    expect(screen.getByText(/needs at least 3 AI credits/)).toBeInTheDocument();
+    expect(screen.getByText(/costs 3 credits/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: en.generate.outOfCredits.buy })).toHaveAttribute(
       "href",
       "/app/credits",

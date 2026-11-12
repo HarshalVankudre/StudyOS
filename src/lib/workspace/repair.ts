@@ -467,11 +467,25 @@ class Repairer {
    */
   grading(raw: unknown, label: string) {
     if (!isObj(raw)) return undefined;
+    // Categories are addressed by id (hand assignments, merging edits from
+    // two devices): a second one with an id already seen gets a new id
+    // derived from its place, so both stay and each can be told apart.
+    const seen = new Set<string>();
     const categories = this.list(raw.categories, (c, j) => {
       const parsed = gradeCategorySchema.safeParse(c);
-      if (parsed.success) return parsed.data;
-      this.note(`dropped ${label} category ${j}`);
-      return null;
+      if (!parsed.success) {
+        this.note(`dropped ${label} category ${j}`);
+        return null;
+      }
+      let id = parsed.data.id;
+      if (seen.has(id)) {
+        let n = 2;
+        while (seen.has(`${id}-${n}`.slice(-100))) n += 1;
+        id = `${id}-${n}`.slice(-100);
+        this.note(`repaired ${label} category ${j}: duplicate id`);
+      }
+      seen.add(id);
+      return id === parsed.data.id ? parsed.data : { ...parsed.data, id };
     }).slice(0, MAX_GRADE_CATEGORIES);
     const assign = isObj(raw.assign)
       ? Object.fromEntries(
@@ -663,6 +677,7 @@ function idLists(ws: Workspace): IdList[] {
   }
   for (const db of ws.databases) {
     out.push(db.properties, db.rows, db.views);
+    if (db.grading) out.push(db.grading.categories);
     for (const prop of db.properties) if (prop.options) out.push(prop.options);
   }
   return out;

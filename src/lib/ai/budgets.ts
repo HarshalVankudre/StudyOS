@@ -34,10 +34,11 @@ const BUDGETS: Record<Plan, AgentBudget> = {
 
 /**
  * The most credits one agent message may spend, per plan, however large the
- * request. Free: a fifth of the monthly refresh; Pro: a tenth of the allowance.
- * Sized so a multi-step edit still fits on the default OpenRouter model.
+ * request (a safety limit: a message's price is set in lib/price-list.ts,
+ * which defines this ceiling with the rest of the plans). Sized so a
+ * multi-step edit still fits on the default OpenRouter model.
  */
-export const TURN_CREDIT_CAP: Record<Plan, number> = { free: 30, pro: 100 };
+export { TURN_CREDIT_CAP } from "@/lib/price-list";
 
 export function budgetForPlan(plan: Plan): AgentBudget {
   return BUDGETS[plan];

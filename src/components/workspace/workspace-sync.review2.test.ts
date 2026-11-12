@@ -4,7 +4,6 @@
  * version service (on an in-memory database, see sync-sim/harness.ts).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import * as store from "@/lib/workspace/store";
 import * as vs from "@/lib/workspace/version-service";
 import type { Workspace } from "@/lib/workspace/types";
 import { MemoryStorage, Server, advance, crash, db, drain, openTab } from "./sync-sim/harness";
@@ -96,29 +95,29 @@ describe("F1: save ids tell whether a save without a reply landed", () => {
     expect(text(server.doc())).toBe("cells divide [A1] [A2]");
   });
 
-  it("the closing-tab save (beacon) lands once, even when the tab then stays and saves again", async () => {
+  // Third review: the closing-tab request that applied a patch on the server
+  // is gone. Closing sends nothing but an ordinary save; what that does not
+  // get through stays in the draft and is merged when the workspace is
+  // opened in this browser again.
+  it("a tab that closes mid-edit leaves the edit in its draft; the next tab here saves it once", async () => {
     const server = new Server(ws());
-    const sent: string[] = [];
-    const a = openTab(server, {
-      deps: {
-        beacon: (body) => {
-          sent.push(body);
-          const { id, baseVersion, ops, saveId } = JSON.parse(body);
-          void store.saveWorkspaceChanges(id, baseVersion, ops, saveId); // what /api/workspace/save does
-          return true;
-        },
-      },
-    });
+    const storage = new MemoryStorage();
+    const a = openTab(server, { storage, tabId: "A" });
+    a.net.offline = true; // the save started on leaving does not get through
     a.update(setText("b1", "cells divide [A1]"));
-    expect(a.prepareToLeave(true)).toBe(true); // "leave site?" cancelled: the tab stays
-    await advance(10);
-    const { ops, baseVersion, saveId } = JSON.parse(sent[0]);
-    // The same request delivered twice (a retrying proxy) does nothing the second time.
-    expect(await store.saveWorkspaceChanges("w1", baseVersion, ops, saveId)).toEqual({ status: "saved", version: 2 });
-    a.update(setText("b1", "cells divide [A1] [A2]"));
+    expect(a.prepareToLeave()).toBe(false); // unsaved: the leave prompt is shown
+    a.releaseTab();
+    crash(a, true);
+    await advance(50);
+    expect(server.version).toBe(1); // nothing reached the server
+    expect([...storage.data.keys()].some((k) => k.startsWith("studyos:draft:"))).toBe(true);
+
+    const b = openTab(server, { storage, tabId: "B" });
     await drain();
-    expect(text(server.doc())).toBe("cells divide [A1] [A2]");
-    expect(server.version).toBe(3);
+    expect(text(server.doc())).toBe("cells divide [A1]");
+    expect(text(b.workspace)).toBe("cells divide [A1]");
+    expect(b.notices).toContain("draftRestored");
+    expect([...storage.data.keys()].some((k) => k.startsWith("studyos:draft:"))).toBe(false);
   });
 });
 
@@ -133,7 +132,7 @@ describe("handing edits over: a tab asleep while another took its draft", () => 
     const b = openTab(server, { storage, tabId: "B" });
     await drain();
     expect(text(server.doc())).toBe("cells divide [A1]");
-    expect(storage.data.has(takenKey("w1", "A"))).toBe(true);
+    expect(storage.data.has(takenKey("w1", a.tabId))).toBe(true);
     // A wakes up.
     a.heartbeat();
     a.setAgentBusy(false);

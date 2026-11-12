@@ -18,10 +18,11 @@ export interface LocaleMeta {
   code: string;
   /** Language name in English — used in AI prompts ("Write in German."). */
   englishName: string;
-  /** Language name in its own script — shown in the switcher. */
+  /**
+   * Language name in its own script — what the switcher shows. No flags: a
+   * language is not a country, and Windows has no flag emoji (it shows "GB").
+   */
   nativeName: string;
-  /** Flag emoji for the switcher. */
-  flag: string;
   /** Text direction. Arabic is the only right-to-left locale here. */
   dir: "ltr" | "rtl";
 }
@@ -31,16 +32,16 @@ export interface LocaleMeta {
  * English first (the default/source language), then the rest.
  */
 export const LOCALES = [
-  { code: "en", englishName: "English", nativeName: "English", flag: "🇬🇧", dir: "ltr" },
-  { code: "es", englishName: "Spanish", nativeName: "Español", flag: "🇪🇸", dir: "ltr" },
-  { code: "de", englishName: "German", nativeName: "Deutsch", flag: "🇩🇪", dir: "ltr" },
-  { code: "fr", englishName: "French", nativeName: "Français", flag: "🇫🇷", dir: "ltr" },
-  { code: "it", englishName: "Italian", nativeName: "Italiano", flag: "🇮🇹", dir: "ltr" },
-  { code: "pt", englishName: "Portuguese", nativeName: "Português", flag: "🇧🇷", dir: "ltr" },
-  { code: "nl", englishName: "Dutch", nativeName: "Nederlands", flag: "🇳🇱", dir: "ltr" },
-  { code: "zh", englishName: "Chinese (Simplified)", nativeName: "中文", flag: "🇨🇳", dir: "ltr" },
-  { code: "ja", englishName: "Japanese", nativeName: "日本語", flag: "🇯🇵", dir: "ltr" },
-  { code: "ar", englishName: "Arabic", nativeName: "العربية", flag: "🇸🇦", dir: "rtl" },
+  { code: "en", englishName: "English", nativeName: "English", dir: "ltr" },
+  { code: "es", englishName: "Spanish", nativeName: "Español", dir: "ltr" },
+  { code: "de", englishName: "German", nativeName: "Deutsch", dir: "ltr" },
+  { code: "fr", englishName: "French", nativeName: "Français", dir: "ltr" },
+  { code: "it", englishName: "Italian", nativeName: "Italiano", dir: "ltr" },
+  { code: "pt", englishName: "Portuguese", nativeName: "Português", dir: "ltr" },
+  { code: "nl", englishName: "Dutch", nativeName: "Nederlands", dir: "ltr" },
+  { code: "zh", englishName: "Chinese (Simplified)", nativeName: "中文", dir: "ltr" },
+  { code: "ja", englishName: "Japanese", nativeName: "日本語", dir: "ltr" },
+  { code: "ar", englishName: "Arabic", nativeName: "العربية", dir: "rtl" },
 ] as const satisfies readonly LocaleMeta[];
 
 /** A supported locale code, e.g. `"en" | "es" | ... | "ar"`. */

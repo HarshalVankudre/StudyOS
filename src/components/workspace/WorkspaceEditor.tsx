@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Download, Layers, ListChecks, MoreHorizontal, Redo2, RotateCw, Search, Trash2, Undo2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import type { PriceQuote } from "@/lib/price-list";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Toaster } from "@/components/ui/sonner";
@@ -40,6 +41,7 @@ import { WorkspaceProvider, type SaveStatus } from "./WorkspaceContext";
 import { useEditorLocation } from "./useEditorLocation";
 import { focusedFieldKey, isTextEntry, useWorkspaceSync } from "./useWorkspaceSync";
 import type { MergeNotice, Notice, PendingField, UpdateOptions } from "./workspace-sync";
+import { describeValue } from "./mergeDetails";
 import { PendingFieldsContext } from "./editor/pendingFields";
 import { DraftInput } from "./editor/DraftInput";
 
@@ -50,15 +52,21 @@ export function WorkspaceEditor({
   initialWorkspace,
   initialVersion = 1,
   initialCredits = 0,
-  kitCreditsPerSection,
+  kitPartQuote,
+  agentQuote,
+  billing,
 }: {
   id: string;
   initialWorkspace: Workspace;
   /** The saved version `initialWorkspace` was read at (for conflict checks). */
   initialVersion?: number;
   initialCredits?: number;
-  /** Typical credits per study-kit section on the student's model (server-priced). */
-  kitCreditsPerSection?: number;
+  /** One study-kit part's price on the student's model (server-priced, lib/price-list.ts). */
+  kitPartQuote?: PriceQuote;
+  /** One assistant message's price and ceiling on the student's model and plan (server-priced). */
+  agentQuote?: PriceQuote;
+  /** Payments are switched on (purchase links may be shown). */
+  billing?: boolean;
 }) {
   const { dict, t, dir, plural } = useI18n();
   const S = dict.safety;
@@ -69,6 +77,7 @@ export function WorkspaceEditor({
   const [aiMounted, setAiMounted] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [agentBusy, setAgentBusy] = useState(false);
+  const [nudgeSlot, setNudgeSlot] = useState<HTMLDivElement | null>(null);
   const aiOpenRef = useRef(false);
   const sidebarTriggerRef = useRef<HTMLButtonElement>(null);
   const sidebarCloseRef = useRef<HTMLButtonElement>(null);
@@ -126,7 +135,7 @@ export function WorkspaceEditor({
       }
     },
   });
-  const { workspace, rev, status, canUndo, canRedo, conflict, merge } = snapshot;
+  const { workspace, rev, status, canUndo, canRedo, conflict, merge, localCopy } = snapshot;
 
   // The open page lives in the URL (?page=), and deep links (?block=,
   // ?db=&row=) are handed to the page and database views to show.
@@ -139,8 +148,28 @@ export function WorkspaceEditor({
       sync.update(mutator, { coalesceKey: focusedFieldKey(), ...options }),
     [sync],
   );
-  const registerField = useCallback((field: PendingField) => sync.registerField(field), [sync]);
-  const fieldSync = useMemo(() => ({ register: registerField, rev }), [registerField, rev]);
+  // A field holding a value not written yet (a date picked in a row dialog,
+  // typing before its pause) means the header must not say "Saved".
+  // Fields announce a change by bumping this; every render (a field change,
+  // a new revision, a status change) reads the answer afresh from the engine.
+  const [, setFieldsTick] = useState(0);
+  const fieldsChanged = useCallback(() => setFieldsTick((n) => n + 1), []);
+  const fieldsPending = sync.hasBufferedWork();
+  const registerField = useCallback(
+    (field: PendingField) => {
+      const unregister = sync.registerField(field);
+      fieldsChanged();
+      return () => {
+        unregister();
+        fieldsChanged();
+      };
+    },
+    [sync, fieldsChanged],
+  );
+  const fieldSync = useMemo(
+    () => ({ register: registerField, rev, changed: fieldsChanged }),
+    [registerField, rev, fieldsChanged],
+  );
   const settle = useCallback(() => sync.settle(), [sync]);
   const getVersion = useCallback(() => sync.version, [sync]);
   const retrySave = useCallback(() => sync.retry(), [sync]);
@@ -306,6 +335,7 @@ export function WorkspaceEditor({
         settle,
         getVersion,
         retrySave,
+        merge,
       }}
     >
      <PendingFieldsContext.Provider value={fieldSync}>
@@ -314,7 +344,8 @@ export function WorkspaceEditor({
       <StudyKitHost
         activePageId={activePage?.id}
         onOpenPage={setActivePageId}
-        creditsPerSection={kitCreditsPerSection}
+        partQuote={kitPartQuote}
+        billing={billing}
       />
       <div className="flex h-[100dvh] w-full overflow-hidden bg-paper text-ink">
         {sidebarOpen && (
@@ -479,7 +510,7 @@ export function WorkspaceEditor({
                   icon={<Redo2 className="h-4 w-4 rtl:-scale-x-100" aria-hidden />}
                 />
               </div>
-              <GettingStarted onAskAi={openAi} />
+              <GettingStarted onAskAi={openAi} nudgeContainer={nudgeSlot} />
               <StudyLauncher />
               <ExportMenu workspace={workspace} page={activePage} />
               <button
@@ -513,9 +544,14 @@ export function WorkspaceEditor({
                 onRedo={redo}
                 study={hasStudyHub}
               />
-              <SaveIndicator status={status} onRetry={() => sync.retry()} />
+              <SaveIndicator status={status} held={fieldsPending} kept={localCopy} onRetry={() => sync.retry()} />
             </div>
           </div>
+          {(status === "offline" || status === "error") && (
+            <SaveStrip status={status} kept={localCopy} onRetry={() => sync.retry()} />
+          )}
+          {/* The getting-started guide's first-visit line (in the layout, never over the page). */}
+          <div ref={setNudgeSlot} className="contents" />
 
           {conflict && (
             <ConflictBanner
@@ -527,9 +563,30 @@ export function WorkspaceEditor({
           {merge && (
             <MergeBanner
               merge={merge}
+              workspace={workspace}
               onUseTheirs={() => sync.restoreTheirs()}
+              onUseMine={() => sync.applyMine()}
               onDismiss={() => sync.dismissMerge()}
             />
+          )}
+          {status === "outdated" && (
+            <div
+              role="alert"
+              className="flex items-start gap-3 border-b border-line bg-amber-400/10 px-4 py-3 text-sm text-ink sm:px-6"
+            >
+              <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" aria-hidden />
+              <p className="min-w-0 flex-1">
+                <span className="font-semibold">{S.outdatedTitle}</span>{" "}
+                <span className="text-ink-soft">{S.outdatedBody}</span>
+              </p>
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                className="min-h-11 shrink-0 rounded-md bg-ink px-3.5 text-xs font-semibold text-paper transition hover:opacity-90 sm:min-h-0 sm:py-2"
+              >
+                {S.reload}
+              </button>
+            </div>
           )}
           {(status === "tooLarge" || status === "gone") && (
             <div
@@ -571,6 +628,8 @@ export function WorkspaceEditor({
               onClose={closeAi}
               onBusyChange={handleAgentBusyChange}
               syncKey={`${rev}:${status}`}
+              messageQuote={agentQuote}
+              initialCredits={initialCredits}
             />
           </div>
         )}
@@ -755,52 +814,91 @@ function ConflictBanner({
   );
 }
 
+/** How many values the merge banner names before "and N more". */
+const MERGE_VALUES_SHOWN = 4;
+
 /**
- * After this tab's unsaved edits were merged with a newer version (or a
- * recovered draft), say plainly what had to be reconciled. Nothing was lost;
- * values the student's edits replaced can be put back.
+ * After something other than "saved as typed" happened to this tab's edits
+ * (merged with a newer version, recovered from a closed tab, added back
+ * because a save could not be confirmed, or changed elsewhere after they
+ * were saved), say plainly what was done. Nothing was lost: values that were
+ * replaced, or not applied, can be taken with one tap.
  */
 function MergeBanner({
   merge,
+  workspace,
   onUseTheirs,
+  onUseMine,
   onDismiss,
 }: {
   merge: MergeNotice;
+  /** The document as it is now (to name the rows and columns the values are in). */
+  workspace: Workspace;
   onUseTheirs: () => void;
+  onUseMine: () => void;
   onDismiss: () => void;
 }) {
   const { dict, t } = useI18n();
   const S = dict.safety;
-  const { keptBoth, restored, keptDeleted, overwritten, skipped, repaired } = merge.report;
+  const { keptBoth, restored, keptDeleted, overwritten, unapplied, skipped, repaired } = merge.report;
+  const unconfirmed = merge.source === "unconfirmed";
+  const mine = unapplied.length + merge.replaced.length;
   const lines = [
     keptBoth > 0 && t(S.mergeKeptBoth, { count: keptBoth }),
-    restored > 0 && t(S.mergeRestored, { count: restored }),
+    restored > 0 && t(unconfirmed ? S.mergeAddedBack : S.mergeRestored, { count: restored }),
     keptDeleted > 0 && t(S.mergeKeptDeleted, { count: keptDeleted }),
     overwritten.length > 0 && t(S.mergeOverwrote, { count: overwritten.length }),
-    skipped > 0 && t(S.mergeSkipped, { count: skipped }),
+    unapplied.length > 0 && t(S.mergeUnapplied, { count: unapplied.length }),
+    merge.replaced.length > 0 && t(S.mergeReplaced, { count: merge.replaced.length }),
+    // (A recovered draft's deletions and moves are not repeated either, see lib/workspace/changes.ts.)
+    skipped > 0 && t(merge.source === "remote" ? S.mergeSkipped : S.mergeNotRepeated, { count: skipped }),
     repaired > 0 && t(S.mergeRepaired, { count: repaired }),
   ].filter((line): line is string => Boolean(line));
+  // Which values, by name: the row and column, yours and the other one.
+  const values = [...overwritten, ...unapplied, ...merge.replaced];
+  const shown = values.slice(0, MERGE_VALUES_SHOWN).map((entry) => describeValue(workspace, entry));
+  const secondary =
+    "min-h-11 rounded-md border border-line-strong bg-card px-3.5 text-xs font-semibold text-ink transition hover:bg-hover sm:min-h-0 sm:py-2";
   return (
     <div
       role="status"
+      data-merge-source={merge.source}
       className="border-b border-line bg-lime-faint px-4 py-3 text-sm text-ink sm:px-6"
     >
       <p className="font-semibold">
-        {merge.source === "draft" ? S.mergeTitleDraft : S.mergeTitle}
+        {unconfirmed
+          ? S.mergeTitleUnconfirmed
+          : merge.source === "draft"
+            ? S.mergeTitleDraft
+            : lines.length === (merge.replaced.length > 0 ? 1 : 0)
+              ? S.updatedElsewhere // nothing was merged here: only values changed elsewhere
+              : S.mergeTitle}
       </p>
+      {unconfirmed && <p className="mt-0.5 text-ink-soft">{S.mergeUnconfirmedBody}</p>}
       <ul className="mt-0.5 list-disc space-y-0.5 ps-5 text-ink-soft">
         {lines.map((line) => (
           <li key={line}>{line}</li>
         ))}
       </ul>
+      {shown.length > 0 && (
+        <ul data-testid="merge-values" className="mt-1.5 space-y-0.5 text-xs text-ink-soft">
+          {shown.map((value, i) => (
+            <li key={i} className="break-words">
+              {t(S.mergeValueLine, { where: value.where ?? S.mergeSomewhere, mine: value.mine, theirs: value.theirs })}
+            </li>
+          ))}
+          {values.length > shown.length && <li>{t(S.mergeMoreValues, { count: values.length - shown.length })}</li>}
+        </ul>
+      )}
       <div className="mt-2.5 flex flex-wrap items-center gap-2">
         {overwritten.length > 0 && (
-          <button
-            type="button"
-            onClick={onUseTheirs}
-            className="min-h-11 rounded-md border border-line-strong bg-card px-3.5 text-xs font-semibold text-ink transition hover:bg-hover sm:min-h-0 sm:py-2"
-          >
+          <button type="button" onClick={onUseTheirs} className={secondary}>
             {S.mergeUseTheirs}
+          </button>
+        )}
+        {mine > 0 && (
+          <button type="button" onClick={onUseMine} className={secondary}>
+            {S.mergeUseMine}
           </button>
         )}
         <button
@@ -815,24 +913,36 @@ function MergeBanner({
   );
 }
 
+/** What the save indicator says: a field still holding a value is never "Saved". */
+export function saveLabelStatus(status: SaveStatus, held: boolean): SaveStatus | "held" {
+  return held && (status === "saved" || status === "saving") ? "held" : status;
+}
+
 function SaveIndicator({
-  status,
+  status: engineStatus,
+  held = false,
+  kept = true,
   onRetry,
 }: {
   status: SaveStatus;
+  /** A field holds a value not written to the workspace yet. */
+  held?: boolean;
+  /** Unsaved edits are stored on this device (false: storage is full or blocked). */
+  kept?: boolean;
   onRetry: () => void;
 }) {
   const { dict } = useI18n();
   const S = dict.safety;
+  const status = saveLabelStatus(engineStatus, held);
   const label =
     status === "saving"
       ? dict.editor.saving
       : status === "saved"
         ? dict.editor.saved
-        : status === "offline"
+        : status === "offline" && kept
           ? S.offline
-          : status === "error"
-            ? dict.editor.saveFailed
+          : status === "error" && kept
+            ? S.errorKept
             : S.notSaved;
   const tone =
     status === "saved"
@@ -849,6 +959,7 @@ function SaveIndicator({
         role="status"
         aria-label={label}
         title={label}
+        data-save-status={status}
         className={`flex min-h-11 items-center gap-1.5 px-1 text-xs sm:min-h-0 sm:px-0 ${
           status === "error" ? "text-rose-500" : "text-ink-soft"
         }`}
@@ -861,12 +972,54 @@ function SaveIndicator({
           type="button"
           onClick={onRetry}
           aria-label={dict.safety.retry}
-          className="flex min-h-11 min-w-11 items-center justify-center gap-1 rounded-md border border-line-strong bg-card px-2 text-xs font-semibold text-ink transition hover:bg-hover sm:min-h-0 sm:min-w-0 sm:py-1"
+          className="hidden min-h-11 min-w-11 items-center justify-center gap-1 rounded-md border border-line-strong bg-card px-2 text-xs font-semibold text-ink transition hover:bg-hover sm:min-h-0 sm:min-w-0 sm:py-1 lg:flex"
         >
           <RotateCw className="h-3.5 w-3.5" aria-hidden />
           <span className="hidden sm:inline">{dict.safety.retry}</span>
         </button>
       )}
     </span>
+  );
+}
+
+/**
+ * Below the wide layout the header has room only for a dot, so being offline
+ * (or a failed save) is said in words on a slim line under it, with Retry.
+ * Not a live region: the header's status already announces the change.
+ */
+function SaveStrip({
+  status,
+  kept = true,
+  onRetry,
+}: {
+  status: "offline" | "error";
+  /** Unsaved edits are stored on this device; otherwise the strip only says "not saved yet". */
+  kept?: boolean;
+  onRetry: () => void;
+}) {
+  const { dict } = useI18n();
+  const S = dict.safety;
+  return (
+    <div
+      data-print="hide"
+      data-testid="save-strip"
+      className={`flex min-w-0 items-center gap-2 border-b border-line px-3 py-1 text-xs lg:hidden ${
+        status === "error" ? "bg-rose-500/10 text-rose-300 [.light_&]:text-rose-700" : "bg-amber-400/10 text-ink"
+      }`}
+    >
+      <span
+        aria-hidden
+        className={`h-1.5 w-1.5 shrink-0 rounded-full ${status === "error" ? "bg-rose-500" : "bg-amber-500"}`}
+      />
+      <p className="min-w-0 flex-1 truncate">{!kept ? S.notSaved : status === "error" ? S.errorKept : S.offline}</p>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="flex min-h-11 shrink-0 items-center gap-1 rounded-md px-2 font-semibold text-ink transition hover:bg-hover"
+      >
+        <RotateCw className="h-3.5 w-3.5" aria-hidden />
+        {S.retry}
+      </button>
+    </div>
   );
 }

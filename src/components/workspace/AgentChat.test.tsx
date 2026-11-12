@@ -4,6 +4,9 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AgentChat } from "./AgentChat";
 
+// The live balance (lib/credits-bus) re-reads it from the server: never answers here.
+vi.mock("@/app/app/account-actions", () => ({ getAccountSummaryAction: () => new Promise(() => {}) }));
+
 beforeAll(() => {
   // jsdom doesn't implement Element.scrollTo; AgentChat auto-scrolls on update.
   Element.prototype.scrollTo = vi.fn();
@@ -72,6 +75,11 @@ vi.mock("@/lib/i18n/client", () => ({
         stoppedAtLimit: "Stopped at limit",
       },
       credits: { turnCostTitle: "Cost" },
+      spend: {
+        agentTurn: "A request usually uses about {cost}. You have {balance}.",
+        keptYours: "Your typing was kept; the assistant’s version is in a marked copy below it.",
+        keptYoursNoUndo: "Undo isn’t possible for this turn.",
+      },
       counts: { credits: { one: "{count} credit", other: "{count} credits" } },
     },
     t: (template: string, values: Record<string, unknown>) =>

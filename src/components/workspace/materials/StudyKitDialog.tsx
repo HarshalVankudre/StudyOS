@@ -5,7 +5,7 @@ import Link from "next/link";
 import { BadgeCheck, Loader2 } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { emitCreditsBalance } from "@/lib/credits-bus";
-import { studyKitCost } from "@/lib/credits-info";
+import { ACTION_PRICES, isFixedPrice, studyKitQuote, type PriceQuote } from "@/lib/price-list";
 import { localeMeta } from "@/lib/i18n/config";
 import { useI18n } from "@/lib/i18n/client";
 import { buildKitPage } from "@/lib/materials/kit";
@@ -48,7 +48,8 @@ export function StudyKitDialog({
   afterPageId,
   onClose,
   onCreated,
-  creditsPerSection,
+  partQuote,
+  billing = true,
 }: {
   intent: StudyKitIntent;
   /** Insert the new page after this one (else at the end). */
@@ -56,11 +57,13 @@ export function StudyKitDialog({
   onClose: () => void;
   onCreated: (pageId: string) => void;
   /**
-   * Typical credits per section on the model that will run the kit, priced
-   * on the server (studyKitSectionCredits): a client bundle cannot read the
-   * configured model. Without it, the default model's figure is shown.
+   * One part's price on the model that will run the kit, priced on the
+   * server (lib/price-list.ts studyKitPartQuote): a client bundle cannot read
+   * the configured model. Without it, the list price is shown.
    */
-  creditsPerSection?: number;
+  partQuote?: PriceQuote;
+  /** Payments are switched on: an out-of-credits run may link to buying more. */
+  billing?: boolean;
 }) {
   const { workspace, update } = useWorkspace();
   const { dict, t, locale, plural } = useI18n();
@@ -122,7 +125,9 @@ export function StudyKitDialog({
   const pageCount = pageChars.length;
   const effectiveRange = useMemo(() => range ?? { from: 1, to: pageCount }, [range, pageCount]);
   const plan = useMemo(() => planRun(pageChars, effectiveRange), [pageChars, effectiveRange]);
-  const cost = studyKitCost(plan.sections.length, creditsPerSection);
+  // The total, shown before the student starts: parts × the price of one.
+  const part = partQuote ?? { list: ACTION_PRICES.studyKitPart, price: ACTION_PRICES.studyKitPart, max: ACTION_PRICES.studyKitPart };
+  const cost = { ...studyKitQuote(plan.sections.length, part), each: part.list, fixed: isFixedPrice(part) };
   const targets = kitTargets(amount, outputs, plan.chars);
   const anyOutput = outputs.notes || outputs.flashcards || outputs.quiz;
   const languageName = localeMeta(locale).nativeName;
@@ -145,6 +150,9 @@ export function StudyKitDialog({
       notesHeading: M.kitNotes,
       flashcardsHeading: M.kitFlashcards,
       quizHeading: M.kitQuiz,
+      cardsCount: dict.counts.flashcards,
+      questionsCount: dict.counts.practiceQuestions,
+      locale,
     });
     update((draft) => {
       const at = afterPageId ? draft.pages.findIndex((p) => p.id === afterPageId) : -1;
@@ -401,7 +409,7 @@ export function StudyKitDialog({
           {phase.kind === "error" && (
             <div role="alert" className="flex flex-col gap-2 text-sm text-ink">
               <p>{phase.message}</p>
-              {phase.code === "out_of_credits" && (
+              {phase.code === "out_of_credits" && billing && (
                 <Link href="/app/credits" className="font-semibold text-ink underline underline-offset-2">
                   {M.getCredits}
                 </Link>
@@ -503,7 +511,7 @@ function KitOptions({
   languageName: string;
   inInterfaceLanguage: boolean;
   onLanguage: (value: boolean) => void;
-  cost: { estimate: number; max: number };
+  cost: PriceQuote & { each: number; fixed: boolean };
 }) {
   const { dict, t, plural } = useI18n();
   const M = dict.materials;
@@ -625,7 +633,11 @@ function KitOptions({
               {plural(M.coverage, plan.sections.length, { from: plan.from, to: plan.to })}
             </p>
             {plan.cutShort && <p className="text-xs text-ink-soft">{t(M.cutShort, { next: plan.to + 1 })}</p>}
-            <p className="font-semibold text-ink">{plural(M.cost, cost.estimate, { max: cost.max })}</p>
+            <p className="font-semibold text-ink" data-testid="kit-cost">
+              {cost.fixed
+                ? plural(M.costFixed, cost.list, { each: cost.each })
+                : plural(M.costRange, cost.price, { max: cost.max })}
+            </p>
             <p className="text-xs text-ink-soft">{M.costNote}</p>
           </>
         )}

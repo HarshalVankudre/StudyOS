@@ -69,7 +69,15 @@ function workspace(checked = false, due = ""): Workspace {
   };
 }
 
-function Harness({ ws, onAskAi = () => {} }: { ws: Workspace; onAskAi?: () => void }) {
+function Harness({
+  ws,
+  onAskAi = () => {},
+  slot,
+}: {
+  ws: Workspace;
+  onAskAi?: () => void;
+  slot?: HTMLElement | null;
+}) {
   return (
     <WorkspaceProvider
       value={{
@@ -85,7 +93,7 @@ function Harness({ ws, onAskAi = () => {} }: { ws: Workspace; onAskAi?: () => vo
         canRedo: false,
       } as unknown as React.ComponentProps<typeof WorkspaceProvider>["value"]}
     >
-      <GettingStarted onAskAi={onAskAi} />
+      <GettingStarted onAskAi={onAskAi} nudgeContainer={slot} />
     </WorkspaceProvider>
   );
 }
@@ -197,48 +205,66 @@ describe("GettingStarted", () => {
     expect(screen.queryByRole("button", { name: /Getting started/ })).toBeNull();
   });
 
-  it("opens by itself once on a large screen", async () => {
-    window.matchMedia = ((query: string) => ({ matches: true, media: query }) as MediaQueryList) as typeof window.matchMedia;
-    const { unmount } = render(<Harness ws={workspace()} />);
-    expect(await screen.findByRole("dialog", { name: G.title })).toBeInTheDocument();
-    unmount();
-    render(<Harness ws={workspace()} />);
-    await screen.findByRole("button", { name: `${G.button} · 1 of 5` });
-    expect(screen.queryByRole("dialog")).toBeNull();
-  });
-
   const largeScreen = () => {
     window.matchMedia = ((query: string) => ({ matches: true, media: query }) as MediaQueryList) as typeof window.matchMedia;
   };
+  const makeSlot = () => {
+    const slot = document.createElement("div");
+    document.body.appendChild(slot);
+    return slot;
+  };
 
-  it("does not open by itself when the student arrived through a deep link, and still can later", async () => {
+  it("never opens by itself, even on a large screen: the first visit gets a small nudge instead", async () => {
     largeScreen();
-    window.history.replaceState(null, "", "/app/w1?page=p1&db=d1&row=r1");
+    const slot = makeSlot();
     try {
-      const { unmount } = render(<Harness ws={workspace()} />);
-      await screen.findByRole("button", { name: `${G.button} · 1 of 5` });
+      render(<Harness ws={workspace()} slot={slot} />);
+      const nudge = await screen.findByTestId("getting-started-nudge");
+      expect(slot).toContainElement(nudge);
+      expect(nudge).toHaveTextContent(G.nudge);
       expect(screen.queryByRole("dialog")).toBeNull();
-      unmount();
+      // The student opens it when they want.
+      await userEvent.click(within(nudge).getByRole("button", { name: G.nudgeOpen }));
+      expect(await screen.findByRole("dialog", { name: G.title })).toBeInTheDocument();
+      expect(screen.queryByTestId("getting-started-nudge")).toBeNull();
     } finally {
-      window.history.replaceState(null, "", "/");
+      slot.remove();
     }
-    // The one automatic opening was not used up by the deep link.
-    render(<Harness ws={workspace()} />);
-    expect(await screen.findByRole("dialog", { name: G.title })).toBeInTheDocument();
   });
 
-  it("does not open by itself over a dialog that is already showing", async () => {
-    largeScreen();
-    const other = document.createElement("div");
-    other.setAttribute("role", "dialog");
-    other.setAttribute("data-state", "open");
-    document.body.appendChild(other);
+  it("the nudge can be dismissed and is shown on the first visit only", async () => {
+    const slot = makeSlot();
     try {
-      render(<Harness ws={workspace()} />);
+      const { unmount } = render(<Harness ws={workspace()} slot={slot} />);
+      const nudge = await screen.findByTestId("getting-started-nudge");
+      await userEvent.click(within(nudge).getByRole("button", { name: G.nudgeDismiss }));
+      expect(screen.queryByTestId("getting-started-nudge")).toBeNull();
+      expect(screen.queryByRole("dialog")).toBeNull();
+      // Still reachable from the header button.
+      expect(screen.getByRole("button", { name: `${G.button} · 1 of 5` })).toBeInTheDocument();
+      unmount();
+      render(<Harness ws={workspace()} slot={slot} />);
       await screen.findByRole("button", { name: `${G.button} · 1 of 5` });
-      expect(screen.queryByRole("dialog", { name: G.title })).toBeNull();
+      expect(screen.queryByTestId("getting-started-nudge")).toBeNull();
     } finally {
-      other.remove();
+      slot.remove();
+    }
+  });
+
+  it("no nudge when the student arrived through a deep link, and the next visit still gets it", async () => {
+    const slot = makeSlot();
+    window.history.replaceState(null, "", "/app/w1?page=p1&db=d1&row=r1");
+    try {
+      const { unmount } = render(<Harness ws={workspace()} slot={slot} />);
+      await screen.findByRole("button", { name: `${G.button} · 1 of 5` });
+      expect(screen.queryByTestId("getting-started-nudge")).toBeNull();
+      unmount();
+      window.history.replaceState(null, "", "/");
+      render(<Harness ws={workspace()} slot={slot} />);
+      expect(await screen.findByTestId("getting-started-nudge")).toBeInTheDocument();
+    } finally {
+      window.history.replaceState(null, "", "/");
+      slot.remove();
     }
   });
 

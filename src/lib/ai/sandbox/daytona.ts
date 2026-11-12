@@ -1,6 +1,8 @@
 import "server-only";
 import { Daytona } from "@daytona/sdk";
+import { reportError } from "@/lib/ops/report-error";
 import type { SandboxArtifact, SandboxRunResult, SandboxRunSpec, SandboxRunner } from "./runner";
+import { PREPARE_COMMAND, RENDER_IMAGE_VERSION, reportedImageVersion } from "./toolchain";
 
 const LOG_TAIL_MAX = 4_000;
 /** Ceiling for a single shell command, whatever the spec asks for. */
@@ -64,6 +66,37 @@ export function sandboxNetworkPolicy(
 export class SandboxTimeoutError extends Error {}
 
 /**
+ * The snapshot is an image built before the offline render toolchain (it
+ * reports no toolchain version, or an older one): renders cannot work in it
+ * with the network blocked, so none is attempted.
+ */
+export class SandboxImageOutdatedError extends Error {
+  constructor(found: number | null) {
+    super(
+      `Render sandbox snapshot "${process.env.STUDYOS_SANDBOX_SNAPSHOT ?? "(unset)"}" has render toolchain ${
+        found === null ? "none" : `v${found}`
+      }, needs v${RENDER_IMAGE_VERSION}: renders are off until it is rebuilt (node infra/sandbox/build-snapshot.mjs, see infra/sandbox/README.md).`,
+    );
+    this.name = "SandboxImageOutdatedError";
+  }
+}
+
+/**
+ * After meeting an outdated image, renders stay off this long in this
+ * process (no sandbox is started for them), then the image is checked again,
+ * so a rebuilt snapshot is picked up without a redeploy.
+ */
+export const OUTDATED_IMAGE_RECHECK_MS = 10 * 60 * 1000;
+let outdatedUntil = 0;
+let reportedOutdated = false;
+
+/** Forget an outdated-image verdict (tests). */
+export function resetSandboxImageCheck(): void {
+  outdatedUntil = 0;
+  reportedOutdated = false;
+}
+
+/**
  * Real SandboxRunner backed by Daytona. Ephemeral per call: create → write only
  * the agent-authored inputs (never workspace data or secrets) → run → download
  * declared outputs → destroy.
@@ -73,6 +106,13 @@ export class SandboxTimeoutError extends Error {}
  * an overall wall-clock deadline and the caller's AbortSignal end the run; and
  * the sandbox is deleted on every exit path, including a create that finishes
  * after the run was already abandoned.
+ *
+ * The first command checks the image's render toolchain version
+ * (./toolchain.ts). An image without the offline toolchain fails the run
+ * with SandboxImageOutdatedError before any agent command runs, logs one
+ * clear error for the owner, and makes `available()` false for
+ * OUTDATED_IMAGE_RECHECK_MS, so the tool refuses renders without starting
+ * sandboxes or charging anything.
  */
 export class DaytonaSandboxRunner implements SandboxRunner {
   private client: DaytonaClientLike;
@@ -83,8 +123,14 @@ export class DaytonaSandboxRunner implements SandboxRunner {
       (new Daytona({ apiKey: process.env.DAYTONA_API_KEY }) as unknown as DaytonaClientLike);
   }
 
+  /** False while the snapshot is known to lack the offline toolchain. */
+  available(): boolean {
+    return Date.now() >= outdatedUntil;
+  }
+
   async run(spec: SandboxRunSpec, signal?: AbortSignal): Promise<SandboxRunResult> {
     if (signal?.aborted) throw new Error("aborted");
+    if (!this.available()) throw new SandboxImageOutdatedError(null);
 
     const commandBudgetMs = spec.timeoutSec * 1000;
     // Whole run: create + uploads + commands + downloads.
@@ -143,7 +189,19 @@ export class DaytonaSandboxRunner implements SandboxRunner {
       // Paths are relative to the sandbox user's home dir, which is writable and
       // is also the default cwd for executeCommand. An absolute "/work" is NOT
       // writable by the non-root sandbox user (mkdir → permission denied).
-      await sb.process.executeCommand("mkdir -p out", undefined, undefined, commandTimeout());
+      const prepared = await sb.process.executeCommand(PREPARE_COMMAND, undefined, undefined, commandTimeout());
+      const version = reportedImageVersion(prepared.result);
+      if (version === null || version < RENDER_IMAGE_VERSION) {
+        const error = new SandboxImageOutdatedError(version);
+        outdatedUntil = Date.now() + OUTDATED_IMAGE_RECHECK_MS;
+        if (!reportedOutdated) {
+          reportedOutdated = true;
+          reportError(error, { source: "sandbox", route: "lib/ai/sandbox/daytona" });
+        }
+        throw error;
+      }
+      // A good image clears an earlier verdict (the snapshot was rebuilt).
+      reportedOutdated = false;
       for (const file of spec.inputs) {
         check();
         await sb.fs.uploadFile(Buffer.from(file.content), file.path, FILE_TIMEOUT_SEC);

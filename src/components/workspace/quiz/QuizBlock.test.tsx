@@ -230,7 +230,7 @@ describe("QuizBlock — exam", () => {
     expect(question("m").stats).toMatchObject({ attempts: 1, correct: 1 });
     expect(question("s").stats).toBeUndefined();
     // Re-run on a newer document if the workspace changed meanwhile.
-    expect(h.update).toHaveBeenLastCalledWith(expect.any(Function), { rebase: "rerun" });
+    expect(h.update).toHaveBeenLastCalledWith(expect.any(Function), expect.objectContaining({ rebase: "rerun" }));
 
     const shortItem = review.find((r) => within(r).queryByText(SHORT.prompt))!;
     await user.click(within(shortItem).getByRole("button", { name: new RegExp(Q.markRight) }));
@@ -273,7 +273,8 @@ describe("QuizBlock — exam", () => {
     await user.click(screen.getAllByRole("radio", { name: Q.trueLabel })[0]);
     await user.click(screen.getByRole("button", { name: Q.submit }));
     const [mutator, options] = h.update.mock.calls.at(-1)!;
-    expect(options).toEqual({ rebase: "rerun" });
+    // Re-run on a newer document, and described as data for recovery from a draft.
+    expect(options).toMatchObject({ rebase: "rerun", replay: { name: "quizRun" } });
 
     // The engine replays the mutator on a newer document (another device
     // answered the MCQ once and the agent renamed the quiz) ...
@@ -376,5 +377,49 @@ describe("QuizBlock — authoring", () => {
     // Preview renders the question as students will see it.
     await user.click(screen.getByRole("button", { name: Q.preview }));
     expect(screen.getAllByTestId("rich").map((r) => r.textContent)).toEqual(["2 + 2 = ?", "4", "5"]);
+  });
+});
+
+describe("QuizBlock — an exam left unfinished (QA round 3)", () => {
+  beforeEach(() => {
+    // Node's own localStorage shadows jsdom's here: a plain in-memory one.
+    const data = new Map<string, string>();
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: (k: string) => data.get(k) ?? null,
+        setItem: (k: string, v: string) => void data.set(k, String(v)),
+        removeItem: (k: string) => void data.delete(k),
+      },
+    });
+  });
+
+  it("says the exam is in progress and resumes it after the tab was closed", async () => {
+    const user = userEvent.setup();
+    setQuiz([MCQ, TF]);
+    const first = render(<Harness />);
+    expect(screen.getByText(Q.notTaken)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: Q.exam }));
+    await user.click(screen.getByRole("button", { name: Q.startExam }));
+    const questions = screen.getAllByTestId("exam-question");
+    const mcq = questions.find((q) => within(q).queryByRole("radio", { name: /Mitochondria/ }))!;
+    await user.click(within(mcq).getByRole("radio", { name: /Mitochondria/ }));
+    // The tab closes mid-exam: nothing is submitted or left on purpose.
+    first.unmount();
+
+    render(<Harness />);
+    expect(screen.queryByText(Q.notTaken)).not.toBeInTheDocument();
+    expect(screen.getByText(Q.examInProgress)).toBeInTheDocument();
+    expect(screen.getByTestId("quiz-exam-in-progress")).toHaveTextContent(
+      fmt(Q.examInProgressAnswered, { answered: 1, total: 2 }),
+    );
+    await user.click(screen.getByRole("button", { name: Q.resumeExam }));
+    expect(screen.getByText(en.safety.examResumed)).toBeInTheDocument();
+    expect(screen.getByLabelText("1 of 2 answered")).toBeInTheDocument();
+
+    // Submitted: the block no longer offers it back.
+    await user.click(screen.getByRole("button", { name: Q.submit }));
+    await user.click(screen.getByRole("button", { name: Q.submitAnyway }));
+    expect(screen.queryByText(Q.examInProgress)).not.toBeInTheDocument();
   });
 });

@@ -261,22 +261,30 @@ export interface QuestionResult extends QuestionRef {
   correct: boolean;
 }
 
+/** How many recent answers a question remembers (to count each exactly once). */
+export const ANSWER_LOG_SIZE = 16;
+
 /**
  * Add one answer to a question's running stats, built on the stats as they
- * are in the document it runs on. Idempotent: `at` (the run's moment) becomes
- * `lastAnsweredAt`, and an answer at or before the last recorded one is not
- * counted again. Monotonic, not "is it the latest one": a question answered
- * in two runs before a save is confirmed is still counted once per run when
- * both runs are replayed onto a document that already holds them.
+ * are in the document it runs on. Each answer is counted exactly once,
+ * whichever device saves first: `at` (the run's moment) is its key, kept in
+ * the question's short log of recent answers, and an answer already in the
+ * log is not counted again. An answer given earlier on a device that syncs
+ * later (a quiz taken offline in the morning, another on the laptop in the
+ * evening) is still counted; `lastAnsweredAt` stays the latest of them.
  */
 export function recordAnswer(q: QuizQuestion, correct: boolean, at: string): void {
-  const last = q.stats?.lastAnsweredAt ? Date.parse(q.stats.lastAnsweredAt) : NaN;
-  if (Number.isFinite(last) && last >= Date.parse(at)) return;
   const prev = q.stats ?? { attempts: 0, correct: 0 };
+  const recent = Array.isArray(prev.recent) ? prev.recent : [];
+  if (recent.includes(at)) return;
+  // Stats from before answers were logged: only the last answer's moment is known.
+  if (recent.length === 0 && prev.lastAnsweredAt === at) return;
+  const last = prev.lastAnsweredAt;
   q.stats = {
     attempts: prev.attempts + 1,
     correct: prev.correct + (correct ? 1 : 0),
-    lastAnsweredAt: at,
+    lastAnsweredAt: last && Date.parse(last) > Date.parse(at) ? last : at,
+    recent: [...recent, at].sort().slice(-ANSWER_LOG_SIZE),
   };
 }
 
@@ -291,7 +299,9 @@ export function pushAttempt(block: QuizBlock, attempt: QuizAttempt): void {
     block.attempts![existing] = { ...attempt };
     return;
   }
-  const attempts = [...(block.attempts ?? []), attempt];
+  // In time order whichever device saved first; the newest are kept.
+  const moment = (a: QuizAttempt) => (/^\d{4}-\d{2}-\d{2}T/.test(a.at) && Date.parse(a.at)) || 0;
+  const attempts = [...(block.attempts ?? []), attempt].sort((a, b) => moment(a) - moment(b));
   block.attempts = attempts.slice(-MAX_QUIZ_ATTEMPTS);
 }
 
@@ -325,6 +335,66 @@ export function applyRunResults(
     const block = findQuiz(attempt.pageId, attempt.blockId);
     if (block) pushAttempt(block, attempt.attempt);
   }
+}
+
+/** The name the editor registers `runResultsReplayer` under. */
+export const RUN_RESULTS_REPLAY = "quizRun";
+
+/**
+ * A saved run as data: what `applyRunResults` was called with. Kept with the
+ * edit so that, recovered from the draft of a closed tab, the run is applied
+ * again as a run (each answer counted once) instead of as raw numbers.
+ */
+export function runResultsReplay(
+  results: readonly QuestionResult[],
+  attempt: { pageId: string; blockId: string; attempt: QuizAttempt } | undefined,
+  runAt: string,
+): { name: string; args: unknown } {
+  return {
+    name: RUN_RESULTS_REPLAY,
+    args: {
+      results: results.map((r) => ({ pageId: r.pageId, blockId: r.blockId, questionId: r.questionId, correct: r.correct })),
+      ...(attempt ? { attempt } : {}),
+      at: runAt,
+    },
+  };
+}
+
+/** The run described by `runResultsReplay` as an edit again (null if `args` is not one). */
+export function runResultsReplayer(args: unknown): ((draft: Workspace) => void) | null {
+  if (typeof args !== "object" || args === null) return null;
+  const a = args as { results?: unknown; attempt?: unknown; at?: unknown };
+  const text = (v: unknown): v is string => typeof v === "string";
+  if (!text(a.at) || Number.isNaN(Date.parse(a.at)) || !Array.isArray(a.results)) return null;
+  const results: QuestionResult[] = [];
+  for (const r of a.results as Array<Record<string, unknown>>) {
+    if (!r || !text(r.pageId) || !text(r.blockId) || !text(r.questionId) || typeof r.correct !== "boolean") return null;
+    results.push({ pageId: r.pageId, blockId: r.blockId, questionId: r.questionId, correct: r.correct });
+  }
+  let attempt: { pageId: string; blockId: string; attempt: QuizAttempt } | undefined;
+  if (a.attempt !== undefined) {
+    const t = a.attempt as { pageId?: unknown; blockId?: unknown; attempt?: Record<string, unknown> };
+    const inner = t?.attempt;
+    if (
+      !t ||
+      !text(t.pageId) ||
+      !text(t.blockId) ||
+      !inner ||
+      !text(inner.at) ||
+      (inner.mode !== "practice" && inner.mode !== "exam") ||
+      typeof inner.score !== "number" ||
+      typeof inner.total !== "number"
+    ) {
+      return null;
+    }
+    attempt = {
+      pageId: t.pageId,
+      blockId: t.blockId,
+      attempt: { at: inner.at, mode: inner.mode, score: inner.score, total: inner.total },
+    };
+  }
+  const at = a.at;
+  return (draft) => applyRunResults(draft, results, attempt, at);
 }
 
 // ---------------------------------------------------------------------------

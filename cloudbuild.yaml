@@ -55,7 +55,7 @@ steps:
           --build-arg NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL="${_NPM_CLERK_SIGNIN_FB}" \
           --build-arg NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL="${_NPM_CLERK_SIGNUP_FB}" \
           --build-arg NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY="${_NPM_STRIPE_PK}" \
-          --build-arg ASSETS_BUCKET="${_ASSETS_BUCKET}" \
+          --build-arg ASSETS_BUCKET="${_ASSETS_BUCKET}"           --build-arg DEPLOYMENT_VERSION="${BUILD_ID}" \
           -t "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:latest" \
           .
 

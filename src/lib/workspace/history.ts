@@ -182,10 +182,11 @@ function blockText(block: Block): string | null {
 
 /**
  * True when a block went away without taking content with it: an empty
- * line (Backspace on an empty line, a "/" pick that replaced it), or text
- * that was joined onto a neighbouring block (Backspace at the start of a
- * line, Delete at the end of the one above). Those are ordinary editing,
- * not deletions to offer an Undo toast for.
+ * line (Backspace on an empty line, a "/" pick that replaced it), text that
+ * was joined onto a neighbouring block (Backspace at the start of a line,
+ * Delete at the end of the one above), or text that replaced another
+ * block's (one of two kept versions chosen). Those are ordinary editing, not
+ * deletions to offer an Undo toast for.
  */
 function removedNothing(block: Block, before: Map<string, Block>, after: Block[]): boolean {
   const text = blockText(block);
@@ -195,9 +196,11 @@ function removedNothing(block: Block, before: Map<string, Block>, after: Block[]
     const now = blockText(b);
     const was = before.get(b.id);
     const prior = was ? blockText(was) : null;
+    if (now === null || prior === null) return false;
+    // A kept copy put in place of the other version ("use this version"):
+    // its text lives on in that block.
+    if (now === text && prior !== text) return true;
     return (
-      now !== null &&
-      prior !== null &&
       now.length === prior.length + text.length &&
       (now === prior + text || now === text + prior)
     );

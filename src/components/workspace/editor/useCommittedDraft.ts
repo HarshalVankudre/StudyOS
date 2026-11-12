@@ -68,9 +68,11 @@ export function useCommittedDraft(
   const committedRef = useRef(value);
   const onCommitRef = useRef(onCommit);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const changedRef = useRef(sync?.changed);
 
   useLayoutEffect(() => {
     onCommitRef.current = onCommit;
+    changedRef.current = sync?.changed;
   });
   useLayoutEffect(() => {
     committedRef.current = value;
@@ -93,6 +95,7 @@ export function useCommittedDraft(
         setDraft(stored);
         setFollow(false);
       }
+      changedRef.current?.();
     }
   }, []);
 
@@ -103,6 +106,7 @@ export function useCommittedDraft(
       setFollow(false);
       if (timer.current) clearTimeout(timer.current);
       timer.current = hold ? null : setTimeout(commitNow, delay);
+      changedRef.current?.();
     },
     [commitNow, delay],
   );
@@ -113,6 +117,7 @@ export function useCommittedDraft(
     draftRef.current = text;
     committedRef.current = text;
     setDraft(text);
+    changedRef.current?.();
   }, []);
 
   // Let the sync engine write buffered typing when it needs to.

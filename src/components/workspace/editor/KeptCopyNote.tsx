@@ -15,7 +15,8 @@ function pageOf(d: Workspace, pageId: string) {
 
 /**
  * Shown on a block the sync engine kept as a second version: that paragraph
- * was changed in two places at once (two tabs or devices, or the AI agent),
+ * was changed in two places at once (two tabs or devices, or the AI agent;
+ * or in a tab that closed before saving, recovered after something else was saved),
  * the texts could not be merged, and both were kept rather than one being
  * lost. One tap resolves it: use this version (it replaces the other one),
  * keep both as ordinary blocks, or discard this one. All are undoable.

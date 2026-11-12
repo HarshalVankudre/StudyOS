@@ -72,10 +72,11 @@ export const ENV_VARS: readonly EnvVarSpec[] = [
   { name: "STRIPE_PRICE_PRO", required: false, feature: "billing", secret: false, description: "Stripe price id of the Pro subscription; with billing on, the pricing page shows its amount and currency (lib/plan-pricing.ts)." },
   { name: "STRIPE_PRICE_PRO_ANNUAL", required: false, feature: "billing", secret: false, description: "Stripe price id of annual Pro billing; annual is shown and sold only when it is set AND is an active yearly price (lib/plan-pricing.ts)." },
   { name: "STRIPE_WEBHOOK_SECRET", required: false, feature: "billing", secret: true, description: "Signing secret of the Stripe webhook (/api/stripe/webhook)." },
-  { name: "STUDYOS_PRO_MONTHLY_PRICE", required: false, feature: "billing", secret: false, description: "USD a month shown for monthly Pro (default 5) only while billing is off. With billing configured the page shows what the Stripe price STRIPE_PRICE_PRO charges, in its currency (lib/plan-pricing.ts)." },
-  { name: "STUDYOS_PRO_ANNUAL_PRICE", required: false, feature: "billing", secret: false, description: "Fallback only: with billing configured, annual Pro is shown and sold exactly when STRIPE_PRICE_PRO_ANNUAL is an active yearly Stripe price, at that price (lib/plan-pricing.ts)." },
+  { name: "STUDYOS_PRO_MONTHLY_PRICE", required: false, feature: "billing", secret: false, description: "USD a month shown for monthly Pro (default 7.99, lib/price-list.ts) only while billing is off. With billing configured the page shows what the Stripe price STRIPE_PRICE_PRO charges, in its currency (lib/plan-pricing.ts)." },
+  { name: "STUDYOS_PRO_ANNUAL_PRICE", required: false, feature: "billing", secret: false, description: "USD a year shown for annual Pro (default 39.99, lib/price-list.ts) only while billing is off. With billing configured, annual Pro is shown and sold exactly when STRIPE_PRICE_PRO_ANNUAL is an active yearly Stripe price, at that price (lib/plan-pricing.ts)." },
   { name: "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY", required: false, feature: "billing", secret: false, description: "Stripe publishable key (passed as a build arg; currently unused by the client)." },
   // Assets + sandbox
+  { name: "DEPLOYMENT_VERSION", required: false, feature: "core", secret: false, description: "Build-time only (a Docker build arg; Cloud Build passes its build id): the id of this build, so a browser tab still running the previous one is recognised during a rolling deploy (next.config.ts deploymentId)." },
   { name: "ASSETS_BUCKET", required: false, feature: "assets", secret: false, description: "GCS bucket for rendered images; required by the sandbox feature and account deletion of asset bytes." },
   { name: "GOOGLE_APPLICATION_CREDENTIALS", required: false, feature: "assets", secret: true, description: "Service-account key path outside Google Cloud; Cloud Run uses its own identity instead." },
   { name: "AGENT_SANDBOX", required: false, feature: "sandbox", secret: false, description: "1 = enable the Daytona render sandbox tool (owner's decision)." },
@@ -234,7 +235,38 @@ export function checkEnvironment(env: Env = process.env, build: BuildInfo = BUIL
   if (production && !isSet(env, "APP_URL") && !isSet(env, "NEXT_PUBLIC_APP_URL")) {
     warnings.push("APP_URL is not set: absolute links use the fallback Cloud Run URL.");
   }
+  if (production) {
+    for (const name of ["APP_URL", "NEXT_PUBLIC_APP_URL"] as const) {
+      if (pointsAtLocalhost(env[name])) {
+        warnings.push(
+          `${name} points at ${env[name]!.trim()}, a local address: links in emails, calendar feeds and redirects would lead students to their own computer.${
+            name === "NEXT_PUBLIC_APP_URL" ? " It is baked into the client at build time, so rebuild after fixing it." : ""
+          }`,
+        );
+      }
+    }
+  }
   return { production, missingRequired, features, warnings };
+}
+
+/** True when `value` is a URL (or bare host) on this machine: localhost, 127.x, 0.0.0.0, ::1. */
+export function pointsAtLocalhost(value: string | undefined): boolean {
+  const text = value?.trim();
+  if (!text) return false;
+  let host: string;
+  try {
+    host = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `http://${text}`).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  host = host.replace(/^\[|\]$/g, "");
+  return (
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host === "0.0.0.0" ||
+    host === "::1" ||
+    /^127(\.\d{1,3}){3}$/.test(host)
+  );
 }
 
 const RULE = "=".repeat(72);

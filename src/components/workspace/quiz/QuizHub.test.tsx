@@ -43,6 +43,8 @@ vi.mock("@/components/workspace/materials/MaterialSourceViewer", () => ({
 }));
 
 import { StudyLauncher } from "../StudyLauncher";
+import { examKey } from "./examProgress";
+import { quizItems } from "@/lib/study/quiz";
 
 const Q = en.quiz;
 const T = en.studyTools;
@@ -133,6 +135,41 @@ describe("quizzes in the study hub", () => {
     // Mixed rounds are not attempts at any one quiz.
     expect(quizAt(0).attempts).toHaveLength(1);
     expect(quizAt(1).attempts).toBeUndefined();
+  });
+
+  it("shows an exam left unfinished on this device and resumes it (QA round 3)", async () => {
+    const user = userEvent.setup();
+    setWorkspace();
+    // Node's own localStorage shadows jsdom's here: a plain in-memory one.
+    const data = new Map<string, string>();
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: (k: string) => data.get(k) ?? null,
+        setItem: (k: string, v: string) => void data.set(k, String(v)),
+        removeItem: (k: string) => void data.delete(k),
+      },
+    });
+    window.localStorage.setItem(
+      examKey("w1", "p2", "qb"),
+      JSON.stringify({
+        v: 1,
+        questions: quizItems("p2", quizAt(1)).map((item) => ({ ...item, key: `p2:qb:${item.questionId}` })),
+        answers: [],
+        deadline: null,
+        savedAt: Date.now(),
+      }),
+    );
+    render(<StudyLauncher />);
+    await user.click(screen.getByRole("button", { name: T.openHub }));
+    const hub = screen.getByRole("dialog", { name: T.studyHub });
+    expect(
+      within(hub).getByText(`Chemistry · 1 question · ${fmt(Q.examInProgressAnswered, { answered: 0, total: 1 })}`),
+    ).toBeInTheDocument();
+    expect(within(hub).queryByRole("button", { name: `${Q.exam}: Acids` })).not.toBeInTheDocument();
+    await user.click(within(hub).getByRole("button", { name: `${Q.resumeExam}: Acids` }));
+    expect(screen.getByText(en.safety.examResumed)).toBeInTheDocument();
+    data.clear();
   });
 
   it("starts one quiz as an exam from the hub", async () => {

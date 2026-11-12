@@ -1,9 +1,10 @@
 // src/lib/ai/tools/sandbox-tool.ts
 import { z } from "zod";
-import type { SandboxRunner, SandboxRunSpec } from "@/lib/ai/sandbox/runner";
+import { isImageOutdatedError, type SandboxRunner, type SandboxRunSpec } from "@/lib/ai/sandbox/runner";
+import { networkCommand, RENDER_COMMANDS } from "@/lib/ai/sandbox/toolchain";
 import type { CreateAssetFn } from "@/lib/assets/service";
 import { mimeForOutputPath } from "@/lib/assets/mime";
-import { SANDBOX_RUN_CREDITS } from "@/lib/credits-info";
+import { RENDER_CREDITS as SANDBOX_RUN_CREDITS } from "@/lib/price-list";
 import type { ToolContext, ToolDefinition } from "./registry";
 
 const MAX_CMDS = 20;
@@ -42,7 +43,23 @@ const sandboxOutput = z.object({
   ),
   logTail: z.string(),
   exitCode: z.number().int(),
+  /** For a run that delivered no image: what to do next (it was not charged). */
+  note: z.string().optional(),
 });
+
+/** Said to the agent when rendering cannot work right now (nothing was charged). */
+export const RENDER_UNAVAILABLE =
+  "Rendering is unavailable right now (the render tools are being updated). Nothing was charged. Do not retry: tell the student the visual couldn't be rendered and give the content another way (an equation as $…$ math in a text block, a plot as a short table or description).";
+
+/** A run that needs the network or an install: refused before anything is reserved. */
+function networkRefusal(command: string): string {
+  return `The render sandbox has no network and nothing can be installed, so "${command.slice(0, 80)}" cannot run. Nothing was charged. Use only the preinstalled offline tools (${RENDER_COMMANDS.join(", ")}, Python matplotlib/numpy, TeX Live) and try once more, or give the content another way.`;
+}
+
+/** A finished run that produced no image (not charged). */
+function failedRenderNote(exitCode: number): string {
+  return `The render ${exitCode !== 0 ? `failed (exit code ${exitCode})` : "produced no usable image"} and was not charged. Read the log once and fix a mistake in your own source; if it fails again, do not retry: tell the student the visual couldn't be rendered and give the content another way.`;
+}
 
 /**
  * Credits charged for renders, per agent task, so the turn's own charge can
@@ -134,7 +151,9 @@ export function createSandboxTool(deps: {
   return {
     id: "run_in_sandbox",
     description:
-      "Run a render toolchain in an isolated sandbox to produce IMAGE artifacts (PNG/SVG) — e.g. compile LaTeX or a diagram. Write source via `inputs`, optionally `setup` installs, `run` the commands that write files under out/, and list those files in `outputs`. Returns asset handles; then add a media block per artifact with set_page_blocks referencing the assetId. Never returns file bytes.",
+      "Run a render toolchain in an isolated, network-blocked sandbox to produce IMAGE artifacts (PNG/SVG): compile LaTeX, plot with matplotlib, draw a Graphviz diagram. Only the preinstalled offline tools exist (" +
+      RENDER_COMMANDS.join(", ") +
+      "); nothing can be downloaded or installed. Write source via `inputs`, `run` the commands that write files under out/, and list those files in `outputs` (`setup` is for preparatory commands, never installs). Returns asset handles; then add a media block per artifact with set_page_blocks referencing the assetId. Never returns file bytes. A failed render is not charged.",
     input: sandboxInput,
     output: sandboxOutput,
     limits: { timeoutMs: (TIMEOUT_MAX + 20) * 1000 },
@@ -142,6 +161,11 @@ export function createSandboxTool(deps: {
     enabled: deps.enabled,
     handler: async (input, ctx) => {
       if (!ctx.ownerId) throw new Error("run_in_sandbox requires an owner");
+      // Refused before any credits or quota are reserved, or a sandbox
+      // started: what cannot work offline, and an image without the tools.
+      const blocked = networkCommand([...input.setup, ...input.run]);
+      if (blocked) throw new Error(networkRefusal(blocked));
+      if (deps.runner.available && !deps.runner.available()) throw new Error(RENDER_UNAVAILABLE);
 
       let charge: SandboxCharge | null = null;
       if (deps.quota) {
@@ -157,6 +181,11 @@ export function createSandboxTool(deps: {
       }
       try {
         return await runAndStore(input, ctx, ctx.ownerId, charge);
+      } catch (error) {
+        // An image without the offline toolchain: one clear log line was
+        // written by the runner; the agent gets something it can act on.
+        if (isImageOutdatedError(error)) throw new Error(RENDER_UNAVAILABLE);
+        throw error;
       } finally {
         // A run that was not charged (it threw, or delivered nothing) gives
         // its credits back. A no-op after a settle.
@@ -214,6 +243,11 @@ export function createSandboxTool(deps: {
       await charge.settle().catch(() => {});
     }
 
-    return { artifacts, logTail: result.logTail, exitCode: result.exitCode };
+    return {
+      artifacts,
+      logTail: result.logTail,
+      exitCode: result.exitCode,
+      ...(artifacts.length === 0 ? { note: failedRenderNote(result.exitCode) } : {}),
+    };
   }
 }

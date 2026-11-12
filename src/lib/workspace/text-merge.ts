@@ -1,29 +1,44 @@
 /**
  * Three-way text merge (diff3) for the workspace sync engine.
  *
- * Used when two people (two devices, or a device and the AI agent) changed the
- * same prose field: `base` is the text as it was when they diverged, `ours`
- * and `theirs` are the two edited versions. Edits in different places combine;
- * edits to the same place are a conflict and the caller keeps both versions.
+ * Used when the same prose field was changed in two places (two devices, or a
+ * device and the AI agent): `base` is the text as it was when they diverged,
+ * `ours` and `theirs` are the two edited versions. Edits in different places
+ * combine; anything else is a conflict and the caller keeps both versions.
  *
- * The classic diff3 construction, over tokens (words, runs of spaces, single
- * punctuation marks and emoji, single CJK characters):
+ * THE GUARANTEE. When `merge3` reports a clean result, that result holds
+ * everything either side added exactly once and nothing either side removed.
+ * When it cannot be sure, it reports a conflict. It errs on the side of
+ * conflicts: a conflict costs the student one tap (two marked versions of the
+ * paragraph), a wrong clean merge silently alters their text.
+ *
+ * How (the plain diff3 construction, over tokens: words, runs of spaces,
+ * single punctuation marks and emoji, single characters of scripts written
+ * without spaces):
  *  1. each side is diffed against the base into hunks (a base range and what
- *     replaced it);
+ *     replaced it). Applying a side's hunks to the base gives that side
+ *     exactly; this is checked, not assumed;
  *  2. every pure insertion or deletion is slid to its leftmost equivalent
  *     position, so the same edit made on both sides lands at the same place
- *     however each diff happened to align it ("the basic unit" typed on both
- *     sides is one insertion, not two one space apart);
- *  3. a change made identically on both sides counts once; changes of the
- *     two sides that share any of the base text conflict; changes that only
- *     touch combine, and two different insertions at the very same spot are
- *     both kept, the other side's first (two people each adding a sentence
- *     at the end of a paragraph get both sentences);
- *  4. finally an alignment-independent count check (`countsConsistent`)
- *     rejects any result whose words do not add up, whatever the diffs
- *     decided about where things moved.
- * A clean result therefore only ever contains, for every stretch of the base,
- * the base itself or exactly one side's change to it.
+ *     however each diff happened to align it;
+ *  3. a hunk both sides have (same place, same new text) is applied once.
+ *     All other hunks of the two sides must not share any base text: they may
+ *     touch, never overlap, and none may insert into the middle of what the
+ *     other replaced. Then every hunk is applied to the base;
+ *  4. things that look combinable and are not are conflicts: a word one side
+ *     moved while the other changed anything; a mark (comma, bracket) one side
+ *     took out in one place and put in at another, with a change of the other
+ *     side between or next to those places (unless a word that occurs only
+ *     once stands between them, kept); a word new to the text added by
+ *     both sides (one addition seen twice); two insertions at the very same
+ *     spot that share a word; and a shared change to a word one side also
+ *     changed elsewhere (a move meeting a deletion);
+ *  5. finally the result is counted, independently of any alignment: every
+ *     word must occur exactly as often as the base, plus what each side added
+ *     or removed, with shared changes counted once. Anything else is a
+ *     conflict.
+ * Since the hunks are disjoint, steps 1 and 3 already imply step 5; it is
+ * kept as the check that holds whatever the steps before it did.
  */
 
 // Grapheme clusters (an emoji with a skin tone or a family is one unit).
@@ -41,7 +56,9 @@ function graphemes(text: string): string[] {
   return Array.from(text);
 }
 
-const CJK = /[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}]/u;
+// Scripts written without spaces between words: every character is a token
+// (a run of them is not "one word" that two edits would always collide on).
+const CJK = /[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}\p{sc=Thai}\p{sc=Lao}\p{sc=Khmer}\p{sc=Myanmar}]/u;
 const SPACE = /^\s+$/u;
 const WORD = /^[\p{L}\p{M}\p{N}_]/u;
 
@@ -51,14 +68,6 @@ function kindOf(g: string): Kind {
   if (CJK.test(g)) return "single";
   return WORD.test(g) ? "word" : "single";
 }
-
-/**
- * The pieces a word is counted by in the final check: its letter and digit
- * runs ("COVID19" counts as "COVID" and "19"), so two words glued together
- * (Latin words inside text written without spaces) are still checked one by
- * one, while the diff itself never cuts a word in half.
- */
-const PIECE = /\p{N}+|[^\p{N}]+/gu;
 
 /** Tokens whose concatenation is exactly `text`. */
 export function tokenize(text: string): string[] {
@@ -251,6 +260,20 @@ function hunksOf(o: readonly string[], a: readonly string[]): Hunk[] | null {
   return out;
 }
 
+/** `o` with `hunks` applied (in order, none overlapping), or null if they overlap. */
+function applyHunks(o: readonly string[], hunks: readonly Hunk[]): string[] | null {
+  const out: string[] = [];
+  let pos = 0;
+  for (const h of hunks) {
+    if (h.s < pos || h.e < h.s || h.e > o.length) return null;
+    for (let k = pos; k < h.s; k += 1) out.push(o[k]);
+    for (const t of h.ins) out.push(t);
+    pos = h.e;
+  }
+  for (let k = pos; k < o.length; k += 1) out.push(o[k]);
+  return out;
+}
+
 /** Can deletion `h` move by `d` tokens (right if positive) and delete the same tokens' worth? */
 function canSlide(o: readonly string[], h: Hunk, d: number): boolean {
   if (d > 0) {
@@ -264,9 +287,10 @@ function canSlide(o: readonly string[], h: Hunk, d: number): boolean {
 }
 
 /**
- * Overlapping deletions `x` (earlier) and `y` of the two sides: move one of
- * them along its run of equal tokens so that they only touch, without
- * running into another hunk of its own side. False if they cannot be.
+ * Overlapping deletions `x` and `y` of the two sides: move one of them along
+ * its run of equal tokens so that they only touch, without running into
+ * another hunk of its own side. False if they cannot be. (Each side's own
+ * result is unchanged by such a move; `merge3` checks that again afterwards.)
  */
 function separateDeletions(
   o: readonly string[],
@@ -304,115 +328,126 @@ function containsRun(long: readonly string[], short: readonly string[]): boolean
   return false;
 }
 
-/** For each piece a side inserted: where ("i<pos>" a pure insertion, "r<s>:<e>" a replacement). */
-function spots(hunks: readonly Hunk[]): Map<string, Set<string>> {
-  const m = new Map<string, Set<string>>();
-  for (const h of hunks) {
-    const where = h.s === h.e ? `i${h.s}` : `r${h.s}:${h.e}`;
-    for (const t of h.ins) {
-      if (SPACE.test(t)) continue;
-      for (const piece of t.match(PIECE) ?? [t]) {
-        const set = m.get(piece) ?? new Set<string>();
-        set.add(where);
-        m.set(piece, set);
-      }
-    }
-  }
-  return m;
-}
-
-function counts(tokens: readonly string[]): Map<string, number> {
-  const m = new Map<string, number>();
+/** How often each token that is not white space occurs. */
+function counts(tokens: readonly string[], into = new Map<string, number>(), sign = 1): Map<string, number> {
   for (const t of tokens) {
     if (SPACE.test(t)) continue;
-    for (const piece of t.match(PIECE) ?? [t]) m.set(piece, (m.get(piece) ?? 0) + 1);
+    into.set(t, (into.get(t) ?? 0) + sign);
   }
-  return m;
+  return into;
+}
+
+/** A token that carries meaning of its own (a word, a number, an emoji), unlike a space or a punctuation mark. */
+const SIGNIFICANT = /[\p{L}\p{N}\p{Extended_Pictographic}]/u;
+
+/**
+ * Does this side take a word out in one place and put the same word in at
+ * another (it moved text, or the diff could only explain its edit that way)?
+ * Then where the other side's changes belong relative to the moved words
+ * cannot be told from the base text.
+ */
+function movesWords(o: readonly string[], hunks: readonly Hunk[]): boolean {
+  const removedAt = new Map<string, number>();
+  hunks.forEach((h, i) => {
+    for (let k = h.s; k < h.e; k += 1) if (SIGNIFICANT.test(o[k]) && !removedAt.has(o[k])) removedAt.set(o[k], i);
+  });
+  if (removedAt.size === 0) return false;
+  return hunks.some((h, i) =>
+    h.ins.some((t) => {
+      if (!removedAt.has(t)) return false;
+      // Removed by another hunk than this one (also when more than one removes it).
+      if (removedAt.get(t) !== i) return true;
+      return hunks.some((g, j) => j !== i && o.slice(g.s, g.e).includes(t));
+    }),
+  );
 }
 
 /**
- * Alignment-independent check of a clean merge. Whatever the diffs decided
- * about where things moved, every word (and mark) must appear as often as
- * the two edits together allow:
- *  - one side changed its count, or the two changed it in opposite
- *    directions: base + both changes, exactly;
- *  - both added (or both removed) some: between "the same change, made on
- *    both sides" (the larger of the two) and "two separate changes" (their
- *    sum). A word that is new to the text and added by both sides in
- *    different places, though, is one addition placed twice (a restore
- *    meeting a copy that already has it): the larger of the two, exactly.
- *    Only additions at the very same spot (two sentences appended to the
- *    same paragraph, both starting "They") count as separate.
- * Anything else means the two edits were entangled (one side moved a word
- * the other deleted, the same insertion was placed twice...), and the merge
- * is reported as a conflict, so both versions are kept.
+ * The same for marks (a comma, a full stop, a bracket), which are far too
+ * common to treat every removal-and-addition as a move: this side takes a
+ * mark out in one hunk and puts the same mark in in another, and the other
+ * side changed something between those two places or right next to them.
+ * Whether that change belongs before or after the mark then depends on how
+ * the diff read this side's edit ("the full stop moved" or "a marker in
+ * front of it was replaced by one behind it"), and the merge must not.
+ *
+ * Not when this side kept a word between the two places that occurs once in
+ * the base and once in its own text: no reading of the edit can then take
+ * the mark that went for the mark that came (it would have to cross that
+ * word), so there is nothing to mistake.
  */
-function countsConsistent(
+function movesMarkAcross(
   o: readonly string[],
-  a: readonly string[],
-  b: readonly string[],
-  r: readonly string[],
-  ha: readonly Hunk[],
-  hb: readonly Hunk[],
-  sharedHunks: readonly Hunk[],
+  hunks: readonly Hunk[],
+  others: readonly Hunk[],
+  countBase: ReadonlyMap<string, number>,
+  countSide: ReadonlyMap<string, number>,
 ): boolean {
-  const co = counts(o);
-  const ca = counts(a);
-  const cb = counts(b);
-  const cr = counts(r);
-  // A change both sides made (applied once) counts once: the rules below
-  // judge what each side did beyond it.
-  const cs = new Map<string, number>();
-  const removedByBoth = new Set<string>();
-  for (const h of sharedHunks) {
-    for (const [k, n] of counts(h.ins)) cs.set(k, (cs.get(k) ?? 0) + n);
-    for (const [k, n] of counts(o.slice(h.s, h.e))) {
-      cs.set(k, (cs.get(k) ?? 0) - n);
-      if (WORD.test(k)) removedByBoth.add(k);
+  if (others.length === 0 || hunks.length < 2) return false;
+  // Per token: the hunks that remove it.
+  const removedBy = new Map<string, number[]>();
+  hunks.forEach((h, i) => {
+    for (let k = h.s; k < h.e; k += 1) {
+      const t = o[k];
+      if (SPACE.test(t)) continue;
+      const list = removedBy.get(t);
+      if (!list) removedBy.set(t, [i]);
+      else if (list[list.length - 1] !== i) list.push(i);
     }
+  });
+  if (removedBy.size === 0) return false;
+  // pins[k]: how many such kept, unique words lie before base position k.
+  const pins = new Uint32Array(o.length + 1);
+  let next = 0;
+  for (let k = 0; k < o.length; k += 1) {
+    while (next < hunks.length && hunks[next].e <= k) next += 1;
+    const replaced = next < hunks.length && hunks[next].s <= k;
+    const pin = !replaced && WORD.test(o[k]) && countBase.get(o[k]) === 1 && countSide.get(o[k]) === 1;
+    pins[k + 1] = pins[k] + (pin ? 1 : 0);
   }
-  // A word both removed from the same place that one side put in again
-  // elsewhere was moved there by that side and deleted by the other: entangled.
-  if (removedByBoth.size > 0) {
-    const sharedKeys = new Set(sharedHunks.map(hunkKey));
-    for (const h of [...ha, ...hb]) {
-      if (sharedKeys.has(hunkKey(h))) continue;
-      for (const k of counts(h.ins).keys()) if (removedByBoth.has(k)) return false;
-    }
-  }
-  const spotsA = spots(ha);
-  const spotsB = spots(hb);
-  const sameSpot = (k: string) => {
-    const x = spotsA.get(k);
-    const y = spotsB.get(k);
-    if (!x || !y || x.size !== 1 || y.size !== 1) return false;
-    const [p] = x;
-    return p.startsWith("i") && y.has(p);
+  return hunks.some((h, j) =>
+    h.ins.some((t) =>
+      (removedBy.get(t) ?? []).some((i) => {
+        if (i === j) return false;
+        const [first, second] = i < j ? [hunks[i], h] : [h, hunks[i]];
+        if (pins[second.s] - pins[first.e] > 0) return false;
+        return others.some((x) => x.s <= second.e && x.e >= first.s);
+      }),
+    ),
+  );
+}
+
+/**
+ * Both sides replaced the same stretch `was` of the base, and each kept it
+ * whole: one only added in front of it, the other only behind it (two people
+ * typing at the start and at the end of the same word, with no space). The
+ * combined text, or null when that is not what happened or it can be read in
+ * more than one way.
+ */
+function fuseAround(was: string, a: string, b: string): string | null {
+  if (!was) return null;
+  const results = new Set<string>();
+  const fuse = (front: string, back: string) => {
+    // `front` ends with the original, `back` starts with it.
+    if (!front.endsWith(was) || !back.startsWith(was)) return;
+    const before = front.slice(0, front.length - was.length);
+    const after = back.slice(was.length);
+    // The same addition on both ends is more likely one edit seen twice.
+    if (before && after && before !== after) results.add(before + was + after);
   };
-  const keys = new Set([...co.keys(), ...ca.keys(), ...cb.keys(), ...cr.keys()]);
-  for (const k of keys) {
-    const base = co.get(k) ?? 0;
-    const both = cs.get(k) ?? 0;
-    const da = (ca.get(k) ?? 0) - base - both;
-    const db = (cb.get(k) ?? 0) - base - both;
-    const got = (cr.get(k) ?? 0) - base - both;
-    if (da > 0 && db > 0) {
-      const most = base === 0 && WORD.test(k) && !sameSpot(k) ? Math.max(da, db) : da + db;
-      if (got < Math.max(da, db) || got > most) return false;
-    } else if (da < 0 && db < 0) {
-      if (got > Math.min(da, db) || got < da + db) return false;
-    } else if (got !== da + db) {
-      return false;
-    }
-  }
-  return true;
+  fuse(a, b);
+  fuse(b, a);
+  if (results.size !== 1) return null;
+  const [only] = results;
+  return only;
 }
 
 export type MergeResult = { ok: true; text: string } | { ok: false };
 
 /**
  * Merge `ours` and `theirs`, both derived from `base`. Returns the combined
- * text, or `{ ok: false }` when both changed the same part differently.
+ * text, or `{ ok: false }` when the two edits cannot be combined with
+ * certainty (the caller then keeps both versions).
  */
 export function merge3(base: string, ours: string, theirs: string): MergeResult {
   if (ours === theirs) return { ok: true, text: ours };
@@ -422,80 +457,151 @@ export function merge3(base: string, ours: string, theirs: string): MergeResult 
   const o = tokenize(base);
   const ta = tokenize(ours);
   const tb = tokenize(theirs);
+  const forward = mergeTokens(o, ta, tb, false);
+  if (!forward) return { ok: false };
+  // Where a text repeats itself a diff has a choice (which of three equal
+  // words was removed?), and the merge must not depend on it: the same merge
+  // read from the end makes the opposite choices, and has to give the same text.
+  const backward = mergeTokens(o.slice().reverse(), ta.slice().reverse(), tb.slice().reverse(), true);
+  if (!backward) return { ok: false };
+  const text = forward.join("");
+  if (backward.reverse().join("") !== text) return { ok: false };
+  return { ok: true, text };
+}
+
+/** One pass of the merge over token lists; null on a conflict. `mirrored`: the lists are reversed. */
+function mergeTokens(
+  o: readonly string[],
+  ta: readonly string[],
+  tb: readonly string[],
+  mirrored: boolean,
+): string[] | null {
   const ha = hunksOf(o, ta);
   const hb = hunksOf(o, tb);
-  if (!ha || !hb) return { ok: false };
+  if (!ha || !hb) return null;
 
-  // The same change made on both sides counts once.
-  const inB = new Set(hb.map(hunkKey));
-  const shared = new Set(ha.map(hunkKey).filter((k) => inB.has(k)));
-  const sharedHunks = ha.filter((h) => shared.has(hunkKey(h)));
-  const merged: Array<Hunk & { side: number }> = [
-    ...ha.map((h) => ({ ...h, side: 0 })),
-    ...hb.filter((h) => !shared.has(hunkKey(h))).map((h) => ({ ...h, side: 1 })),
-  ].sort((x, y) => x.s - y.s || x.e - y.e || y.side - x.side);
+  // The same change made on both sides (same place, same new text) counts once.
+  const keysB = new Set(hb.map(hunkKey));
+  const shared = new Set(ha.map(hunkKey).filter((k) => keysB.has(k)));
+  const mine = ha.filter((h) => !shared.has(hunkKey(h)));
+  const other = hb.filter((h) => !shared.has(hunkKey(h)));
 
-  // Edits of the two sides may touch but not share any of the base text: a
-  // change to the same words is a conflict. Two different insertions at the
-  // very same spot are both kept, the other side's first (both people added
-  // a sentence at the end of the paragraph: both sentences stay).
-  const mine = merged.filter((h) => h.side === 0);
-  const other = merged.filter((h) => h.side === 1);
-  // A deletion can sit anywhere along a run of equal tokens ("␣[B14]" or
-  // "[B14]␣"): two deletions that overlap only because of where the diffs
-  // put them are moved apart (each side's own result is unchanged).
-  let moved = false;
+  // A deletion can sit anywhere along a run of equal tokens ("␣word" or
+  // "word␣"): two deletions that overlap only because of where the diffs put
+  // them are moved apart.
   for (const x of mine) {
     for (const y of other) {
       if (x.ins.length === 0 && y.ins.length === 0 && x.s < y.e && y.s < x.e) {
-        moved = separateDeletions(o, x, y, x.s <= y.s ? mine : other, x.s <= y.s ? other : mine) || moved;
+        separateDeletions(o, x, y, x.s <= y.s ? ha : hb, x.s <= y.s ? hb : ha);
       }
     }
   }
-  if (moved) merged.sort((x, y) => x.s - y.s || x.e - y.e || y.side - x.side);
+  // Whatever was moved: each side's hunks must still produce exactly that side.
+  const againA = applyHunks(o, ha);
+  const againB = applyHunks(o, hb);
+  if (!againA || !againB || againA.join("") !== ta.join("") || againB.join("") !== tb.join("")) return null;
+  // Text one side moved while the other changed something too.
+  if ((other.length > 0 && movesWords(o, ha)) || (mine.length > 0 && movesWords(o, hb))) return null;
+
+  const co = counts(o);
+  const ca = counts(ta);
+  const cb = counts(tb);
+  if (movesMarkAcross(o, ha, other, co, ca) || movesMarkAcross(o, hb, mine, co, cb)) return null;
+  // A word (not a bracket or a comma) that the base text does not contain.
+  const isNew = (t: string) => SIGNIFICANT.test(t) && !co.has(t);
+  // What is applied once although both sides have it: per word, how often.
+  const net = new Map<string, number>();
+  const dropped = new Set<Hunk>();
+  // The same stretch replaced on both sides, each side only adding at one
+  // end of it ("alpha" -> "headalpha" and "alphatail"): one replacement
+  // holding both additions.
+  const read = (tokens: readonly string[]) => (mirrored ? tokens.slice().reverse() : tokens).join("");
   for (const x of mine) {
     for (const y of other) {
-      const overlap = x.s < y.e && y.s < x.e;
-      const inside =
-        (x.s === x.e && x.s > y.s && x.s < y.e) || (y.s === y.e && y.s > x.s && y.s < x.e);
-      // Two deletions that share only the space between them (each removed
-      // a word, and the space before or after it): everything either removed goes.
-      const spaceOnly =
-        overlap &&
-        x.ins.length === 0 &&
-        y.ins.length === 0 &&
-        o.slice(Math.max(x.s, y.s), Math.min(x.e, y.e)).every((t) => SPACE.test(t));
-      if ((overlap && !spaceOnly) || inside) return { ok: false };
-      // The same new text at two different places is almost certainly one
-      // edit the two diffs placed differently: keeping both would duplicate it.
-      if (x.ins.length > 0 && x.ins.join("") === y.ins.join("") && x.ins.some((t) => !SPACE.test(t))) {
-        return { ok: false };
+      if (dropped.has(y) || x.s !== y.s || x.e !== y.e || x.e === x.s) continue;
+      const fused = fuseAround(read(o.slice(x.s, x.e)), read(x.ins), read(y.ins));
+      if (fused === null) continue;
+      const tokens = tokenize(fused);
+      // Counted as: both replacements once each gone, the stretch they shared
+      // once less removed, the fused text in.
+      counts(x.ins, net, 1);
+      counts(y.ins, net, 1);
+      counts(o.slice(x.s, x.e), net, -1);
+      counts(tokens, net, -1);
+      x.ins = mirrored ? tokens.reverse() : tokens;
+      dropped.add(y);
+      break;
+    }
+  }
+  const fusedNet = new Map(net);
+  for (const x of mine) {
+    for (const y of other) {
+      if (dropped.has(x) || dropped.has(y)) continue;
+      // Changes of the two sides may touch but not share any of the base text.
+      if (x.s < y.e && y.s < x.e) return null;
+      // An insertion in the middle of what the other side replaced.
+      if ((x.s === x.e && x.s > y.s && x.s < y.e) || (y.s === y.e && y.s > x.s && y.s < x.e)) return null;
+      if (x.s === x.e && y.s === y.e && x.s === y.s) {
+        // Two insertions at the very same spot. One holds the other whole,
+        // and that other has a word new to the text (the same words typed or
+        // restored on both sides, one side then typing more): the longer
+        // one, once.
+        const [long, short] = x.ins.length >= y.ins.length ? [x, y] : [y, x];
+        if (short.ins.some(isNew) && containsRun(long.ins, short.ins)) {
+          dropped.add(short);
+          counts(short.ins, net, 1);
+          continue;
+        }
+        // They share a word otherwise (the same sentence begun on both
+        // sides): which words are the same typing cannot be told. Two
+        // unrelated additions are both kept, see below.
+        if (x.ins.some((t) => WORD.test(t) && y.ins.includes(t))) return null;
       }
+      // A word (a name, a number, a mark) that was not in the text and that
+      // both sides add is taken to be one addition, placed twice by the two
+      // diffs (the other side already holds this side's words): combining
+      // would write it twice.
+      if (x.ins.some((t) => isNew(t) && y.ins.includes(t))) return null;
     }
   }
 
-  // Two insertions at the very same spot where one already contains the
-  // other (the same words typed or restored on both sides, one side then
-  // typing more): the longer one, once.
-  for (let i = 0; i + 1 < merged.length; i += 1) {
-    const x = merged[i];
-    const y = merged[i + 1];
-    if (x.side === y.side || x.s !== x.e || y.s !== y.e || x.s !== y.s) continue;
-    const [long, short] = x.ins.length >= y.ins.length ? [x, y] : [y, x];
-    if (short.ins.some((t) => WORD.test(t)) && containsRun(long.ins, short.ins)) {
-      merged.splice(i, 2, long);
-      i -= 1;
-    }
+  // A shared change is only "the same change" if neither side did more to
+  // the same words elsewhere: a word both removed from one place that one
+  // side put in again somewhere else was moved by that side and deleted by
+  // the other, and applying the removal once would keep the moved copy.
+  for (const h of ha) {
+    if (!shared.has(hunkKey(h))) continue;
+    counts(h.ins, net, 1);
+    counts(o.slice(h.s, h.e), net, -1);
+  }
+  for (const [k, total] of net) {
+    const s = total - (fusedNet.get(k) ?? 0);
+    const base0 = co.get(k) ?? 0;
+    const da = (ca.get(k) ?? 0) - base0;
+    const db = (cb.get(k) ?? 0) - base0;
+    if (s > 0 && (da < s || db < s)) return null;
+    if (s < 0 && (da > s || db > s)) return null;
   }
 
-  const out: string[] = [];
-  let pos = 0;
-  for (const h of merged) {
-    for (let k = pos; k < h.s; k += 1) out.push(o[k]);
-    out.push(...h.ins);
-    pos = Math.max(pos, h.e);
+  // Shared changes once, then each side's own. At the very same spot the
+  // other side's insertion goes first (both added a sentence at the end of
+  // the paragraph: both sentences stay).
+  const merged: Array<Hunk & { side: number }> = [
+    ...ha.filter((h) => !dropped.has(h)).map((h) => ({ ...h, side: 0 })),
+    ...other.filter((h) => !dropped.has(h)).map((h) => ({ ...h, side: 1 })),
+  ].sort((x, y) => x.s - y.s || x.e - y.e || (mirrored ? x.side - y.side : y.side - x.side));
+  const out = applyHunks(o, merged);
+  if (!out) return null;
+
+  // Last, a check that does not depend on how the diffs aligned anything:
+  // every word must occur exactly as often as the two edits together make it
+  // (the base, plus what each side added or removed, with a shared change
+  // counted once). Otherwise something was written twice or dropped.
+  const cr = counts(out);
+  for (const k of new Set([...co.keys(), ...ca.keys(), ...cb.keys(), ...cr.keys()])) {
+    const base0 = co.get(k) ?? 0;
+    const want = (ca.get(k) ?? 0) + (cb.get(k) ?? 0) - base0 - (net.get(k) ?? 0);
+    if ((cr.get(k) ?? 0) !== want) return null;
   }
-  for (let k = pos; k < o.length; k += 1) out.push(o[k]);
-  if (!countsConsistent(o, ta, tb, out, ha, hb, sharedHunks)) return { ok: false };
-  return { ok: true, text: out.join("") };
+  return out;
 }

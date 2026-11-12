@@ -7,17 +7,26 @@ vi.mock("@daytona/sdk", () => ({
     }
   },
 }));
+const reported = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/ops/report-error", () => ({ reportError: reported }));
 
 import {
   CREATE_TIMEOUT_SEC,
   DaytonaSandboxRunner,
+  OUTDATED_IMAGE_RECHECK_MS,
   PER_COMMAND_TIMEOUT_SEC,
+  resetSandboxImageCheck,
+  SandboxImageOutdatedError,
   SandboxTimeoutError,
   sandboxNetworkPolicy,
   type DaytonaClientLike,
   type DaytonaSandboxLike,
 } from "./daytona";
 import type { SandboxRunSpec } from "./runner";
+import { PREPARE_COMMAND, RENDER_IMAGE_VERSION } from "./toolchain";
+
+/** What an image with the current offline toolchain answers to the first command. */
+const CURRENT_IMAGE = { exitCode: 0, result: `studyos-render-image ${RENDER_IMAGE_VERSION}\n` };
 
 const SPEC: SandboxRunSpec = {
   inputs: [{ path: "main.tex", content: "x" }],
@@ -30,7 +39,10 @@ const SPEC: SandboxRunSpec = {
 function fakeSandbox(overrides: Partial<{ exec: DaytonaSandboxLike["process"]["executeCommand"] }> = {}) {
   const sandbox = {
     process: {
-      executeCommand: vi.fn(overrides.exec ?? (async () => ({ exitCode: 0, result: "ok" }))),
+      executeCommand: vi.fn(
+        overrides.exec ??
+          (async (cmd: string) => (cmd === PREPARE_COMMAND ? CURRENT_IMAGE : { exitCode: 0, result: "ok" })),
+      ),
     },
     fs: {
       uploadFile: vi.fn(async () => {}),
@@ -48,6 +60,8 @@ function fakeClient(sandbox: DaytonaSandboxLike | Promise<DaytonaSandboxLike>) {
 
 afterEach(() => {
   vi.useRealTimers();
+  resetSandboxImageCheck();
+  reported.mockReset();
   delete process.env.STUDYOS_SANDBOX_NETWORK_ALLOWLIST;
 });
 
@@ -100,7 +114,8 @@ describe("DaytonaSandboxRunner", () => {
 
   it("stops at the first failing command, skips downloads, and still deletes", async () => {
     const sb = fakeSandbox({
-      exec: async (cmd) => (cmd.startsWith("pdflatex") ? { exitCode: 1, result: "error" } : { exitCode: 0 }),
+      exec: async (cmd) =>
+        cmd === PREPARE_COMMAND ? CURRENT_IMAGE : cmd.startsWith("pdflatex") ? { exitCode: 1, result: "error" } : { exitCode: 0 },
     });
     const result = await new DaytonaSandboxRunner(fakeClient(sb).client).run(SPEC);
     expect(result.exitCode).toBe(1);
@@ -116,7 +131,7 @@ describe("DaytonaSandboxRunner", () => {
   });
 
   it("aborts a hung command on the caller's signal and deletes the sandbox", async () => {
-    const sb = fakeSandbox({ exec: (cmd) => (cmd === "mkdir -p out" ? Promise.resolve({ exitCode: 0 }) : new Promise(() => {})) });
+    const sb = fakeSandbox({ exec: (cmd) => (cmd === PREPARE_COMMAND ? Promise.resolve(CURRENT_IMAGE) : new Promise(() => {})) });
     const controller = new AbortController();
     const run = new DaytonaSandboxRunner(fakeClient(sb).client).run(SPEC, controller.signal);
     await vi.waitFor(() => expect(sb.process.executeCommand).toHaveBeenCalledTimes(2));
@@ -127,7 +142,7 @@ describe("DaytonaSandboxRunner", () => {
 
   it("enforces the total wall-clock budget", async () => {
     vi.useFakeTimers();
-    const sb = fakeSandbox({ exec: (cmd) => (cmd === "mkdir -p out" ? Promise.resolve({ exitCode: 0 }) : new Promise(() => {})) });
+    const sb = fakeSandbox({ exec: (cmd) => (cmd === PREPARE_COMMAND ? Promise.resolve(CURRENT_IMAGE) : new Promise(() => {})) });
     const run = new DaytonaSandboxRunner(fakeClient(sb).client).run({ ...SPEC, timeoutSec: 10 });
     const settled = expect(run).rejects.toBeInstanceOf(SandboxTimeoutError);
     await vi.advanceTimersByTimeAsync(10_000 + 200_000);
@@ -148,5 +163,38 @@ describe("DaytonaSandboxRunner", () => {
     resolveCreate(sb);
     await vi.waitFor(() => expect(sb.delete).toHaveBeenCalledTimes(1));
     expect(sb.process.executeCommand).not.toHaveBeenCalled();
+  });
+
+  it("refuses an image without the offline toolchain before any agent command, logs once, then stops starting sandboxes", async () => {
+    const old = fakeSandbox({ exec: async () => ({ exitCode: 0, result: "" }) }); // no version marker
+    const { client, create } = fakeClient(old);
+    const runner = new DaytonaSandboxRunner(client);
+    expect(runner.available()).toBe(true);
+    await expect(runner.run(SPEC)).rejects.toBeInstanceOf(SandboxImageOutdatedError);
+    // Only the prepare command ran; nothing the agent wrote, no downloads; deleted.
+    expect(old.process.executeCommand).toHaveBeenCalledTimes(1);
+    expect(old.process.executeCommand.mock.calls[0][0]).toBe(PREPARE_COMMAND);
+    expect(old.fs.uploadFile).not.toHaveBeenCalled();
+    expect(old.delete).toHaveBeenCalledTimes(1);
+    // One clear log line for the owner, naming the fix.
+    expect(reported).toHaveBeenCalledTimes(1);
+    const [error, context] = reported.mock.calls[0];
+    expect(String((error as Error).message)).toMatch(/render toolchain none, needs v\d+.*build-snapshot\.mjs/);
+    expect(context).toMatchObject({ source: "sandbox" });
+    // Renders stay off for a while: no sandbox is created for them.
+    expect(runner.available()).toBe(false);
+    await expect(runner.run(SPEC)).rejects.toBeInstanceOf(SandboxImageOutdatedError);
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(reported).toHaveBeenCalledTimes(1);
+  });
+
+  it("rechecks the image later, so a rebuilt snapshot is picked up without a redeploy", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const old = fakeSandbox({ exec: async () => ({ exitCode: 0, result: "studyos-render-image 1" }) });
+    await expect(new DaytonaSandboxRunner(fakeClient(old).client).run(SPEC)).rejects.toBeInstanceOf(SandboxImageOutdatedError);
+    vi.setSystemTime(Date.now() + OUTDATED_IMAGE_RECHECK_MS + 1);
+    const rebuilt = new DaytonaSandboxRunner(fakeClient(fakeSandbox()).client);
+    expect(rebuilt.available()).toBe(true);
+    expect((await rebuilt.run(SPEC)).exitCode).toBe(0);
   });
 });

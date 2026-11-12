@@ -20,6 +20,7 @@ import {
   usdToCredits,
   type CreditHold,
 } from "@/lib/credits";
+import { agentTooExpensiveMessage, outOfCreditsMessage } from "@/lib/credit-messages";
 import { getLocale } from "@/lib/i18n/server";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { fmt } from "@/lib/i18n/interpolate";
@@ -49,7 +50,8 @@ import {
   watchDurableCancellation,
 } from "@/lib/ai/tasks/cancellation";
 import { estimateAgentTurn, runAgentLoop } from "@/lib/ai/agent-loop";
-import { budgetForPlan, TURN_CREDIT_CAP } from "@/lib/ai/budgets";
+import { budgetForPlan } from "@/lib/ai/budgets";
+import { messageQuote, type PriceQuote } from "@/lib/price-list";
 import {
   appendChatMessages,
   loadModelHistory,
@@ -198,13 +200,22 @@ export async function POST(request: Request) {
         finish();
       };
 
-      // Charge (or not) by outcome, exactly once per turn, never more than
-      // the plan's per-message cap with the turn's sandbox runs included.
+      // Charge (or not) by outcome, exactly once per turn: the message price
+      // (lib/price-list.ts), never more than the plan's per-message ceiling
+      // with the turn's sandbox runs included.
       let capCredits: number | undefined;
+      let quote: PriceQuote | null = null;
+      // What this request was expected to spend: a stopped turn pays its share.
+      let typicalUsd: number | undefined;
       const settle = async (outcome: AgentTurnOutcome): Promise<number> => {
         if (settled) return 0;
         settled = true;
-        return settleAgentTurn({ userId, usage, model, outcome, hold, capCredits, taskId });
+        // No quote yet: refused before any model ran, so nothing to charge.
+        if (!quote) {
+          await releaseAgentHold(hold);
+          return 0;
+        }
+        return settleAgentTurn({ userId, usage, model, outcome, quote, typicalUsd, hold, capCredits, taskId });
       };
 
       const remember = async (messages: NewChatMessage[]) => {
@@ -254,7 +265,8 @@ export async function POST(request: Request) {
 
         const plan = await getUserPlan();
         model = modelForPlan(plan);
-        capCredits = TURN_CREDIT_CAP[plan];
+        const turnQuote = messageQuote(model, plan);
+        capCredits = turnQuote.max;
         const clock = studentClock(
           await studentTimeZone(request, userId, parsed.data.timeZone),
         );
@@ -277,29 +289,34 @@ export async function POST(request: Request) {
         );
 
         // ---- Up-front cost check -----------------------------------------
-        // What the smallest real edit on this workspace would cost on this
-        // model. A student who can't afford it is told the estimate and their
-        // balance, and nothing runs.
+        // A message costs at least its price (lib/price-list.ts), and at
+        // least what the smallest real edit on this workspace would cost on
+        // this model. A student who can't afford that is told the amount and
+        // their balance, and nothing runs.
         const balance = await getCreditBalance(userId);
         const estimate = estimateAgentTurn({ workspace, history, message, model, locale, clock });
-        const estimateCredits = Math.max(1, usdToCredits(estimate.simpleTurnUsd));
+        const estimateCredits = Math.min(
+          turnQuote.max,
+          Math.max(turnQuote.price, usdToCredits(estimate.simpleTurnUsd)),
+        );
+        typicalUsd = estimate.simpleTurnUsd;
         const tooExpensive = (available: number) =>
           refuse(
             "insufficient_credits",
             available <= 0
-              ? T.credits.outAgent
-              : fmt(T.credits.agentTooExpensive, { cost: plural(locale, T.counts.credits, estimateCredits), balance: available }),
+              ? outOfCreditsMessage(T, "agent")
+              : agentTooExpensiveMessage(T, { cost: plural(locale, T.counts.credits, estimateCredits), balance: available }),
           );
         if (balance < estimateCredits) {
           tooExpensive(balance);
           return;
         }
         // Reserve the turn's whole spend ceiling atomically: up to the
-        // plan's per-message cap, at least the estimate. A parallel turn sees
+        // plan's per-message ceiling, at least the price. A parallel turn sees
         // the balance without it, so turns running at once can never spend
-        // the same credits; the hold is settled down to the real cost.
+        // the same credits; the hold is settled down to the charge.
         hold = await reserveCredits(userId, {
-          estimate: TURN_CREDIT_CAP[plan],
+          estimate: turnQuote.max,
           min: estimateCredits,
           reason: "agent",
         });
@@ -307,6 +324,7 @@ export async function POST(request: Request) {
           tooExpensive(await getCreditBalance(userId));
           return;
         }
+        quote = turnQuote;
         // Hard spend ceiling for this turn: exactly what was reserved. The
         // loop sizes every call to stay under it.
         const ceilingCredits = hold.amount;

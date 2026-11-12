@@ -10,7 +10,7 @@ const m = vi.hoisted(() => ({
   limit: vi.fn(),
 }));
 vi.mock("@/lib/credits", () => ({
-  SANDBOX_RUN_CREDITS: 2,
+  RENDER_CREDITS: 2,
   reserveCredits: m.reserve,
   settleCreditHold: m.settle,
   releaseCreditHold: m.release,

@@ -59,9 +59,10 @@ function Editor() {
 }
 
 let local: Map<string, string>;
+let session: Map<string, string>;
 beforeEach(() => {
   local = installMemoryStorage("localStorage");
-  installMemoryStorage("sessionStorage");
+  session = installMemoryStorage("sessionStorage");
   actions.saveWorkspaceAction.mockImplementation(() => new Promise(() => {})); // a phone about to freeze
   actions.getWorkspaceStateAction.mockResolvedValue({ workspace, version: 1 });
   actions.getWorkspaceVersionAction.mockResolvedValue(1);
@@ -88,7 +89,10 @@ describe("useWorkspaceSync and buffered fields (finding 7)", () => {
     Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true });
   });
 
-  it("closing sends typing still only in a field to the server, so no leave prompt", async () => {
+  // Third review: nothing is sent to the server while the page closes except
+  // an ordinary save. Typing that has not been confirmed is written to the
+  // local draft synchronously, and the student is asked before leaving.
+  it("closing writes typing still only in a field to the local draft and asks before leaving", async () => {
     const fetchMock = vi.fn<(url: string, init: RequestInit) => Promise<Response>>(() =>
       Promise.resolve(new Response("{}")),
     );
@@ -101,24 +105,15 @@ describe("useWorkspaceSync and buffered fields (finding 7)", () => {
       act(() => {
         window.dispatchEvent(event);
       });
-      expect(event.defaultPrevented).toBe(false);
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-      expect(url).toBe("/api/workspace/save");
-      expect(init.keepalive).toBe(true);
-      const body = JSON.parse(String(init.body)) as { id: string; baseVersion: number; saveId: string; ops: unknown[] };
-      expect(body).toMatchObject({ id: "w1", baseVersion: 1 });
-      expect(body.saveId).toMatch(/\S{8,}/);
-      expect(JSON.stringify(body.ops)).toContain("Biology!");
-
-      // pagehide right after: not sent a second time; the tab says goodbye
-      // (its draft may be recovered at once, it is not "alive").
+      expect(event.defaultPrevented).toBe(true); // not on the server yet: "leave site?"
+      const draft = [...local.entries()].find(([k]) => k.startsWith("studyos:draft:"));
+      expect(draft?.[1]).toContain("Biology!");
       act(() => {
         window.dispatchEvent(new Event("pagehide"));
       });
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-      const draft = [...local.entries()].find(([k]) => k.startsWith("studyos:draft:"));
-      expect(draft?.[1]).toContain("Biology!"); // the local fallback stays
+      // No request that outlives the page: no patch is ever applied server-side.
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect([...local.entries()].find(([k]) => k.startsWith("studyos:draft:"))?.[1]).toContain("Biology!");
     } finally {
       vi.unstubAllGlobals();
     }
@@ -138,5 +133,38 @@ describe("useWorkspaceSync and buffered fields (finding 7)", () => {
     } finally {
       online.mockRestore();
     }
+  });
+});
+
+describe("tab ids (third review, finding 10)", () => {
+  it("a duplicated tab never shares its id with the original, however long that was frozen", async () => {
+    const user = userEvent.setup();
+    const draftKeys = () => [...local.keys()].filter((k) => k.startsWith("studyos:draft:"));
+    const hide = () => {
+      Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
+      act(() => {
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true });
+    };
+    const first = render(<Editor />);
+    await user.type(first.getByLabelText("Page title"), " one");
+    hide();
+    expect(draftKeys()).toHaveLength(1);
+    const [originalKey] = draftKeys();
+    // The original shows no sign of life for a long time (frozen by the OS)...
+    for (const key of [...local.keys()]) if (key.startsWith("studyos:tab:")) local.set(key, String(Date.now() - 600_000));
+    // ...and the browser duplicates the tab: a new page load that copies sessionStorage.
+    const copied = new Map(session);
+    const second = render(<Editor />);
+    for (const [k, v] of copied) expect(session.get(k)).toBe(v); // nothing of the original's is taken over
+    const titles = second.getAllByLabelText("Page title");
+    await user.type(titles[titles.length - 1], " two");
+    hide();
+    // The duplicate writes its draft under an id of its own, never under the
+    // original's (which it may have taken over as that of a closed tab).
+    const own = draftKeys().filter((k) => !k.includes("~"));
+    expect(own).toHaveLength(1);
+    expect(own[0]).not.toBe(originalKey);
   });
 });

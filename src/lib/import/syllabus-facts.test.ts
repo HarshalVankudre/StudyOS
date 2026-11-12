@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractSyllabusFacts, findDate, syllabusFactsBlock } from "./syllabus-facts";
+import { extractSyllabusFacts, findDate, statesCount, syllabusFactsBlock } from "./syllabus-facts";
 
 const TODAY = "2026-11-12";
 
@@ -313,8 +313,54 @@ describe("extractSyllabusFacts: categories versus single items", () => {
     const facts = extractSyllabusFacts("Grading: Quizzes 10% (best 8 of 10 count), Two midterms 20% each, Final 50%", TODAY, "en");
     expect(facts.assessments).toEqual([
       { name: "Quizzes", weight: 10, group: true, count: 10, dropLowest: 2 },
-      { name: "Midterms", weight: 40, group: true, count: 2 },
+      { name: "Midterms", weight: 40, group: true, count: 2, each: 20 },
       { name: "Final", weight: 50 },
+    ]);
+  });
+
+  // "N items, X% each": one category of N items whose weight is N × X, with the
+  // per-item weight kept, so nothing downstream gives both the category and its
+  // items a weight.
+  const EACH_SHAPES: { locale: string; text: string; name: string; count: number; each: number }[] = [
+    { locale: "en", text: "Two midterms 20% each, Final 60%", name: "Midterms", count: 2, each: 20 },
+    { locale: "en", text: "2 midterms (20% each), final 60%", name: "Midterms", count: 2, each: 20 },
+    { locale: "en", text: "Three quizzes at 5% each, Final exam 85%", name: "Quizzes", count: 3, each: 5 },
+    { locale: "en", text: "Midterms: 2 x 20%; Final 60%", name: "Midterms", count: 2, each: 20 },
+    { locale: "de", text: "Zwei Klausuren je 20 %; Abschlussprüfung 60 %", name: "Klausuren", count: 2, each: 20 },
+    { locale: "de", text: "2 Zwischenprüfungen mit jeweils 20 %, Abschlussprüfung 60 %", name: "Zwischenprüfungen", count: 2, each: 20 },
+    { locale: "es", text: "Dos parciales, 20% cada uno; Examen final 60%", name: "Parciales", count: 2, each: 20 },
+    { locale: "es", text: "2 exámenes parciales (20% cada uno), examen final 60%", name: "Exámenes parciales", count: 2, each: 20 },
+    { locale: "fr", text: "Deux partiels de 20 % chacun; Examen final 60 %", name: "Partiels", count: 2, each: 20 },
+    { locale: "it", text: "Due prove intermedie, 20% ciascuna; Esame finale 60%", name: "Prove intermedie", count: 2, each: 20 },
+    { locale: "pt", text: "Duas provas de 20% cada; Exame final 60%", name: "Provas", count: 2, each: 20 },
+    { locale: "nl", text: "Twee deeltoetsen van elk 20%; Tentamen 60%", name: "Deeltoetsen", count: 2, each: 20 },
+    { locale: "zh", text: "两次期中考试，各20%；期末考试 60%", name: "期中考试", count: 2, each: 20 },
+    { locale: "ja", text: "中間試験2回（各20%）；期末試験 60%", name: "中間試験", count: 2, each: 20 },
+    { locale: "ar", text: "اختباران نصفيان، 20% لكل منهما؛ الامتحان النهائي 60%", name: "اختباران نصفيان", count: 2, each: 20 },
+  ];
+
+  it.each(EACH_SHAPES)("$locale: $text", ({ locale, text, name, count, each }) => {
+    const facts = extractSyllabusFacts(`Grading\n${text.replace("؛", ";")}`, TODAY, locale);
+    expect(facts.assessments[0]).toEqual({ name, weight: count * each, group: true, count, each });
+    // The other item keeps its single weight.
+    expect(facts.assessments[1].weight).toBe(100 - count * each);
+    expect(facts.assessments).toHaveLength(2);
+  });
+
+  it("knows when the student's text states a count, in words too", () => {
+    expect(statesCount("Two midterms 20% each", 2)).toBe(true);
+    expect(statesCount("Zwei Klausuren je 20 %", 2)).toBe(true);
+    expect(statesCount("两次期中考试，各20%", 2)).toBe(true);
+    expect(statesCount("10 problem sets", 10)).toBe(true);
+    expect(statesCount("Problem sets 20%", 10)).toBe(false);
+    expect(statesCount("Problem sets 120%", 12)).toBe(false);
+  });
+
+  it("does not read one weight with a per-something note as several items", () => {
+    const facts = extractSyllabusFacts("Bewertung\nHausaufgaben 20 % (je Blatt gleich gewichtet), Klausur 80 %", TODAY, "de");
+    expect(facts.assessments.map((a) => [a.name, a.weight])).toEqual([
+      ["Hausaufgaben", 20],
+      ["Klausur", 80],
     ]);
   });
 
@@ -334,6 +380,9 @@ describe("extractSyllabusFacts: categories versus single items", () => {
     expect(block).toContain('"category":true');
     expect(block).toContain('"items":10');
     expect(block).toMatch(/grading\.categories/);
+    const each = syllabusFactsBlock({ assessments: [{ name: "Midterms", weight: 40, group: true, count: 2, each: 20 }] });
+    expect(each).toContain('"eachPercent":20');
+    expect(each).toMatch(/never both/);
   });
 });
 

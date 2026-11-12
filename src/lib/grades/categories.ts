@@ -334,6 +334,59 @@ export function dropSingleItemCategories(
   return removed;
 }
 
+/**
+ * One weight per item, never two. When rows of a category also carry their
+ * own weight (the category "Midterms 40%" next to rows "Midterm 1 20%" and
+ * "Midterm 2 20%"), the weight is moved to exactly one place:
+ *   - the rows' weights add up to the category's (and it drops no scores):
+ *     the rows say it all, so the category is removed;
+ *   - every row carries the per-item share (the category's weight over its
+ *     item count, "20% each"): the rows' copies are cleared, and they count
+ *     through the category, which also covers the ones not listed yet;
+ *   - anything else is left as it is: the grade calculation then counts each
+ *     such row on its own weight and the category only on the rest.
+ * Mutates `db`; returns how many categories or row weights were changed.
+ */
+export function settleDoubleWeights(
+  db: Database,
+  columns: CategoryRowColumns,
+  courseKeyOf: (row: DatabaseRow) => string,
+): number {
+  const weightProp = columns.weight;
+  const title = titleProperty(db);
+  if (!weightProp || !title || !db.grading?.categories.length) return 0;
+  const scheme = db.grading;
+  let changed = 0;
+  const removed = new Set<string>();
+  for (const category of scheme.categories) {
+    const siblings = categoriesFor(scheme, category.course);
+    const own = db.rows.filter((row) => {
+      const weight = row.cells[weightProp.id];
+      if (typeof weight !== "number" || !Number.isFinite(weight) || weight <= 0) return false;
+      if (courseKeyOf(row) !== category.course) return false;
+      const hand = scheme.assign?.[row.id];
+      if (hand !== undefined) return hand === category.id;
+      return matchCategory(cellText(row.cells[title.id]), rowTypeLabels(db, row, columns.course), siblings) === category.id;
+    });
+    if (own.length === 0) continue;
+    const weights = own.map((row) => row.cells[weightProp.id] as number);
+    const sum = weights.reduce((a, b) => a + b, 0);
+    const near = (a: number, b: number) => Math.abs(a - b) < 0.01;
+    if (near(sum, category.weight) && !category.dropLowest && (!category.expectedCount || category.expectedCount <= own.length)) {
+      removed.add(category.id);
+      changed += 1;
+      continue;
+    }
+    const share = category.expectedCount ? category.weight / category.expectedCount : null;
+    if (share !== null && weights.every((w) => near(w, share))) {
+      for (const row of own) row.cells[weightProp.id] = null;
+      changed += own.length;
+    }
+  }
+  for (const id of removed) removeCategory(db, id);
+  return changed;
+}
+
 /** The student keeps these rows as they are: the clean-up is not offered for them again. */
 export function keepCategoryRows(db: Database, rowIds: readonly string[]): void {
   db.grading ??= { categories: [] };

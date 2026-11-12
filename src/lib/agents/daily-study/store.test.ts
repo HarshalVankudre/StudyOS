@@ -267,12 +267,34 @@ describe("Daily Study Agent store", () => {
       expect(stored.pages[0].blocks[0]).toMatchObject({ checked: true });
       const savedItems = JSON.parse(mocks.planUpdateMany.mock.calls[0][0].data.items);
       expect(savedItems[0]).toMatchObject({ completed: true });
-      expect(mocks.planUpdateMany.mock.calls[0][0].where).toEqual({ id: "plan-1", userId: "user-1" });
+      // Written only if the plan still holds what was read.
+      expect(mocks.planUpdateMany.mock.calls[0][0].where).toMatchObject({ id: "plan-1", userId: "user-1" });
+      expect(typeof mocks.planUpdateMany.mock.calls[0][0].where.items).toBe("string");
 
       mocks.planFindFirst.mockResolvedValue(planRow(savedItems));
       const undone = await setDailyStudyItemCompleted("plan-1", "task:ws-1:home:todo-1", false);
       expect(undone).toEqual({ ok: true, completed: false, wroteThrough: true });
       expect(stored.pages[0].blocks[0]).toMatchObject({ checked: false });
+    });
+
+    // Third sync review: two devices checking different items off must not
+    // overwrite each other (the plan is one JSON list).
+    it("a check-off made on another device meanwhile is kept, not overwritten", async () => {
+      const first = todoItem({ id: "task:ws-1:home:todo-1", mode: "session" });
+      const second = todoItem({ id: "task:ws-1:home:todo-2", mode: "session" });
+      // What this request read...
+      mocks.planFindFirst.mockResolvedValueOnce(planRow([first, second]));
+      // ...is no longer what the plan holds: the phone checked the second item off.
+      mocks.planUpdateMany.mockResolvedValueOnce({ count: 0 });
+      mocks.planFindFirst.mockResolvedValueOnce(planRow([first, { ...second, completed: true }]));
+      const done = await setDailyStudyItemCompleted("plan-1", first.id, true);
+      expect(done).toMatchObject({ ok: true, completed: true });
+      expect(mocks.planUpdateMany).toHaveBeenCalledTimes(2);
+      const [refused, written] = mocks.planUpdateMany.mock.calls.map((c) => c[0]);
+      expect(refused.where.items).toBe(JSON.stringify([first, second]));
+      expect(written.where.items).toBe(JSON.stringify([first, { ...second, completed: true }]));
+      const saved = JSON.parse(written.data.items) as DailyStudyPlanItem[];
+      expect(saved.map((i) => i.completed)).toEqual([true, true]);
     });
 
     it("gives a row its done status and restores the old one on undo", async () => {

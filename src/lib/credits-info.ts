@@ -1,20 +1,16 @@
 /**
  * Pure, dependency-free credit facts safe to import from CLIENT and server
- * (unlike lib/credits.ts, which pulls in Prisma). Holds the credit peg, the
- * low-balance threshold and the "what does a credit buy" translation into
- * human units — the transparency the research flags as essential to a credit
- * model people trust (never expose the raw token peg; always show what
- * credits mean).
+ * (unlike lib/credits.ts, which pulls in Prisma): the credit peg (what a
+ * credit is worth in model spend), the low-balance threshold, and the token
+ * profiles that say what each kind of AI work really costs on a model.
  *
- * Typical costs are derived from the configured model's token rates (one
- * token profile per kind of work, priced with lib/ai/model-pricing.ts), so
- * they stay true when the owner changes STUDYOS_FREE_MODEL / STUDYOS_PRO_MODEL.
- * The constants below are those figures for the configured models; on the
- * server they follow the environment, in a client bundle (which cannot read
- * it) they are the default model's.
+ * What an action COSTS THE STUDENT is not set here: every AI action has a
+ * fixed, published credit price in lib/price-list.ts. The figures below are
+ * only used there to find out whether the configured model's real cost can
+ * exceed that price (then the action is charged its real cost, and the page
+ * shows that before the student starts).
  */
 import { callCostUsd, type CallTokens } from "@/lib/ai/model-pricing";
-import { modelForPlan } from "@/lib/ai/plans";
 
 /** The peg: 1000 credits buys $3.00 of token spend. */
 export const USD_PER_1000_CREDITS = 3;
@@ -31,11 +27,12 @@ export function creditsToUsd(credits: number): number {
   return Math.max(0, credits) * USD_PER_CREDIT;
 }
 
-/** Flat credit price of one sandbox render run (covers Daytona compute). */
-export const SANDBOX_RUN_CREDITS = 2;
-
 /** Warn the user at or below this balance. */
 export const LOW_CREDIT_THRESHOLD = 50;
+
+export function isLowBalance(credits: number): boolean {
+  return credits <= LOW_CREDIT_THRESHOLD;
+}
 
 /**
  * Token profiles. TYPICAL_* are what an ordinary run uses (measured on the
@@ -51,10 +48,16 @@ export const TYPICAL_EDIT_TOKENS: CallTokens = { input: 5_000, output: 3_000, ca
 
 /** One study-kit section: ~3k tokens of material plus the prompt in, the kit out. */
 export const TYPICAL_KIT_SECTION_TOKENS: CallTokens = { input: 6_000, output: 4_000, cacheRead: 0, cacheWrite: 0 };
+/**
+ * One study-kit section at its limits: two attempts (one retry, see
+ * lib/materials/pipeline.ts), each over a full ~12,000-character section and
+ * writing up to the section call's output budget (lib/materials/model.ts).
+ */
+export const MAX_KIT_SECTION_TOKENS: CallTokens = { input: 12_000, output: 28_000, cacheRead: 0, cacheWrite: 0 };
 /** The setup questions before a build: one small call (lib/ai/generate.ts planQuestions). */
 export const TYPICAL_QUESTIONS_TOKENS: CallTokens = { input: 2_500, output: 1_500, cacheRead: 0, cacheWrite: 0 };
 
-type WorkKind = "build" | "edit" | "kitSection" | "questions";
+export type WorkKind = "build" | "edit" | "kitSection" | "questions";
 const DEFAULT_PROFILES: Record<WorkKind, CallTokens> = {
   build: TYPICAL_BUILD_TOKENS,
   edit: TYPICAL_EDIT_TOKENS,
@@ -66,8 +69,9 @@ const DEFAULT_PROFILES: Record<WorkKind, CallTokens> = {
  * Typical token use measured on a specific model, where it differs from the
  * default model's. Claude Haiku 5.5 reads the same prompts but writes far
  * less than GLM (whose reasoning is billed as output): on the local QA run of
- * 12 Nov 2026 its builds were charged 1 to 2 credits, its edits 1 and its
- * study-kit runs 1 to 3 (CreditHold.charged), which this profile reproduces.
+ * 12 Nov 2026 its builds cost 1 to 2 credits of model spend, its edits 1 and
+ * its study-kit runs 1 to 3 (CreditHold.charged), which this profile
+ * reproduces.
  */
 const MODEL_PROFILES: Readonly<Record<string, Partial<Record<WorkKind, CallTokens>>>> = {
   "claude-haiku-5-5": { build: { input: 22_000, output: 6_000, cacheRead: 0, cacheWrite: 0 } },
@@ -78,101 +82,22 @@ export function typicalTokens(model: string, kind: WorkKind): CallTokens {
   return MODEL_PROFILES[model]?.[kind] ?? DEFAULT_PROFILES[kind];
 }
 
-const creditsFor = (model: string, tokens: CallTokens) => usdToCredits(callCostUsd(model, tokens));
-
-/**
- * What a workspace build costs on `model`: typically, and the most it is
- * expected to cost. A build starts only with the typical cost available, and
- * reserves the larger figure (lib/credits.ts reserveCredits), so parallel
- * builds cannot share one balance. `max` is a reservation, not a promise: a
- * build is charged what it really used.
- */
-export function buildCreditCost(model: string): { typical: number; max: number } {
-  const typical = creditsFor(model, typicalTokens(model, "build"));
-  return { typical, max: Math.max(typical, creditsFor(model, MAX_BUILD_TOKENS)) };
-}
-
-/** What one ordinary agent edit / chat turn costs on `model`. */
-export function editCreditCost(model: string): number {
-  return creditsFor(model, typicalTokens(model, "edit"));
-}
-
-/** What the setup questions before a build typically cost on `model`. */
-export function questionsCreditCost(model: string): number {
-  return creditsFor(model, typicalTokens(model, "questions"));
-}
-
-/** The more expensive of the two plans' models (what the pricing page quotes). */
-function quotedCost(cost: (model: string) => number): number {
-  return Math.max(cost(modelForPlan("free")), cost(modelForPlan("pro")));
-}
-
-/**
- * Rough averages for translating a credit balance into everyday actions on
- * the pricing/credits pages: typical costs, not guarantees — a request's
- * real cost scales with how much the AI does.
- */
-export const CREDITS_PER_GENERATION = quotedCost((m) => buildCreditCost(m).typical); // a full workspace build
-export const CREDITS_PER_EDIT = quotedCost(editCreditCost); // one agent edit / chat turn
-export const CREDITS_PER_QUESTIONS = quotedCost(questionsCreditCost); // the setup questions
-
-/**
- * Balance needed to START a workspace build: about one typical build. A run
- * is charged at most the remaining balance, so without this a 1-credit
- * account would get a full build for 1 credit.
- */
-export const MIN_GENERATION_BALANCE = CREDITS_PER_GENERATION;
-
-/**
- * A study kit made from the student's material costs per section read (one
- * model call over ~12,000 characters, see lib/materials/limits): typically
- * TYPICAL_KIT_SECTION_TOKENS priced for the model (about 9 credits on GLM,
- * 1 on Claude Haiku). The cap is a promise, not an estimate: the server
- * never charges a run more than STUDY_KIT_MAX_CREDITS_PER_SECTION per
- * section, whatever the model used.
- */
-export const STUDY_KIT_MAX_CREDITS_PER_SECTION = 20;
-
-/** Typical credits for one study-kit section on `model` (never above the cap). */
-export function studyKitSectionCredits(model: string): number {
-  return Math.min(STUDY_KIT_MAX_CREDITS_PER_SECTION, creditsFor(model, typicalTokens(model, "kitSection")));
-}
-
-/** The configured models' per-section figure (the default model's in a client bundle). */
-export const STUDY_KIT_CREDITS_PER_SECTION = quotedCost(studyKitSectionCredits);
-
-/**
- * What a study-kit run of `sections` sections costs: typical, at most, and
- * the balance needed to start it. A run is charged at most the balance, so a
- * run starts only with its typical cost AND at least one section's full cap
- * (otherwise an account with a few credits would get a section almost free).
- * `perSection` is the typical section cost on the model that will run it
- * (studyKitSectionCredits); client code gets it from the server.
- */
-export function studyKitCost(
-  sections: number,
-  perSection: number = STUDY_KIT_CREDITS_PER_SECTION,
-): { estimate: number; max: number; minBalance: number } {
-  const n = Math.max(0, Math.floor(sections));
-  const estimate = n * Math.min(STUDY_KIT_MAX_CREDITS_PER_SECTION, Math.max(1, Math.floor(perSection)));
-  const max = n * STUDY_KIT_MAX_CREDITS_PER_SECTION;
+/** The sum of two token profiles (a build and its setup questions). */
+export function addTokens(a: CallTokens, b: CallTokens): CallTokens {
   return {
-    estimate,
-    max,
-    minBalance: n > 0 ? Math.max(estimate, STUDY_KIT_MAX_CREDITS_PER_SECTION) : 0,
+    input: a.input + b.input,
+    output: a.output + b.output,
+    cacheRead: a.cacheRead + b.cacheRead,
+    cacheWrite: a.cacheWrite + b.cacheWrite,
   };
 }
 
-export function isLowBalance(credits: number): boolean {
-  return credits <= LOW_CREDIT_THRESHOLD;
+/** USD of `tokens` on `model`. */
+export function tokensUsd(model: string, tokens: CallTokens): number {
+  return callCostUsd(model, tokens);
 }
 
-/** ~how many workspace builds a balance affords (floored, non-negative). */
-export function estimatedGenerations(credits: number): number {
-  return Math.max(0, Math.floor(credits / CREDITS_PER_GENERATION));
-}
-
-/** ~how many agent edits a balance affords (floored, non-negative). */
-export function estimatedEdits(credits: number): number {
-  return Math.max(0, Math.floor(credits / CREDITS_PER_EDIT));
+/** Credits of model spend `tokens` cost on `model` (at the peg, rounded up). */
+export function tokensCredits(model: string, tokens: CallTokens): number {
+  return usdToCredits(callCostUsd(model, tokens));
 }

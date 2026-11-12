@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { recordUsage } from "@/lib/ai/usage-meter";
 import { sampleWorkspace } from "@/lib/workspace/sample";
 import type { GenerationEvent } from "@/lib/ai/generation-progress";
@@ -21,7 +21,11 @@ const mocks = vi.hoisted(() => ({
   workspaceLimitReached: vi.fn(),
   saveNewWorkspace: vi.fn(),
   normalizeSourceText: vi.fn(),
+  // The model the student's plan runs: the configured Haiku (real cost
+  // within the list price) unless a test makes it an expensive one.
+  model: "claude-haiku-5-5",
 }));
+vi.mock("@/lib/ai/plans", () => ({ modelForPlan: () => mocks.model }));
 vi.mock("@/lib/import/syllabus", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/import/syllabus")>();
   mocks.normalizeSourceText.mockImplementation(actual.normalizeSourceText);
@@ -45,9 +49,12 @@ vi.mock("@/lib/credits", () => ({
   settleCreditHold: mocks.settleCreditHold,
   releaseCreditHold: mocks.releaseCreditHold,
   getCreditBalance: mocks.getCreditBalance,
-  // 1 credit per 100 tokens keeps the arithmetic visible in assertions.
+  // 1 credit per 100 tokens keeps the arithmetic visible in assertions,
+  // and $0.0001 per credit of model spend.
   usageToCredits: (usage: { promptTokens: number; completionTokens: number }) =>
     Math.ceil((usage.promptTokens + usage.completionTokens) / 100),
+  usageToUsd: (usage: { promptTokens: number; completionTokens: number }) =>
+    Math.ceil((usage.promptTokens + usage.completionTokens) / 100) * 0.0001,
 }));
 vi.mock("@/lib/usage-limits", () => ({
   checkUsageLimit: mocks.checkUsageLimit,
@@ -65,10 +72,22 @@ import { POST as CANCEL } from "./cancel/route";
 import { GenerationCancelledError, GenerationFailedError } from "@/lib/ai/generate";
 import { en } from "@/lib/i18n/dictionaries/en";
 import { fmt } from "@/lib/i18n/interpolate";
-import { buildCreditCost, MIN_GENERATION_BALANCE } from "@/lib/credits-info";
-import { modelForPlan } from "@/lib/ai/plans";
+import { ACTION_PRICES, buildQuote, buildTypicalUsd, chargeForPartial } from "@/lib/price-list";
 
-const HOLD = { id: "hold-1", userId: "user-1", amount: MIN_GENERATION_BALANCE, reason: "generate" };
+const HAIKU = "claude-haiku-5-5";
+/** A build's price on the configured model: the list price, 30. */
+const PRICE = buildQuote(HAIKU).price;
+/** What a build stopped after `credits` of model spend is charged (lib/price-list.ts). */
+const stoppedAt = (credits: number) =>
+  chargeForPartial(buildQuote(HAIKU), credits, (credits * 0.0001) / buildTypicalUsd(HAIKU));
+
+/** Payments switched on: the refusals may point to buying credits (lib/credit-messages). */
+function billingOn() {
+  vi.stubEnv("STRIPE_SECRET_KEY", "sk_test");
+  vi.stubEnv("STRIPE_PRICE_PRO", "price_month");
+}
+
+const HOLD = { id: "hold-1", userId: "user-1", amount: PRICE, reason: "generate" };
 
 const PLAN = {
   workspaceName: "Study HQ",
@@ -120,33 +139,58 @@ beforeEach(() => {
 });
 
 describe("POST /api/generate", () => {
-  it("saves and charges for a successful generation", async () => {
+  afterEach(() => vi.unstubAllEnvs());
+  it("saves and charges a successful build its list price", async () => {
     mocks.generateWorkspace.mockImplementation(async () => {
       recordUsage({ prompt_tokens: 1500, completion_tokens: 500 });
       return sampleWorkspace;
     });
     const stream = await events(await POST(request({ prompt: "CS student" })));
-    expect(stream.at(-1)).toMatchObject({ type: "complete", workspaceId: "ws-new", credits: 24 });
+    // 24 credits of model spend, charged the price shown: 30.
+    expect(PRICE).toBe(ACTION_PRICES.build);
+    expect(stream.at(-1)).toMatchObject({ type: "complete", workspaceId: "ws-new", credits: 30 });
     expect(mocks.saveNewWorkspace).toHaveBeenCalledOnce();
-    // Up to the most a build can cost on the configured model was held
-    // before any model call (at least the typical cost), and settled to the real cost.
-    const cost = buildCreditCost(modelForPlan("free"));
-    expect(cost.max).toBeGreaterThan(cost.typical);
+    // The price was held before any model call and settled to it.
     expect(mocks.reserveCredits).toHaveBeenCalledWith("user-1", {
-      estimate: cost.max,
-      min: cost.typical,
+      estimate: 30,
+      min: 30,
       reason: "generate",
     });
     expect(mocks.reserveCredits.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.planWorkspace.mock.invocationCallOrder[0],
     );
-    expect(mocks.settleCreditHold).toHaveBeenCalledWith(HOLD, 24);
+    expect(mocks.settleCreditHold).toHaveBeenCalledWith(HOLD, 30);
+    expect(mocks.settleCreditHold).toHaveBeenCalledTimes(1);
     expect(mocks.chargeCredits).not.toHaveBeenCalled();
     // The failure slot claimed up front is withdrawn: this build did not fail.
     expect(mocks.claimOutcomeSlot.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.planWorkspace.mock.invocationCallOrder[0],
     );
     expect(mocks.releaseOutcomeSlot).toHaveBeenCalledWith("slot-1");
+  });
+
+  it("on a model whose real cost exceeds the price, the build is charged its real cost, shown up front", async () => {
+    mocks.model = "claude-opus-5-5";
+    try {
+      const quote = buildQuote("claude-opus-5-5");
+      expect(quote.price).toBeGreaterThan(ACTION_PRICES.build);
+      mocks.getCreditBalance.mockResolvedValue(quote.max + 10);
+      mocks.generateWorkspace.mockImplementation(async () => {
+        recordUsage({ prompt_tokens: 9_000, completion_tokens: 3_000 }); // + 400 planning: 124 credits
+        return sampleWorkspace;
+      });
+      const stream = await events(await POST(request({ prompt: "CS student" })));
+      expect(mocks.reserveCredits).toHaveBeenCalledWith("user-1", { estimate: quote.max, min: quote.price, reason: "generate" });
+      const expected = Math.min(quote.max, Math.max(30, 124));
+      expect(mocks.settleCreditHold).toHaveBeenCalledWith(HOLD, expected);
+      expect(stream.at(-1)).toMatchObject({ type: "complete", credits: expected });
+    } finally {
+      mocks.model = HAIKU;
+    }
+  });
+
+  it("a build stopped after most of its work is charged at most its price", async () => {
+    expect(stoppedAt(500)).toBe(PRICE);
   });
 
   it("a failed generation is not saved, not charged, and tells the client it can retry", async () => {
@@ -170,6 +214,7 @@ describe("POST /api/generate", () => {
   });
 
   it("out of credits stops before any model call, with a code the client can act on", async () => {
+    billingOn();
     mocks.getCreditBalance.mockResolvedValue(0);
     const stream = await events(await POST(request({ prompt: "CS student" })));
     expect(stream).toEqual([
@@ -178,20 +223,30 @@ describe("POST /api/generate", () => {
     expect(mocks.planWorkspace).not.toHaveBeenCalled();
   });
 
-  it("needs about one build's worth of credits to start (no full build for 1 credit)", async () => {
-    mocks.getCreditBalance.mockResolvedValue(MIN_GENERATION_BALANCE - 1);
+  it("without payments switched on, the refusal sends nobody to buy credits", async () => {
+    vi.stubEnv("STRIPE_SECRET_KEY", "");
+    mocks.getCreditBalance.mockResolvedValue(0);
+    const [event] = await events(await POST(request({ prompt: "CS student" })));
+    expect(event).toMatchObject({ type: "error", code: "out_of_credits" });
+    expect((event as { message: string }).message).toBe(en.spend.outOfCredits);
+    vi.unstubAllEnvs();
+  });
+
+  it("needs the build's price to start (no full build for 1 credit)", async () => {
+    billingOn();
+    mocks.getCreditBalance.mockResolvedValue(PRICE - 1);
     const stream = await events(await POST(request({ prompt: "CS student" })));
     expect(stream).toEqual([
       {
         type: "error",
         code: "out_of_credits",
-        message: fmt(en.credits.belowGenerateMinimum, { min: MIN_GENERATION_BALANCE }),
+        message: fmt(en.credits.belowGenerateMinimum, { min: PRICE }),
       },
     ]);
     expect(mocks.planWorkspace).not.toHaveBeenCalled();
     expect(mocks.checkUsageLimit).not.toHaveBeenCalled();
 
-    mocks.getCreditBalance.mockResolvedValue(MIN_GENERATION_BALANCE);
+    mocks.getCreditBalance.mockResolvedValue(PRICE);
     mocks.generateWorkspace.mockResolvedValue(sampleWorkspace);
     const ok = await events(await POST(request({ prompt: "CS student" })));
     expect(ok.at(-1)).toMatchObject({ type: "complete" });
@@ -212,13 +267,14 @@ describe("POST /api/generate", () => {
   });
 
   it("a parallel build that finds the credits already held is refused before any model call", async () => {
+    billingOn();
     mocks.reserveCredits.mockResolvedValue(null);
     const stream = await events(await POST(request({ prompt: "CS student" })));
     expect(stream).toEqual([
       {
         type: "error",
         code: "out_of_credits",
-        message: fmt(en.credits.belowGenerateMinimum, { min: MIN_GENERATION_BALANCE }),
+        message: fmt(en.credits.belowGenerateMinimum, { min: PRICE }),
       },
     ]);
     expect(mocks.planWorkspace).not.toHaveBeenCalled();
@@ -255,7 +311,7 @@ describe("POST /api/generate", () => {
     expect(mocks.normalizeSourceText).not.toHaveBeenCalled();
   });
 
-  it("cancel stops the server work: nothing is saved and only consumed tokens are billed", async () => {
+  it("cancel stops the server work: nothing is saved and only the share that ran is billed", async () => {
     let started!: () => void;
     const generationStarted = new Promise<void>((resolve) => (started = resolve));
     mocks.generateWorkspace.mockImplementation(async (...args: unknown[]) => {
@@ -296,9 +352,12 @@ describe("POST /api/generate", () => {
     expect(stream.some((event) => event.type === "complete")).toBe(false);
     expect(stream.some((event) => event.type === "error")).toBe(false);
     expect(mocks.saveNewWorkspace).not.toHaveBeenCalled();
-    // Planning (400 tokens) + the cut-off call (200 tokens) = 6 credits, nothing more.
+    // Planning (400 tokens) + the cut-off call (200 tokens): 6 credits of
+    // spend, the share of the price that ran, never more than the price.
+    expect(stoppedAt(6)).toBeGreaterThan(0);
+    expect(stoppedAt(6)).toBeLessThan(PRICE);
     expect(mocks.settleCreditHold).toHaveBeenCalledTimes(1);
-    expect(mocks.settleCreditHold).toHaveBeenCalledWith(HOLD, 6, { reason: "generate_cancelled" });
+    expect(mocks.settleCreditHold).toHaveBeenCalledWith(HOLD, stoppedAt(6), { reason: "generate_cancelled" });
   });
 
   it("tells the student what a cancelled build cost", async () => {
@@ -322,7 +381,7 @@ describe("POST /api/generate", () => {
     );
     const stream = await streamed;
     // The last event says what was charged (planning 400 + cut-off call 200 tokens).
-    expect(stream.at(-1)).toEqual({ type: "cancelled", credits: 6 });
+    expect(stream.at(-1)).toEqual({ type: "cancelled", credits: stoppedAt(6) });
     expect(stream.filter((event) => event.type === "cancelled")).toHaveLength(1);
   });
 
@@ -381,7 +440,7 @@ describe("POST /api/generate", () => {
     await response.text().catch(() => "");
     await vi.waitFor(() => expect(mocks.settleCreditHold).toHaveBeenCalled());
     expect(mocks.saveNewWorkspace).not.toHaveBeenCalled();
-    expect(mocks.settleCreditHold).toHaveBeenCalledWith(HOLD, 4, { reason: "generate_cancelled" });
+    expect(mocks.settleCreditHold).toHaveBeenCalledWith(HOLD, stoppedAt(4), { reason: "generate_cancelled" });
   });
 
   it("passes the student's time zone (body first, then cookie) to the generator", async () => {

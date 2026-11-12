@@ -19,7 +19,7 @@ import { useWorkspace } from "./WorkspaceContext";
 import { DraftInput } from "./editor/DraftInput";
 import { CardEditor } from "./study/CardEditor";
 import { CatchUpBanner } from "./study/CatchUpBanner";
-import { applyGrade } from "./study/gradeEdit";
+import { applyGrade, gradeOptions } from "./study/gradeEdit";
 import { ImportDialog } from "./study/ImportDialog";
 import { useReviewRecorder } from "./study/useReviewRecorder";
 
@@ -70,11 +70,10 @@ export function FlashcardsBlock({
 
   // Computed from the card as it is when the edit runs, and re-run (not
   // replayed) if the workspace changed elsewhere first (study/gradeEdit.ts).
-  const onGrade = (item: ReviewItem, grade: Grade, _next: Flashcard, at: Date) =>
-    update(
-      (d) => applyGrade(d, { pageId: item.pageId, blockId: item.blockId, cardId: item.card.id }, grade, at),
-      { rebase: "rerun" },
-    );
+  const onGrade = (item: ReviewItem, grade: Grade, _next: Flashcard, at: Date) => {
+    const ref = { pageId: item.pageId, blockId: item.blockId, cardId: item.card.id };
+    update((d) => applyGrade(d, ref, grade, at), gradeOptions(ref, grade, at));
+  };
 
   const spreadOut = () => {
     if (!catchUp) return;

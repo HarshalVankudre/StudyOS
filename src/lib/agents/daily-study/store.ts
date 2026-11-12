@@ -273,12 +273,32 @@ export async function setDailyStudyItemCompleted(
   }
   items[index] = next;
 
-  const update = await prisma.dailyStudyPlan.updateMany({
-    where: { id: planId, userId },
-    data: { items: JSON.stringify(items) },
-  });
-  if (update.count !== 1) return { ok: false, reason: "not_found" };
-  return { ok: true, completed, wroteThrough };
+  // Written only if the plan still holds what was read (another device may
+  // have checked a different item off meanwhile): otherwise this item is put
+  // into the plan as it is now, so neither check-off overwrites the other.
+  let stored = row.items;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const update = await prisma.dailyStudyPlan.updateMany({
+      where: { id: planId, userId, items: stored },
+      data: { items: JSON.stringify(items) },
+    });
+    if (update.count === 1) return { ok: true, completed, wroteThrough };
+    const fresh = await prisma.dailyStudyPlan.findFirst({
+      where: { id: planId, userId },
+      select: { items: true },
+    });
+    if (!fresh) return { ok: false, reason: "not_found" };
+    try {
+      items = parseDailyStudyPlanItems(fresh.items);
+    } catch {
+      return { ok: false, reason: "not_found" };
+    }
+    const at = items.findIndex((candidate) => candidate.id === itemId);
+    if (at < 0) return { ok: false, reason: "not_found" };
+    items[at] = next;
+    stored = fresh.items;
+  }
+  return { ok: false, reason: "conflict" };
 }
 
 export function localDateInTimeZone(

@@ -17,8 +17,6 @@ import {
   CREDIT_HOLD_TTL_MS,
   debitCredits,
   dueAllowanceMonths,
-  FREE_MONTHLY_CREDITS,
-  FREE_SIGNUP_CREDITS,
   getCreditBalance,
   grantCredits,
   hasCredits,
@@ -26,6 +24,7 @@ import {
   releaseExpiredHolds,
   reserveCredits,
   settleCreditHold,
+  TRIAL_CREDITS,
   usageToCredits,
   withUserCreditLock,
 } from "./credits";
@@ -51,24 +50,54 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("monthly free refresh", () => {
-  it("seeds new accounts with the signup grant", async () => {
-    expect(await getCreditBalance(USER)).toBe(FREE_SIGNUP_CREDITS);
+describe("Free is a one-time trial", () => {
+  const grantsOf = (reason: string) => h.db.ledgerFor(USER).filter((l) => l.reason === reason);
+
+  it("a new account gets exactly one trial grant, however often it is read", async () => {
+    expect(await getCreditBalance(USER)).toBe(TRIAL_CREDITS);
+    await Promise.all([getCreditBalance(USER), getCreditBalance(USER), hasCredits(USER)]);
+    expect(await getCreditBalance(USER)).toBe(TRIAL_CREDITS);
+    expect(grantsOf("free_signup")).toHaveLength(1);
+    expect(h.db.ledgerFor(USER)).toHaveLength(1);
   });
 
-  it("tops up a depleted free account once per month", async () => {
-    await seed(10);
-    expect(await getCreditBalance(USER)).toBe(10 + FREE_MONTHLY_CREDITS);
-    expect(await getCreditBalance(USER)).toBe(10 + FREE_MONTHLY_CREDITS);
-    expect(h.db.ledgerFor(USER).filter((l) => l.reason === "free_monthly")).toHaveLength(1);
+  it("a depleted free account is never topped up, across month boundaries", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-30T23:59:00Z"));
+    await seed(0);
+    for (const at of ["2026-12-01T00:00:01Z", "2027-01-01T00:00:00Z", "2027-06-15T12:00:00Z", "2028-02-29T08:00:00Z"]) {
+      vi.setSystemTime(new Date(at));
+      expect(await getCreditBalance(USER)).toBe(0);
+      expect(await hasCredits(USER)).toBe(false);
+    }
+    expect(grantsOf("free_monthly")).toHaveLength(0);
+    expect(grantsOf("free_signup")).toHaveLength(1);
   });
 
-  it("does not refresh when the balance is healthy", async () => {
-    await seed(FREE_MONTHLY_CREDITS);
-    expect(await getCreditBalance(USER)).toBe(FREE_MONTHLY_CREDITS);
+  it("an account that received monthly top-ups in the past keeps its balance and gets no more", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-12-05T10:00:00Z"));
+    await getCreditBalance(USER);
+    // The old top-ups, as the previous code wrote them.
+    for (const month of ["2026-09", "2026-10", "2026-11"]) {
+      await grantCredits(USER, 150, "free_monthly", `free_monthly:${USER}:${month}`);
+    }
+    await chargeCredits(USER, TRIAL_CREDITS + 3 * 150 - 12, "agent");
+    expect(await getCreditBalance(USER)).toBe(12);
+    vi.setSystemTime(new Date("2027-01-02T00:00:00Z"));
+    expect(await getCreditBalance(USER)).toBe(12); // nothing clawed back, nothing added
+    expect(grantsOf("free_monthly")).toHaveLength(3);
+    expect(h.db.ledgerSum(USER)).toBe(12);
   });
 
-  it("does not refresh active Pro subscribers (paid allowances cover them)", async () => {
+  it("credits on hold do not change that", async () => {
+    await funded(40);
+    await reserveCredits(USER, { estimate: 30, reason: "generate" });
+    expect(await getCreditBalance(USER)).toBe(10);
+    expect(grantsOf("free_monthly")).toHaveLength(0);
+  });
+
+  it("an active Pro subscriber without a yearly allowance gets nothing on a read either", async () => {
     await seed(5, "active");
     expect(await getCreditBalance(USER)).toBe(5);
   });
@@ -161,8 +190,8 @@ describe("usageToCredits", () => {
 /** An account at `balance` reached through the ledger (so ledger == balance). */
 async function funded(balance: number) {
   await getCreditBalance(USER);
-  if (balance < FREE_SIGNUP_CREDITS) await chargeCredits(USER, FREE_SIGNUP_CREDITS - balance, "test");
-  if (balance > FREE_SIGNUP_CREDITS) await grantCredits(USER, balance - FREE_SIGNUP_CREDITS, "test");
+  if (balance < TRIAL_CREDITS) await chargeCredits(USER, TRIAL_CREDITS - balance, "test");
+  if (balance > TRIAL_CREDITS) await grantCredits(USER, balance - TRIAL_CREDITS, "test");
   expect(h.db.balance(USER)).toBe(balance);
 }
 
@@ -186,7 +215,7 @@ describe("finding 7: a deleted account stays deleted", () => {
     await getCreditBalance(USER);
     await tombstone();
     expect(await grantCredits(USER, 1000, "credit_purchase", "credit_purchase:cs_1")).toBe("deleted_account");
-    expect(h.db.balance(USER)).toBe(FREE_SIGNUP_CREDITS);
+    expect(h.db.balance(USER)).toBe(TRIAL_CREDITS);
   });
 
   it("a grant racing the tombstone lands before it or not at all", async () => {
@@ -209,13 +238,6 @@ describe("finding 10: hold and settle", () => {
     expect(await settleCreditHold(hold!, 25)).toBe(25);
     expect(h.db.balance(USER)).toBe(175);
     expect(h.db.ledgerSum(USER)).toBe(175);
-  });
-
-  it("credits on hold still count as the user's for the free monthly refresh", async () => {
-    await funded(160);
-    await reserveCredits(USER, { estimate: 40, reason: "generate" });
-    expect(await getCreditBalance(USER)).toBe(120);
-    expect(h.db.ledgerFor(USER).some((l) => l.reason === "free_monthly")).toBe(false);
   });
 
   it("a cost above the hold takes the rest from the balance, never below zero", async () => {

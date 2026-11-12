@@ -17,11 +17,12 @@ import {
   createInitialAgentActivity,
   reduceAgentActivity,
 } from "@/lib/ai/progress";
-import { emitCreditsBalance } from "@/lib/credits-bus";
+import { emitCreditsBalance, useLiveBalance } from "@/lib/credits-bus";
 import type { Workspace } from "@/lib/workspace/types";
 import { AgentProgressCard } from "./AgentProgressCard";
 import { AgentUndoButton } from "./AgentUndoButton";
 import { useWorkspace, type WorkspaceCtx } from "./WorkspaceContext";
+import { agentEditsSetAside, keptCopyIds } from "./agentSetAside";
 
 interface ChatItem {
   id: string;
@@ -36,7 +37,16 @@ interface ChatItem {
   undo?: AgentUndoState;
   creditsCost?: number;
   stopReason?: "budget" | "time";
+  /**
+   * Edits of this turn the editor's merge set aside: the student was typing
+   * in the same words, so their text stayed and the agent's version is in a
+   * marked copy below it (found on this device, after the reply was written).
+   */
+  setAside?: number;
 }
+
+/** How long after a turn its result is watched for edits the merge set aside. */
+const SET_ASIDE_WATCH_MS = 60_000;
 
 /** Most recent turns sent as a fallback history (the server keeps its own). */
 const FALLBACK_HISTORY = 12;
@@ -91,6 +101,8 @@ export function AgentChat({
   onClose,
   onBusyChange,
   syncKey,
+  messageQuote,
+  initialCredits,
 }: {
   workspaceId: string;
   onApplied: (ws: Workspace) => void;
@@ -101,11 +113,22 @@ export function AgentChat({
    * then re-checks which of its Undo buttons the server can still honour.
    */
   syncKey?: string | number;
+  /**
+   * One message's price on the student's model, and the per-message
+   * ceiling a long request can reach (server-priced, lib/price-list.ts).
+   */
+  messageQuote?: { price: number; max: number };
+  /** The balance when the page was rendered; the live one after that. */
+  initialCredits?: number;
 }) {
   const inputHintId = useId();
   const errorId = useId();
   const clearPromptId = useId();
-  const { dict, plural } = useI18n();
+  const { dict, plural, t } = useI18n();
+  const balance = useLiveBalance(initialCredits);
+  // A message's price, its ceiling and the balance, said before sending.
+  const showCost = messageQuote !== undefined && typeof balance === "number";
+  const costHintId = useId();
   const initialActivity = createInitialAgentActivity(
     dict.agentChat.initialMessage,
   );
@@ -134,9 +157,43 @@ export function AgentChat({
   // The editor's save state, read synchronously while waiting for saves.
   const workspaceCtx = useOptionalWorkspace();
   const saveStatusRef = useRef(workspaceCtx?.status);
+  const liveWorkspace = workspaceCtx?.workspace;
+  const liveWorkspaceRef = useRef(liveWorkspace);
   useEffect(() => {
     saveStatusRef.current = workspaceCtx?.status;
+    liveWorkspaceRef.current = workspaceCtx?.workspace;
   });
+
+  // ---- Edits the editor's merge set aside ----------------------------------
+  // The agent's reply is written before this device merges the result with
+  // what the student typed meanwhile. When that merge keeps the student's
+  // text and moves the agent's version into a marked copy, say so under the
+  // turn (the reply alone would claim the change was made).
+  /** Marked copies that existed when the turn was sent (not this turn's). */
+  const keptBeforeTurnRef = useRef<Set<string> | null>(null);
+  const setAsideWatchRef = useRef<{
+    itemId: string;
+    agent: Workspace;
+    before: Set<string>;
+    /** When watching stops (set on the first check after the result). */
+    until: number | null;
+  } | null>(null);
+  useEffect(() => {
+    const watch = setAsideWatchRef.current;
+    if (!watch || !liveWorkspace) return;
+    watch.until ??= Date.now() + SET_ASIDE_WATCH_MS;
+    if (Date.now() > watch.until) {
+      setAsideWatchRef.current = null;
+      return;
+    }
+    const count = agentEditsSetAside(watch.before, watch.agent, liveWorkspace);
+    if (count === 0) return;
+    setItems((current) =>
+      current.map((item) =>
+        item.id === watch.itemId && item.setAside !== count ? { ...item, setAside: count } : item,
+      ),
+    );
+  }, [liveWorkspace]);
 
   // Propagate busy state to the editor so it can suppress autosave while the
   // agent is processing (edits made meanwhile are replayed on top of the
@@ -216,6 +273,18 @@ export function AgentChat({
   // Render a completed agent result: append the assistant turn and reflect the
   // applied workspace live. Used by both the live stream and a reconnect.
   const applyResult = (response: AgentResponse) => {
+    const itemId = crypto.randomUUID();
+    // Watch the merge that follows (onApplied re-reads the saved result and
+    // replays the student's edits on top of it).
+    setAsideWatchRef.current =
+      response.changed && response.workspace
+        ? {
+            itemId,
+            agent: response.workspace,
+            before: keptBeforeTurnRef.current ?? keptCopyIds(liveWorkspaceRef.current),
+            until: null,
+          }
+        : null;
     setItems((previous) => [
       // Only the newest agent change can be undone (it must be the latest version).
       ...(response.changeId
@@ -224,7 +293,7 @@ export function AgentChat({
           )
         : previous),
       {
-        id: crypto.randomUUID(),
+        id: itemId,
         role: "assistant",
         content: response.reply,
         changed: response.changed,
@@ -343,6 +412,7 @@ export function AgentChat({
       setOtherOpen((previous) => ({ ...previous, [resolveItemId]: false }));
       setOtherReplies((previous) => ({ ...previous, [resolveItemId]: "" }));
     }
+    keptBeforeTurnRef.current = keptCopyIds(liveWorkspaceRef.current);
     setSettling(true);
     setBusy(true);
     setActivity(initialActivity);
@@ -798,6 +868,18 @@ export function AgentChat({
                   )}
                 </div>
               )}
+
+              {/* The merge on this device kept the student's typing over this turn's edit. */}
+              {item.changed && (item.setAside ?? 0) > 0 && item.undo !== "undone" && (
+                <p
+                  role="status"
+                  data-testid="agent-set-aside"
+                  className="ms-1 max-w-[94%] rounded-md border border-amber-500/40 bg-amber-400/10 px-2.5 py-1.5 text-xs leading-relaxed text-ink"
+                >
+                  {dict.spend.keptYours}
+                  {item.undo !== "available" && <> {dict.spend.keptYoursNoUndo}</>}
+                </p>
+              )}
             </div>
           ),
         )}
@@ -832,7 +914,7 @@ export function AgentChat({
             rows={1}
             disabled={busy}
             aria-label={dict.agentChat.placeholderIdle}
-            aria-describedby={`${inputHintId}${error ? ` ${errorId}` : ""}`}
+            aria-describedby={`${inputHintId}${showCost ? ` ${costHintId}` : ""}${error ? ` ${errorId}` : ""}`}
             placeholder={
               busy
                 ? dict.agentChat.placeholderBusy
@@ -852,6 +934,15 @@ export function AgentChat({
         <p id={inputHintId} className="mt-1.5 px-1 text-[10px] text-ink-soft/70">
           {dict.agentChat.inputHint}
         </p>
+        {showCost && (
+          <p id={costHintId} className="mt-0.5 px-1 text-[10px] text-ink-soft" data-testid="agent-cost-hint">
+            {t(dict.spend.agentTurn, {
+              cost: plural(dict.counts.credits, messageQuote?.price ?? 0),
+              max: plural(dict.counts.credits, messageQuote?.max ?? 0),
+              balance: plural(dict.counts.credits, balance ?? 0),
+            })}
+          </p>
+        )}
       </div>
     </aside>
   );

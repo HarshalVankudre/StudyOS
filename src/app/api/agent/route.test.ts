@@ -109,7 +109,9 @@ describe("up-front refusals (nothing runs, nothing is charged)", () => {
     const out = await events(await POST(request({})));
     expect(out).toHaveLength(1);
     expect(out[0]).toMatchObject({ type: "error", code: "insufficient_credits" });
-    expect(out[0].message).toMatch(/needs about \d+ credits, and your balance is 1\./);
+    // At least the message's price (3), and the balance.
+    expect(out[0].message).toMatch(/needs at least \d+ credits, and your balance is 1\./);
+    expect(Number(/needs at least (\d+)/.exec(out[0].message)![1])).toBeGreaterThanOrEqual(3);
     // The concurrency slot claimed before the cost check is given back at once.
     expect(m.markError).toHaveBeenCalledWith("task_1", "refused");
     expect(m.runLoop).not.toHaveBeenCalled();
@@ -124,9 +126,9 @@ describe("up-front refusals (nothing runs, nothing is charged)", () => {
     const out = await events(await POST(request({})));
     expect(m.reserve).toHaveBeenCalledWith("user_1", expect.objectContaining({ reason: "agent" }));
     const { estimate, min } = m.reserve.mock.calls[0][1];
-    // Up to the plan's per-message cap (free: 30), at least the small-turn estimate.
+    // Up to the plan's per-message ceiling (free: 30), at least the message's price (3).
     expect(estimate).toBe(30);
-    expect(min).toBeGreaterThanOrEqual(1);
+    expect(min).toBeGreaterThanOrEqual(3);
     expect(min).toBeLessThan(estimate);
     expect(out[0]).toMatchObject({ type: "error", code: "insufficient_credits" });
     expect(m.runLoop).not.toHaveBeenCalled();
@@ -177,6 +179,10 @@ describe("a turn that runs", () => {
       expect.objectContaining({ outcome: "completed", userId: "user_1", hold: expect.objectContaining({ id: "hold_1" }) }),
     );
     expect(m.settle.mock.calls[0][0].usage.costUsd).toBeGreaterThan(0);
+    // Settled by the published message price, with the request's estimate
+    // as the base of a stopped turn's share.
+    expect(m.settle.mock.calls[0][0].quote).toMatchObject({ list: 3, max: 30 });
+    expect(m.settle.mock.calls[0][0].typicalUsd).toBeGreaterThan(0);
     const stored = m.append.mock.calls.flatMap((c) => c[2]);
     expect(stored[0]).toMatchObject({ role: "user", content: "Quiz", modelContent: "add a quiz on Chapter 3 next Friday" });
     expect(stored[1]).toMatchObject({ role: "assistant", content: "Added.", changeNote: "added row [r1]", changeId: "chg_1" });

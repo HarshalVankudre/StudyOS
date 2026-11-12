@@ -511,12 +511,71 @@ describe("GradesBlock: grading categories", () => {
     await user.click(screen.getByRole("button", { name: G.cleanup.convert }));
     const box = within(screen.getByTestId("grades-uncategorized"));
     expect(box.getByText("Pop quiz")).toBeInTheDocument();
-    expect(box.getByText(fmt(G.notes.uncategorized, { count: 1 }))).toBeInTheDocument();
+    // A real plural, not "1 item(s)".
+    expect(box.getByText("Not counted yet: 1 item with no category and no weight. Pick where it counts below.")).toBeInTheDocument();
 
     await user.click(box.getByRole("button", { name: fmt(C.assignAria, { item: "Pop quiz", category: "Lab reports" }) }));
     const lab = scheme()!.categories.find((c) => c.name === "Lab reports")!;
     expect(scheme()?.assign).toEqual({ q1: lab.id });
     expect(screen.queryByTestId("grades-uncategorized")).not.toBeInTheDocument();
+  });
+
+  it("counts a weight once and shows it as the syllabus gives it (QA round 3: 140%)", async () => {
+    const user = userEvent.setup();
+    const db: Database = {
+      id: "db-a",
+      name: "Coursework",
+      properties: [
+        { id: "a-name", name: "Item", type: "text" },
+        { id: "a-course", name: "Course", type: "select", options: [{ id: "co-phys", label: "PHYS 201" }] },
+        { id: "a-due", name: "Due", type: "date" },
+        { id: "a-weight", name: "Weight %", type: "number" },
+        { id: "a-score", name: "Score", type: "number" },
+      ],
+      rows: [
+        { id: "ps5", cells: { "a-name": "Problem Set 5", "a-course": "co-phys", "a-due": "2026-10-30", "a-score": 70 } },
+        { id: "q8", cells: { "a-name": "Quiz 8", "a-course": "co-phys", "a-due": "2026-11-17" } },
+        { id: "m1", cells: { "a-name": "Midterm 1", "a-course": "co-phys", "a-due": "2026-10-08", "a-weight": 20, "a-score": 82 } },
+        { id: "m2", cells: { "a-name": "Midterm 2", "a-course": "co-phys", "a-weight": 20 } },
+        { id: "fin", cells: { "a-name": "Final exam (cumulative)", "a-course": "co-phys", "a-due": "2026-12-15", "a-weight": 25 } },
+      ],
+      views: [{ id: "v", name: "All", type: "table" }],
+      grading: {
+        categories: [
+          { id: "cat-ps", course: "co-phys", name: "Problem sets", weight: 20, dropLowest: 1, expectedCount: 10 },
+          { id: "cat-quiz", course: "co-phys", name: "Weekly quizzes", weight: 15 },
+          { id: "cat-mid", course: "co-phys", name: "Midterms", weight: 40, expectedCount: 2 },
+        ],
+      },
+    };
+    setStore({ ...configured, defaultTarget: 85 }, db);
+    render(<Harness />);
+    const c = card("PHYS 201");
+    // No "weights add up to 140%" and no "remaining 83% of the grade".
+    expect(screen.queryByText(/add up to/)).not.toBeInTheDocument();
+    const mid = c.getAllByTestId("grades-category").find((el) => within(el).queryByText("Midterms"))!;
+    expect(mid).toHaveTextContent("40% of the grade, set on its 2 items");
+    expect(within(mid).queryByLabelText(fmt(C.countAria, { name: "Midterms" }))).not.toBeInTheDocument();
+    // The final is listed at its own 25 %, not a rescaled 17.9 %.
+    const breakdown = within(c.getByTestId("grades-breakdown"));
+    expect(breakdown.getByText("25% of the grade")).toBeInTheDocument();
+
+    await user.click(c.getByRole("button", { name: fmt(G.showScores, { count: 5 }) }));
+    expect(screen.getAllByText("20% of the grade").length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByText(/14\.3%|17\.9%/)).not.toBeInTheDocument();
+  });
+
+  it("says once, plainly, when the weights really do not add up to 100", () => {
+    const db = assignments();
+    db.rows = db.rows.filter((r) => r.id !== "r3");
+    db.rows[1].cells["a-weight"] = 80; // Lab 1 40 % + Final 80 % = 120 %
+    setStore({ ...configured, defaultTarget: 70 }, db);
+    render(<Harness />);
+    const c = card("BIO 101");
+    expect(c.getAllByText(/The weights add up to 120%, not 100%/)).toHaveLength(1);
+    expect(c.getByText(/Check whether something is listed twice/)).toBeInTheDocument();
+    // The outlook does not quote a rescaled share of the grade.
+    expect(c.getByTestId("grades-outlook")).toHaveTextContent(/on the work not graded yet/);
   });
 
   it("lets the student say how many items a category will have", async () => {

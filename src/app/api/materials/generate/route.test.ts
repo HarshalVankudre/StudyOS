@@ -15,7 +15,11 @@ const mocks = vi.hoisted(() => ({
   claimFailure: vi.fn(),
   releaseFailure: vi.fn(),
   complete: vi.fn(),
+  // The configured Haiku (a part's real cost stays within its price) unless
+  // a test makes it an expensive model.
+  model: "claude-haiku-5-5",
 }));
+vi.mock("@/lib/ai/plans", () => ({ modelForPlan: () => mocks.model }));
 
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }));
 vi.mock("@/lib/materials/store", () => ({ getMaterial: mocks.getMaterial }));
@@ -45,9 +49,13 @@ vi.mock("@/lib/i18n/server", () => ({ getLocale: vi.fn(async () => "en") }));
 import { POST } from "./route";
 import { POST as CANCEL } from "./cancel/route";
 import { en } from "@/lib/i18n/dictionaries/en";
+import { ACTION_PRICES, studyKitPartQuote } from "@/lib/price-list";
+
 
 const PAGE = "The mitochondrion is the site of aerobic respiration and produces most of the cell's ATP.";
 const MATERIAL = { id: "mat-1", workspaceId: "ws-1", title: "Cells", pages: [PAGE] };
+/** Two pages, each long enough to be its own part, each starting with PAGE. */
+const TWO_PARTS = { ...MATERIAL, pages: [0, 1].map(() => PAGE + " " + "filler text ".repeat(900)) };
 const GOOD_REPLY = JSON.stringify({
   cards: [
     {
@@ -97,33 +105,65 @@ beforeEach(() => {
   }));
   mocks.settle.mockImplementation(async (_hold: unknown, amount: number) => amount);
   mocks.release.mockResolvedValue(true);
+  mocks.model = "claude-haiku-5-5";
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
 describe("POST /api/materials/generate", () => {
-  it("delivers a verified kit and charges for it, never more than the cap shown", async () => {
+  it("delivers a verified kit and charges the price shown: parts × the part price", async () => {
     mocks.complete.mockImplementation((async () => {
       recordUsage({ prompt_tokens: 600, completion_tokens: 400 });
       return GOOD_REPLY;
     }) as KitComplete);
     const stream = await events(await POST(request()));
-    expect(stream[0]).toMatchObject({ type: "start", estimate: 9, maxCredits: 20 });
+    expect(ACTION_PRICES.studyKitPart).toBe(10);
+    expect(stream[0]).toMatchObject({ type: "start", estimate: 10, maxCredits: 10 });
     const done = stream.at(-1) as Extract<KitEvent, { type: "complete" }>;
     expect(done.type).toBe("complete");
     expect(done.result.cards[0].source).toMatchObject({ materialId: "mat-1", page: 1 });
-    // The cap was reserved before any model call, then settled to the real cost.
-    expect(mocks.reserve).toHaveBeenCalledWith("user-1", { estimate: 20, min: 20, reason: "study_kit" });
+    // The price was reserved before any model call, then settled to it.
+    expect(mocks.reserve).toHaveBeenCalledWith("user-1", { estimate: 10, min: 10, reason: "study_kit" });
     expect(mocks.reserve.mock.invocationCallOrder[0]).toBeLessThan(mocks.complete.mock.invocationCallOrder[0]);
     expect(mocks.settle).toHaveBeenCalledWith(expect.objectContaining({ id: "hold-1" }), 10);
+    expect(done.credits).toBe(10);
 
-    // A run that used far more than expected is charged the promised cap.
+    // A run whose model spend was far above the price is still charged the price shown.
     mocks.complete.mockImplementation((async () => {
       recordUsage({ prompt_tokens: 50_000, completion_tokens: 50_000 });
       return GOOD_REPLY;
     }) as KitComplete);
     await events(await POST(request()));
-    expect(mocks.settle).toHaveBeenLastCalledWith(expect.objectContaining({ id: "hold-1" }), 20);
+    expect(mocks.settle).toHaveBeenLastCalledWith(expect.objectContaining({ id: "hold-1" }), 10);
+  });
+
+  it("parts that fail are not charged: a run with one good part of two pays for one", async () => {
+    mocks.getMaterial.mockResolvedValue(TWO_PARTS);
+    mocks.complete.mockImplementation((async (_s, user) => {
+      recordUsage({ prompt_tokens: 600, completion_tokens: 400 });
+      return String(user).includes("[[page 1]]") ? GOOD_REPLY : "not json at all";
+    }) as KitComplete);
+    const stream = await events(await POST(request()));
+    expect(stream[0]).toMatchObject({ type: "start", estimate: 20, maxCredits: 20 });
+    const done = stream.at(-1) as Extract<KitEvent, { type: "complete" }>;
+    expect(done.type).toBe("complete");
+    expect(done.result.stats.failedSections).toBe(1);
+    expect(mocks.settle).toHaveBeenCalledWith(expect.objectContaining({ id: "hold-1" }), 10);
+  });
+
+  it("on a model whose real cost exceeds the part price, it charges the real cost, never above the most shown", async () => {
+    mocks.model = "claude-opus-5-5";
+    const part = studyKitPartQuote("claude-opus-5-5");
+    expect(part.price).toBeGreaterThan(10);
+    mocks.getCreditBalance.mockResolvedValue(part.max * 2);
+    mocks.complete.mockImplementation((async () => {
+      recordUsage({ prompt_tokens: 20_000, completion_tokens: 10_000 }); // 300 credits in the mock
+      return GOOD_REPLY;
+    }) as KitComplete);
+    const stream = await events(await POST(request()));
+    expect(stream[0]).toMatchObject({ type: "start", estimate: part.price, maxCredits: part.max });
+    expect(mocks.reserve).toHaveBeenCalledWith("user-1", { estimate: part.max, min: part.price, reason: "study_kit" });
+    expect(mocks.settle).toHaveBeenCalledWith(expect.objectContaining({ id: "hold-1" }), Math.min(part.max, 300));
   });
 
   it("charges nothing when nothing verifiable was made, and says so", async () => {
@@ -161,11 +201,11 @@ describe("POST /api/materials/generate", () => {
   });
 
   it("stops before any model call without enough credits, or past the rate limit", async () => {
-    // One section: typical 9, but a run needs one section's full cap (20).
-    mocks.getCreditBalance.mockResolvedValue(15);
+    // One part: the run costs 10, and a balance of 9 is not enough.
+    mocks.getCreditBalance.mockResolvedValue(9);
     const stream = await events(await POST(request()));
     expect(stream).toEqual([
-      { type: "error", code: "out_of_credits", message: en.materials.errors.outOfCredits.replace("{estimate}", "20") },
+      { type: "error", code: "out_of_credits", message: en.materials.errors.outOfCreditsNoBilling.replace("{estimate}", "10") },
     ]);
     expect(mocks.reserve).not.toHaveBeenCalled();
     mocks.getCreditBalance.mockResolvedValue(100);
@@ -181,7 +221,7 @@ describe("POST /api/materials/generate", () => {
     expect(mocks.getMaterial).toHaveBeenCalledWith("intruder", "mat-1", "ws-1");
   });
 
-  it("cancel stops the server work: nothing delivered, only consumed tokens billed, only by the owner", async () => {
+  it("cancel stops the server work: nothing delivered, only finished parts billed, only by the owner", async () => {
     let started!: () => void;
     const callStarted = new Promise<void>((resolve) => (started = resolve));
     mocks.complete.mockImplementation((async (_s, _u, { signal }) => {
@@ -217,11 +257,39 @@ describe("POST /api/materials/generate", () => {
     const stream = await streamed;
     expect(stream.some((e) => e.type === "complete" || e.type === "error")).toBe(false);
     expect(mocks.settle).toHaveBeenCalledTimes(1);
-    expect(mocks.settle).toHaveBeenCalledWith(expect.objectContaining({ id: "hold-1" }), 3, {
+    // No part had finished: nothing is charged.
+    expect(mocks.settle).toHaveBeenCalledWith(expect.objectContaining({ id: "hold-1" }), 0, {
       reason: "study_kit_cancelled",
     });
     // Not a failed run: the failure slot claimed up front is withdrawn.
     expect(mocks.releaseFailure).toHaveBeenCalledWith("slot-1");
+  });
+
+  it("a run stopped after one of two parts pays for that part only", async () => {
+    mocks.getMaterial.mockResolvedValue(TWO_PARTS);
+    let secondStarted!: () => void;
+    const second = new Promise<void>((resolve) => (secondStarted = resolve));
+    mocks.complete.mockImplementation((async (_s, user, { signal }) => {
+      recordUsage({ prompt_tokens: 300, completion_tokens: 0 });
+      if (String(user).includes("[[page 1]]")) return GOOD_REPLY;
+      const aborted = new Promise((resolve) => signal.addEventListener("abort", resolve));
+      secondStarted();
+      await aborted;
+      throw new Error("aborted");
+    }) as KitComplete);
+    const streamed = events(await POST(request({ generationId: "kit-22222222" })));
+    await second;
+    await new Promise((resolve) => setTimeout(resolve, 50)); // the first part finishes
+    await CANCEL(
+      new Request("http://localhost/api/materials/generate/cancel", {
+        method: "POST",
+        body: JSON.stringify({ generationId: "kit-22222222" }),
+      }),
+    );
+    await streamed;
+    expect(mocks.settle).toHaveBeenCalledWith(expect.objectContaining({ id: "hold-1" }), 10, {
+      reason: "study_kit_cancelled",
+    });
   });
 
   it("rejects malformed requests", async () => {

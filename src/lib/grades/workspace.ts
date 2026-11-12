@@ -32,6 +32,7 @@ import { pointsFor, resolveScale, type ScaleDefinition, type UkClassLabels } fro
 import {
   categoriesFor,
   findCategoryRows,
+  matchCategory,
   placeRow,
   rowTypeLabels,
   type CategoryRowCandidate,
@@ -345,14 +346,17 @@ export function gradeCourses(workspace: Workspace, db: Database, columns: Resolv
     };
     const categories = categoriesFor(db.grading, key);
     if (categories.length > 0) {
-      const place = placeRow(db.grading, categories, {
-        id: row.id,
-        title: name,
-        typeLabels: rowTypeLabels(db, row, course),
-        weight,
-      });
+      const typeLabels = rowTypeLabels(db, row, course);
+      const place = placeRow(db.grading, categories, { id: row.id, title: name, typeLabels, weight });
       if (place.kind === "category") item.category = place.categoryId;
       else if (place.kind === "excluded") item.excluded = true;
+      else if (place.kind === "single") {
+        // A row with its own weight that belongs to a category ("Midterm 1 20%"
+        // under "Midterms 40%") counts on its own weight; the calculation takes
+        // that weight out of the category's, so nothing counts twice.
+        const member = matchCategory(name, typeLabels, categories);
+        if (member) item.category = member;
+      }
     }
     group.items.push(item);
   }

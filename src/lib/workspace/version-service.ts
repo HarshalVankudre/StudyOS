@@ -17,6 +17,10 @@
  * task, or edits after the agent's change), the change is applied on top of
  * the newer version only if a strict three-way merge finds no overlap
  * (changes.ts, "strict" mode); otherwise it is refused as before.
+ *
+ * Every write here keeps the workspace's save log in step with its version
+ * (`logAfterWrite`), so an editor tab can still tell for certain whether a
+ * save of its own landed before or after the agent's change (save-ids.ts).
  */
 import "server-only";
 
@@ -24,9 +28,15 @@ import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/db";
 import { applyPatch, diff } from "./changes";
 import { keepUnknownFields, prepareWorkspaceForSave } from "./repair";
+import { readSaveLog, recordSave, serializeSaveLog } from "./save-ids";
 import { safeParseWorkspace } from "./schema";
 import { NOT_TRASHED, columnText, parseStoredWorkspace } from "./store";
 import type { Workspace } from "./types";
+
+/** The save log after a write by this service (no editor save to record). */
+function logAfterWrite(raw: string | null | undefined, version: number): string {
+  return serializeSaveLog(recordSave(readSaveLog(raw, version), version + 1));
+}
 
 export class WorkspaceNotFoundError extends Error {}
 export class WorkspaceVersionConflictError extends Error {}
@@ -117,7 +127,7 @@ export async function applyAgentWorkspaceChange(
   return prisma.$transaction(async (tx) => {
     const current = await tx.workspace.findFirst({
       where: { id, ownerId, ...NOT_TRASHED },
-      select: { data: true, version: true },
+      select: { data: true, version: true, saveIds: true },
     });
     if (!current) throw new WorkspaceNotFoundError("Workspace not found");
 
@@ -146,6 +156,7 @@ export async function applyAgentWorkspaceChange(
         name: columnText(toWrite.workspace.name),
         icon: toWrite.workspace.icon == null ? null : columnText(toWrite.workspace.icon),
         data: toWrite.data,
+        saveIds: logAfterWrite(current.saveIds, current.version),
         version: { increment: 1 },
       },
     });
@@ -195,7 +206,7 @@ export async function undoAgentWorkspaceChange(
 
     const current = await tx.workspace.findFirst({
       where: { id: original.workspaceId, ownerId, ...NOT_TRASHED },
-      select: { data: true, version: true },
+      select: { data: true, version: true, saveIds: true },
     });
     if (!current) throw new WorkspaceNotFoundError("Workspace not found");
 
@@ -231,6 +242,7 @@ export async function undoAgentWorkspaceChange(
         name: columnText(restored.name),
         icon: restored.icon == null ? null : columnText(restored.icon),
         data: restoredData,
+        saveIds: logAfterWrite(current.saveIds, current.version),
         version: { increment: 1 },
       },
     });

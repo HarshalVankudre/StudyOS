@@ -14,6 +14,7 @@ import type {
 import { titleProperty } from "@/lib/workspace/helpers";
 import { isDayKey } from "@/lib/workspace/view-logic";
 import { findRow } from "@/lib/workspace/row-lookup";
+import { matchCategory } from "@/lib/grades/categories";
 
 const MAX_TEXT = 180;
 
@@ -252,6 +253,30 @@ export interface ExamInfo {
   major: boolean;
 }
 
+/**
+ * The grading category the row counts in, when the database has a grading
+ * scheme: placed there by hand, or matched by its title and type labels.
+ */
+function schemeCategoryName(database: Database, row: DatabaseRow, title: string): string | null {
+  const categories = database.grading?.categories ?? [];
+  if (categories.length === 0) return null;
+  const hand = database.grading?.assign?.[row.id];
+  if (hand === "") return null;
+  const placed = hand ? categories.find((c) => c.id === hand) : undefined;
+  if (placed) return placed.name;
+  const labels = database.properties
+    .filter((p) => p.type === "select" || p.type === "multi_select")
+    .flatMap((p) => optionLabel(p, row.cells[p.id]));
+  const matched = matchCategory(title, labels, categories);
+  return categories.find((c) => c.id === matched)?.name ?? null;
+}
+
+/**
+ * Whether a row is an exam, judged by the row itself: its type, its title,
+ * the grading category it counts in ("Midterms 40%"), or a heavy weight.
+ * Never by the name of the list it sits in: a "Finals Planner" holds study
+ * sessions, not finals.
+ */
 export function classifyExam(
   database: Database,
   row: DatabaseRow,
@@ -264,11 +289,12 @@ export function classifyExam(
   // ("Homework", "Essay", "Lab report") wins over the title and the weight:
   // a 25 % essay is a big essay, not an exam.
   const otherType = !byType && labels.some((label) => hasWord(label, NON_EXAM_TYPE_WORDS));
-  const byTitle = !otherType && hasWord(title, EXAM_WORDS) && !hasWord(title, NOT_EXAM_WORDS);
-  const byDatabase =
-    labels.length === 0 && hasWord(database.name, EXAM_WORDS) && !hasWord(title, NOT_EXAM_WORDS);
+  const notExam = hasWord(title, NOT_EXAM_WORDS);
+  const byTitle = !otherType && hasWord(title, EXAM_WORDS) && !notExam;
+  const category = otherType || notExam ? null : schemeCategoryName(database, row, title);
+  const byScheme = category !== null && hasWord(category, EXAM_WORDS);
   const heavy = weight !== null && weight >= MAJOR_WEIGHT;
-  const isExam = byType || byTitle || byDatabase || (heavy && !otherType);
+  const isExam = byType || byTitle || byScheme || (heavy && !otherType);
   const finalWords = ["final", "finals", "midterm", "midterms", "期末", "期中", "abschlussprüfung", "examen final"];
   return { isExam, major: isExam && (heavy || hasWord(title, finalWords)) };
 }

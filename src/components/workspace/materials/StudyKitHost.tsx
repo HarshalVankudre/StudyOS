@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { STUDY_KIT_EVENT, type StudyKitIntent } from "./events";
 import { StudyKitDialog } from "./StudyKitDialog";
+import type { PriceQuote } from "@/lib/price-list";
 
 /**
  * Mounted once by the workspace editor: opens the study-kit dialog when the
@@ -12,12 +13,15 @@ import { StudyKitDialog } from "./StudyKitDialog";
 export function StudyKitHost({
   activePageId,
   onOpenPage,
-  creditsPerSection,
+  partQuote,
+  billing,
 }: {
   activePageId?: string;
   onOpenPage: (pageId: string) => void;
-  /** Typical credits per section on the student's model (see StudyKitDialog). */
-  creditsPerSection?: number;
+  /** One part's price on the student's model (see StudyKitDialog). */
+  partQuote?: PriceQuote;
+  /** Payments are switched on (the dialog may link to buying credits). */
+  billing?: boolean;
 }) {
   const [intent, setIntent] = useState<StudyKitIntent | null>(null);
   const [afterPageId, setAfterPageId] = useState<string | undefined>(undefined);
@@ -40,7 +44,8 @@ export function StudyKitHost({
       afterPageId={afterPageId}
       onClose={() => setIntent(null)}
       onCreated={onOpenPage}
-      creditsPerSection={creditsPerSection}
+      partQuote={partQuote}
+      billing={billing}
     />
   );
 }

@@ -9,7 +9,9 @@
  *     when there is one, otherwise to the home page;
  *   - a row the model made for a share of the grade many items have in
  *     common ("Problem sets 20%", no date) becomes a grading category of the
- *     list, and an item that copied its category's weight loses the copy.
+ *     list, and an item that copied its category's weight loses the copy;
+ *   - a weight given both to a category and to its rows is kept in one
+ *     place only (see settleDoubleWeights).
  * Real work is never changed or removed. Pure: returns a new workspace.
  */
 import type { Block, Database, GradesBlock, GradesColumns, Page, Workspace } from "@/lib/workspace/types";
@@ -21,7 +23,12 @@ import {
   resolveGradeColumns,
   rowCourseKey,
 } from "./workspace";
-import { clearCopiedCategoryWeights, convertCategoryRows, dropSingleItemCategories } from "./categories";
+import {
+  clearCopiedCategoryWeights,
+  convertCategoryRows,
+  dropSingleItemCategories,
+  settleDoubleWeights,
+} from "./categories";
 
 /** Category rows become categories of the scheme; items keep only their own weights. */
 export function categoriesFromRows(workspace: Workspace, db: Database): void {
@@ -30,6 +37,8 @@ export function categoriesFromRows(workspace: Workspace, db: Database): void {
   const courseOf = (row: Database["rows"][number]) => rowCourseKey(workspace, db, columns, row);
   dropSingleItemCategories(db, columns, courseOf);
   clearCopiedCategoryWeights(db, columns, courseOf);
+  // A weight on a category and again on its rows would count twice.
+  settleDoubleWeights(db, columns, courseOf);
   // A zero means none: keep the scheme tidy.
   for (const c of db.grading?.categories ?? []) if (c.dropLowest === 0) delete c.dropLowest;
 }

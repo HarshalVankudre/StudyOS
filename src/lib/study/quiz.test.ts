@@ -24,6 +24,9 @@ import {
   weakness,
   type QuizAnswer,
   type QuizItem,
+  recordAnswer,
+  runResultsReplay,
+  runResultsReplayer,
 } from "./quiz";
 
 /** Deterministic PRNG (mulberry32) so shuffles are reproducible. */
@@ -194,15 +197,20 @@ describe("saving results", () => {
       { pageId: "p1", blockId: "b1", attempt: { at: "2026-11-12T10:00:00.000Z", mode: "exam", score: 1, total: 2 } },
     );
     const b = d.pages[0].blocks[0] as QuizBlock;
-    expect(b.questions[0].stats).toEqual({ attempts: 1, correct: 1, lastAnsweredAt: "2026-11-12T10:00:00.000Z" });
-    expect(b.questions[1].stats).toEqual({ attempts: 1, correct: 0, lastAnsweredAt: "2026-11-12T10:00:00.000Z" });
+    const moment = "2026-11-12T10:00:00.000Z";
+    expect(b.questions[0].stats).toEqual({ attempts: 1, correct: 1, lastAnsweredAt: moment, recent: [moment] });
+    expect(b.questions[1].stats).toEqual({ attempts: 1, correct: 0, lastAnsweredAt: moment, recent: [moment] });
     expect(b.attempts).toEqual([{ at: "2026-11-12T10:00:00.000Z", mode: "exam", score: 1, total: 2 }]);
 
+    const later = (i: number) => new Date(Date.UTC(2026, 10, 13, 9, i)).toISOString();
     for (let i = 0; i < MAX_QUIZ_ATTEMPTS + 5; i += 1) {
-      pushAttempt(b, { at: `t${i}`, mode: "practice", score: i, total: 50 });
+      pushAttempt(b, { at: later(i), mode: "practice", score: i, total: 50 });
     }
     expect(b.attempts).toHaveLength(MAX_QUIZ_ATTEMPTS);
-    expect(b.attempts!.at(-1)!.at).toBe(`t${MAX_QUIZ_ATTEMPTS + 4}`);
+    expect(b.attempts!.at(-1)!.at).toBe(later(MAX_QUIZ_ATTEMPTS + 4));
+    // An attempt made earlier on a device that syncs later takes its place in time.
+    pushAttempt(b, { at: later(MAX_QUIZ_ATTEMPTS + 2).replace(":00.000Z", ":30.000Z"), mode: "practice", score: 0, total: 50 });
+    expect(b.attempts!.at(-1)!.at).toBe(later(MAX_QUIZ_ATTEMPTS + 4));
   });
 
   it("is idempotent per run: replaying a saved run changes nothing, and the attempt is updated in place", () => {
@@ -214,12 +222,12 @@ describe("saving results", () => {
     applyRunResults(d, first, attempt(1), at);
     applyRunResults(d, first, attempt(1), at); // a save whose reply was lost
     const b = d.pages[0].blocks[0] as QuizBlock;
-    expect(b.questions[0].stats).toEqual({ attempts: 1, correct: 1, lastAnsweredAt: at });
+    expect(b.questions[0].stats).toEqual({ attempts: 1, correct: 1, lastAnsweredAt: at, recent: [at] });
     expect(b.attempts).toHaveLength(1);
 
     // A written answer marked later in the same run: its stats, the same attempt.
     applyRunResults(d, [{ pageId: "p1", blockId: "b1", questionId: "2", correct: true }], attempt(2), at);
-    expect(b.questions[1].stats).toEqual({ attempts: 1, correct: 1, lastAnsweredAt: at });
+    expect(b.questions[1].stats).toEqual({ attempts: 1, correct: 1, lastAnsweredAt: at, recent: [at] });
     expect(b.questions[0].stats?.attempts).toBe(1);
     expect(b.attempts).toEqual([{ at, mode: "exam", score: 2, total: 2 }]);
   });
@@ -235,7 +243,7 @@ describe("saving results", () => {
     });
     applyRunResults(newer, run, undefined, at);
     const q1 = (newer.pages[0].blocks[0] as QuizBlock).questions[1];
-    expect(q1.stats).toEqual({ attempts: 4, correct: 3, lastAnsweredAt: at });
+    expect(q1.stats).toEqual({ attempts: 4, correct: 3, lastAnsweredAt: at, recent: [at] });
     // A quiz deleted meanwhile is skipped without error.
     const empty: Workspace = { id: "w", name: "W", pages: [{ id: "p1", title: "P", blocks: [] }], databases: [] };
     expect(() => applyRunResults(empty, run, { pageId: "p1", blockId: "b1", attempt: { at, mode: "practice", score: 0, total: 1 } }, at)).not.toThrow();
@@ -350,5 +358,53 @@ describe("agent edits", () => {
     expect(reconcileAgentQuiz(bad, prev)).toMatch(/question "n".*answerIndex/);
     expect(reconcileAgentQuiz({ id: "b9", type: "quiz", questions: [tf("t")] }, undefined)).toMatch(/answerBool/);
     expect(reconcileAgentQuiz({ ...prev, questions: [prev.questions[1]] }, prev)).toBeNull();
+  });
+});
+
+// Third sync review: the old rule ("an answer at or before the last recorded
+// one is not counted") dropped an answer given earlier on a device that
+// synced later.
+describe("answers recorded in any order (third review, finding 8)", () => {
+  const morning = "2026-11-12T07:40:00.000Z";
+  const evening = "2026-11-12T19:10:00.000Z";
+  it("an earlier answer arriving after a later one is still counted, once", () => {
+    const q = tf("1", true);
+    recordAnswer(q, true, evening); // the laptop saved first
+    recordAnswer(q, false, morning); // the phone's answer from the morning arrives
+    expect(q.stats).toEqual({ attempts: 2, correct: 1, lastAnsweredAt: evening, recent: [morning, evening] });
+    recordAnswer(q, false, morning); // the same edit run again
+    recordAnswer(q, true, evening);
+    expect(q.stats).toMatchObject({ attempts: 2, correct: 1 });
+  });
+
+  it("gives the same stats whichever device saves first", () => {
+    const a = tf("1", true);
+    const b = tf("1", true);
+    recordAnswer(a, false, morning);
+    recordAnswer(a, true, evening);
+    recordAnswer(b, true, evening);
+    recordAnswer(b, false, morning);
+    expect(a.stats).toEqual(b.stats);
+  });
+
+  it("stats from before answers were logged: the last answer is not counted twice", () => {
+    const q = tf("1", true);
+    q.stats = { attempts: 3, correct: 2, lastAnsweredAt: evening };
+    recordAnswer(q, true, evening);
+    expect(q.stats).toEqual({ attempts: 3, correct: 2, lastAnsweredAt: evening });
+  });
+
+  it("a run described as data is the same edit when replayed from a draft", () => {
+    const block: QuizBlock = { id: "b1", type: "quiz", questions: [tf("1", true)] };
+    const d: Workspace = { id: "w", name: "W", pages: [{ id: "p1", title: "P", blocks: [block] }], databases: [] };
+    const results = [{ pageId: "p1", blockId: "b1", questionId: "1", correct: true }];
+    const replay = runResultsReplay(results, undefined, morning);
+    const again = runResultsReplayer(JSON.parse(JSON.stringify(replay.args)));
+    expect(again).not.toBeNull();
+    again!(d);
+    again!(d);
+    expect((d.pages[0].blocks[0] as QuizBlock).questions[0].stats).toMatchObject({ attempts: 1, correct: 1 });
+    expect(runResultsReplayer({ results: "nope", at: morning })).toBeNull();
+    expect(runResultsReplayer({ results: [], at: "not a date" })).toBeNull();
   });
 });

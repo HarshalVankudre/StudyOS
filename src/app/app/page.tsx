@@ -16,6 +16,7 @@ import { TodayPlan } from "@/components/today/TodayPlan";
 import { SearchButton } from "@/components/command/SearchButton";
 import { loadDemoAction } from "./actions";
 import { manageBillingAction } from "./billing-actions";
+import { isBillingConfigured } from "@/lib/stripe";
 import { DeleteWorkspaceButton } from "./DeleteWorkspaceButton";
 import { TrashList } from "./TrashList";
 import { DailyAgentBootstrap } from "./agents/DailyAgentBootstrap";
@@ -46,6 +47,8 @@ export default async function AppHome({
     getDailyStudyAgentOverview(),
     getI18n(),
   ]);
+  // Without payments switched on there is nothing to upgrade to yet.
+  const billing = isBillingConfigured();
   const A = dict.app;
   const Agent = dict.agentCenter;
   const promptExample = dict.generate.describe.placeholder;
@@ -78,7 +81,7 @@ export default async function AppHome({
                 <LanguageSwitcher compact />
               </div>
               <div className="hidden sm:block">
-                <CreditChip credits={credits} locale={locale} />
+                <CreditChip credits={credits} locale={locale} billing={billing} />
               </div>
               {pro ? (
                 <>
@@ -94,14 +97,14 @@ export default async function AppHome({
                     </button>
                   </form>
                 </>
-              ) : (
+              ) : billing ? (
                 <Link
                   href="/pricing"
                   className="hidden rounded-md border border-line-strong px-3.5 py-1.5 text-sm font-semibold text-ink transition hover:bg-hover md:inline-flex"
                 >
                   {A.upgrade}
                 </Link>
-              )}
+              ) : null}
               <Link
                 href="/app/agents"
                 className="hidden items-center gap-1.5 rounded-md px-2.5 py-2 text-sm font-semibold text-ink-soft transition hover:bg-hover hover:text-ink lg:inline-flex"
@@ -125,20 +128,20 @@ export default async function AppHome({
             </div>
             <LanguageSwitcher compact />
             <div className="sm:hidden">
-              <CreditChip credits={credits} locale={locale} />
+              <CreditChip credits={credits} locale={locale} billing={billing} />
             </div>
             {pro ? (
               <span className="ml-auto rounded-full bg-ink px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-paper">
                 {A.pro}
               </span>
-            ) : (
+            ) : billing ? (
               <Link
                 href="/pricing"
                 className="ml-auto rounded-md border border-line-strong px-3 py-1.5 text-xs font-semibold text-ink transition hover:bg-hover"
               >
                 {A.upgrade}
               </Link>
-            )}
+            ) : null}
           </div>
         </div>
       </header>

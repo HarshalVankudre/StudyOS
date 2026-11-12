@@ -9,20 +9,27 @@ import {
   unmarkAccountDeleted,
 } from "@/lib/billing";
 import { getCreditBalance } from "@/lib/credits";
+import { isBillingConfigured } from "@/lib/stripe";
 import { eraseUserData } from "@/lib/account/erase-user-data";
 
-/** Lightweight plan + credit snapshot for the sidebar profile menu. */
+/**
+ * Lightweight plan + credit snapshot for the sidebar profile menu. `billing`
+ * says whether payments are switched on here: without it the menu offers no
+ * purchase links.
+ */
 export async function getAccountSummaryAction(): Promise<{
   pro: boolean;
   credits: number;
+  billing: boolean;
 }> {
+  const billing = isBillingConfigured();
   const { userId } = await auth();
-  if (!userId) return { pro: false, credits: 0 };
+  if (!userId) return { pro: false, credits: 0, billing };
   const [pro, credits] = await Promise.all([
     isPro(),
     getCreditBalance(userId),
   ]);
-  return { pro, credits };
+  return { pro, credits, billing };
 }
 
 /**

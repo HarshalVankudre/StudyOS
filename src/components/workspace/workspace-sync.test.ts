@@ -474,11 +474,28 @@ describe("finding 3: recovering a draft merges, never replaces", () => {
     const b = openTab(fake, { storage, tabId: "B" });
     await drain(); // the server is asked which of the draft's saves landed
     expect(b.notices).toContain("draftRestored");
-    expect(texts(fake.server.workspace)).toEqual(["laptop text", "PHONE NOTES"]);
+    // Something was saved since that tab closed, so its rewrite of the
+    // paragraph does not replace what is there: both versions are kept.
+    expect(texts(fake.server.workspace)).toEqual(["hi", "laptop text", "PHONE NOTES"]);
+    expect(b.getSnapshot().merge?.report.keptBoth).toBe(1);
     // The merge is one undoable step.
     b.undo();
     await drain();
     expect(texts(fake.server.workspace)).toEqual(["hi", "PHONE NOTES"]);
+  });
+
+  it("unsaved edits from a closed tab simply apply when nothing happened since", async () => {
+    const fake = fakeServer();
+    const storage = new MemoryStorage();
+    const a = openTab(fake, { storage, tabId: "A" });
+    a.update(setText("b1", "laptop text"));
+    crash(a, true); // closed before it could save
+
+    const b = openTab(fake, { storage, tabId: "B" });
+    await drain();
+    expect(b.notices).toContain("draftRestored");
+    expect(texts(fake.server.workspace)).toEqual(["laptop text"]);
+    expect(b.getSnapshot().merge).toBeNull();
   });
 });
 
@@ -750,9 +767,12 @@ describe("finding 14: memory and storage", () => {
       throw new DOMException("quota", "QuotaExceededError");
     };
     const a = openTab(fakeServer(), { storage });
+    expect(a.getSnapshot().localCopy).toBe(true);
     a.update((d) => (d.name = "1"));
     a.update((d) => (d.name = "2"));
     expect(a.notices.filter((n) => n === "localCopyFailed")).toHaveLength(1);
+    // The status line must not say "kept on this device" from here on.
+    expect(a.getSnapshot().localCopy).toBe(false);
   });
 
   it("cleans up drafts nobody came back for", () => {
@@ -889,7 +909,7 @@ describe("closing a tab (browser QA)", () => {
     const storage = new MemoryStorage();
     const a = openTab(fake, { storage, tabId: "A", deps: { isOnline: () => false } });
     a.update(setText("b1", "hi, offline"));
-    a.prepareToLeave(true); // nothing can be sent: the draft is the fallback
+    a.prepareToLeave(); // nothing is sent while closing: the draft holds the edit
     a.releaseTab();
     // Events that follow pagehide do not mark it alive again.
     a.writeDraft();
