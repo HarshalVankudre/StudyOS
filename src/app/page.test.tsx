@@ -6,11 +6,22 @@ import { en } from "@/lib/i18n/dictionaries/en";
 import { fmt } from "@/lib/i18n/interpolate";
 import { formatLongDay } from "@/lib/agents/daily-study/present";
 import { FREE_SIGNUP_CREDITS } from "@/lib/credits";
+import { clearProPriceCache } from "@/lib/plan-pricing";
+import type { createFakeStripe } from "@/test/billing-fakes";
 
 const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
   getI18n: vi.fn(),
+  stripe: null as unknown as ReturnType<typeof createFakeStripe>,
 }));
+
+// Stripe Prices come from the in-memory fake (no network).
+vi.mock("@/lib/stripe", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/stripe")>();
+  const { createFakeStripe } = await import("@/test/billing-fakes");
+  mocks.stripe = createFakeStripe();
+  return { ...actual, stripe: mocks.stripe.stripe };
+});
 
 vi.mock("@/lib/db", () => ({ prisma: {} }));
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }));
@@ -29,6 +40,7 @@ vi.mock("@/components/ThemeToggle", () => ({
 }));
 
 import Home from "./page";
+import "@/lib/stripe"; // creates the fake (lib/plan-pricing reads it lazily)
 
 function useLocale(locale: Locale) {
   mocks.getI18n.mockResolvedValue({ dict: getDictionary(locale), locale, t: fmt, dir: locale === "ar" ? "rtl" : "ltr" });
@@ -38,6 +50,11 @@ describe("landing page", () => {
   beforeEach(() => {
     mocks.auth.mockResolvedValue({ userId: null });
     useLocale("en");
+    for (const name of ["STRIPE_SECRET_KEY", "STRIPE_PRICE_PRO", "STRIPE_PRICE_PRO_ANNUAL", "STUDYOS_PRO_MONTHLY_PRICE"]) {
+      vi.stubEnv(name, "");
+    }
+    mocks.stripe.reset();
+    clearProPriceCache();
   });
   afterEach(() => {
     vi.unstubAllEnvs();
@@ -109,6 +126,19 @@ describe("landing page", () => {
       "href",
       "mailto:help@studyos.app",
     );
+  });
+
+  test("with billing on, shows what Stripe charges, in Stripe's currency, as the pricing page does", async () => {
+    vi.stubEnv("STRIPE_SECRET_KEY", "sk_test");
+    vi.stubEnv("STRIPE_PRICE_PRO", "price_month");
+    // The configured value is only the fallback: it must not be shown.
+    vi.stubEnv("STUDYOS_PRO_MONTHLY_PRICE", "5");
+    mocks.stripe.setPrice("price_month", { unit_amount: 600, currency: "eur" });
+    const { container } = render(await Home());
+    const text = container.textContent ?? "";
+    expect(text).toContain("€6/month");
+    expect(text).toContain("€0");
+    expect(text).not.toContain("$5");
   });
 
   test("signed-in visitors go to the app", async () => {

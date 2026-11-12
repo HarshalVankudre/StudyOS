@@ -14,6 +14,7 @@ import type { Dictionary } from "@/lib/i18n/dictionaries/en";
 import { useWorkspace } from "../WorkspaceContext";
 import { useDbActions } from "./actions";
 import { PROPERTY_TYPES, VIEW_TYPES } from "./shared";
+import { DraftInput } from "../editor/DraftInput";
 
 const SMALL_ICON_BUTTON =
   "grid h-8 w-8 shrink-0 place-items-center rounded text-ink-faint transition enabled:hover:bg-hover enabled:hover:text-rose-500 disabled:opacity-30";
@@ -216,11 +217,11 @@ export function DatabaseSettings({
         {/* Also here: the label above the views hides when it repeats the page title. */}
         <label className="mb-3 block text-xs font-medium text-ink-soft">
           {dict.db.nameAria}
-          <input
+          <DraftInput
             value={database.name}
-            onChange={(e) =>
+            onCommit={(value) =>
               withDb((target) => {
-                target.name = e.target.value;
+                target.name = value;
               })
             }
             dir="auto"
@@ -229,11 +230,11 @@ export function DatabaseSettings({
         </label>
         <label className="block text-xs font-medium text-ink-soft">
           {dict.dbSettings.description}
-          <input
+          <DraftInput
             value={database.description ?? ""}
-            onChange={(e) =>
+            onCommit={(value) =>
               withDb((target) => {
-                target.description = e.target.value;
+                target.description = value;
               })
             }
             placeholder={dict.dbSettings.descriptionPlaceholder}
@@ -254,12 +255,12 @@ export function DatabaseSettings({
             {database.properties.map((property) => (
               <div key={property.id} className="rounded border border-line bg-card p-2">
                 <div className="flex flex-wrap items-center gap-2">
-                  <input
+                  <DraftInput
                     value={property.name}
-                    onChange={(e) =>
+                    onCommit={(value) =>
                       withDb((target) => {
                         const p = target.properties.find((item) => item.id === property.id);
-                        if (p) p.name = e.target.value;
+                        if (p) p.name = value;
                       })
                     }
                     dir="auto"
@@ -319,12 +320,12 @@ export function DatabaseSettings({
                         key={option.id}
                         className="flex items-center gap-1 rounded-full border border-line bg-surface py-0.5 ps-2"
                       >
-                        <input
+                        <DraftInput
                           value={option.label}
-                          onChange={(e) =>
+                          onCommit={(value) =>
                             optionUpdate(property.id, (options) => {
                               const o = options.find((item) => item.id === option.id);
-                              if (o) o.label = e.target.value;
+                              if (o) o.label = value;
                             })
                           }
                           dir="auto"
@@ -369,12 +370,12 @@ export function DatabaseSettings({
           <div className="space-y-2">
             {database.views.map((view) => (
               <div key={view.id} className="flex flex-wrap items-center gap-2 rounded border border-line bg-card p-2">
-                <input
+                <DraftInput
                   value={view.name}
                   onFocus={() => setActiveViewId(view.id)}
-                  onChange={(e) =>
+                  onCommit={(value) =>
                     updateView(view.id, (target) => {
-                      target.name = e.target.value;
+                      target.name = value;
                     })
                   }
                   dir="auto"

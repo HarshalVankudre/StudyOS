@@ -15,6 +15,7 @@ import {
 import {
   CREDITS_PER_EDIT,
   CREDITS_PER_GENERATION,
+  CREDITS_PER_QUESTIONS,
   MIN_GENERATION_BALANCE,
   STUDY_KIT_CREDITS_PER_SECTION,
   STUDY_KIT_MAX_CREDITS_PER_SECTION,
@@ -82,7 +83,7 @@ export default async function PricingPage({
     },
     {
       action: P.costs.rows.questions.action,
-      cost: P.costs.few,
+      cost: t(P.costs.about, { count: n(CREDITS_PER_QUESTIONS) }),
       details: P.costs.rows.questions.details,
     },
     {
@@ -342,8 +343,8 @@ export default async function PricingPage({
               <p className="mt-3 font-display text-2xl font-bold">{formatUsd(CREDIT_PACK_PRICE_USD, locale)}</p>
               <p className="mt-1 text-xs text-ink-soft">
                 {t(dict.credits.buysApprox, {
-                  gens: estimatedGenerations(CREDIT_PACK_SIZE),
-                  edits: estimatedEdits(CREDIT_PACK_SIZE),
+                  gens: n(estimatedGenerations(CREDIT_PACK_SIZE)),
+                  edits: n(estimatedEdits(CREDIT_PACK_SIZE)),
                 })}
               </p>
               <div className="mt-5">
@@ -389,7 +390,8 @@ export default async function PricingPage({
 
         <section className="mt-20 rounded-md bg-primary px-6 py-14 text-center text-primary-foreground">
           <h2 className="font-display text-3xl font-extrabold tracking-tight">{P.ctaTitle}</h2>
-          <p className="mx-auto mt-3 max-w-md text-primary-foreground/70">{P.ctaSubtitle}</p>
+          {/* /90: at /70 the subtitle fell to 3.6:1 on the teal band (4.8:1 now). */}
+          <p className="mx-auto mt-3 max-w-md text-primary-foreground/90">{P.ctaSubtitle}</p>
           <Link
             href={signedIn ? "/generate" : "/sign-up"}
             className="mt-8 inline-flex min-h-12 items-center gap-2 rounded-md bg-paper px-8 text-sm font-bold text-ink transition hover:opacity-90"

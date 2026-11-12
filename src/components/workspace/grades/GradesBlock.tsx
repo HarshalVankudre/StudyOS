@@ -37,6 +37,7 @@ import { useWorkspace } from "../WorkspaceContext";
 import { CategoryEditor } from "./CategoryEditor";
 import { GradesSettings } from "./GradesSettings";
 import { GradesSetup } from "./GradesSetup";
+import { DraftInput } from "../editor/DraftInput";
 import { ScoreInput } from "./ScoreInput";
 import { TargetPicker } from "./TargetPicker";
 import { noteText, outlookText, targetText } from "./text";
@@ -140,9 +141,10 @@ export function GradesBlock({ pageId, block }: { pageId: string; block: GradesBl
   const header = (
     <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-3 sm:px-4">
       <GraduationCap className="size-5 shrink-0 text-lime-deep" aria-hidden />
-      <input
+      <DraftInput
         value={block.title ?? ""}
-        onChange={(e) => mutateBlock((b) => void (b.title = e.target.value.slice(0, 200)))}
+        onCommit={(value) => mutateBlock((b) => void (b.title = value.slice(0, 200)))}
+        maxLength={200}
         aria-label={g.titleAria}
         placeholder={g.defaultTitle}
         className="min-w-0 flex-1 rounded bg-transparent px-1 font-display text-base font-bold text-ink outline-none placeholder:text-ink-soft/40 hover:bg-hover focus:bg-hover"

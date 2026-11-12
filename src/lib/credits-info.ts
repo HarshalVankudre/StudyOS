@@ -49,22 +49,57 @@ export const TYPICAL_BUILD_TOKENS: CallTokens = { input: 22_000, output: 20_000,
 export const MAX_BUILD_TOKENS: CallTokens = { input: 60_000, output: 40_000, cacheRead: 0, cacheWrite: 0 };
 export const TYPICAL_EDIT_TOKENS: CallTokens = { input: 5_000, output: 3_000, cacheRead: 0, cacheWrite: 0 };
 
+/** One study-kit section: ~3k tokens of material plus the prompt in, the kit out. */
+export const TYPICAL_KIT_SECTION_TOKENS: CallTokens = { input: 6_000, output: 4_000, cacheRead: 0, cacheWrite: 0 };
+/** The setup questions before a build: one small call (lib/ai/generate.ts planQuestions). */
+export const TYPICAL_QUESTIONS_TOKENS: CallTokens = { input: 2_500, output: 1_500, cacheRead: 0, cacheWrite: 0 };
+
+type WorkKind = "build" | "edit" | "kitSection" | "questions";
+const DEFAULT_PROFILES: Record<WorkKind, CallTokens> = {
+  build: TYPICAL_BUILD_TOKENS,
+  edit: TYPICAL_EDIT_TOKENS,
+  kitSection: TYPICAL_KIT_SECTION_TOKENS,
+  questions: TYPICAL_QUESTIONS_TOKENS,
+};
+
+/**
+ * Typical token use measured on a specific model, where it differs from the
+ * default model's. Claude Haiku 5.5 reads the same prompts but writes far
+ * less than GLM (whose reasoning is billed as output): on the local QA run of
+ * 12 Nov 2026 its builds were charged 1 to 2 credits, its edits 1 and its
+ * study-kit runs 1 to 3 (CreditHold.charged), which this profile reproduces.
+ */
+const MODEL_PROFILES: Readonly<Record<string, Partial<Record<WorkKind, CallTokens>>>> = {
+  "claude-haiku-5-5": { build: { input: 22_000, output: 6_000, cacheRead: 0, cacheWrite: 0 } },
+};
+
+/** The typical tokens of one `kind` of work on `model`. */
+export function typicalTokens(model: string, kind: WorkKind): CallTokens {
+  return MODEL_PROFILES[model]?.[kind] ?? DEFAULT_PROFILES[kind];
+}
+
 const creditsFor = (model: string, tokens: CallTokens) => usdToCredits(callCostUsd(model, tokens));
 
 /**
- * What a workspace build costs on `model`: typically, and at most. A build
- * starts only with the typical cost available, and reserves up to the most
- * it can cost (lib/credits.ts reserveCredits), so parallel builds cannot
- * share one balance and a larger build is covered whenever the balance is.
+ * What a workspace build costs on `model`: typically, and the most it is
+ * expected to cost. A build starts only with the typical cost available, and
+ * reserves the larger figure (lib/credits.ts reserveCredits), so parallel
+ * builds cannot share one balance. `max` is a reservation, not a promise: a
+ * build is charged what it really used.
  */
 export function buildCreditCost(model: string): { typical: number; max: number } {
-  const typical = creditsFor(model, TYPICAL_BUILD_TOKENS);
+  const typical = creditsFor(model, typicalTokens(model, "build"));
   return { typical, max: Math.max(typical, creditsFor(model, MAX_BUILD_TOKENS)) };
 }
 
 /** What one ordinary agent edit / chat turn costs on `model`. */
 export function editCreditCost(model: string): number {
-  return creditsFor(model, TYPICAL_EDIT_TOKENS);
+  return creditsFor(model, typicalTokens(model, "edit"));
+}
+
+/** What the setup questions before a build typically cost on `model`. */
+export function questionsCreditCost(model: string): number {
+  return creditsFor(model, typicalTokens(model, "questions"));
 }
 
 /** The more expensive of the two plans' models (what the pricing page quotes). */
@@ -79,6 +114,7 @@ function quotedCost(cost: (model: string) => number): number {
  */
 export const CREDITS_PER_GENERATION = quotedCost((m) => buildCreditCost(m).typical); // a full workspace build
 export const CREDITS_PER_EDIT = quotedCost(editCreditCost); // one agent edit / chat turn
+export const CREDITS_PER_QUESTIONS = quotedCost(questionsCreditCost); // the setup questions
 
 /**
  * Balance needed to START a workspace build: about one typical build. A run
@@ -89,23 +125,36 @@ export const MIN_GENERATION_BALANCE = CREDITS_PER_GENERATION;
 
 /**
  * A study kit made from the student's material costs per section read (one
- * model call over ~12,000 characters, see lib/materials/limits). Typical: ~6k
- * tokens in and ~4k out at the GLM peg is about 9 credits. The cap is a
- * promise, not an estimate: the server never charges a run more than
- * STUDY_KIT_MAX_CREDITS_PER_SECTION per section, whatever the model used.
+ * model call over ~12,000 characters, see lib/materials/limits): typically
+ * TYPICAL_KIT_SECTION_TOKENS priced for the model (about 9 credits on GLM,
+ * 1 on Claude Haiku). The cap is a promise, not an estimate: the server
+ * never charges a run more than STUDY_KIT_MAX_CREDITS_PER_SECTION per
+ * section, whatever the model used.
  */
-export const STUDY_KIT_CREDITS_PER_SECTION = 9;
 export const STUDY_KIT_MAX_CREDITS_PER_SECTION = 20;
+
+/** Typical credits for one study-kit section on `model` (never above the cap). */
+export function studyKitSectionCredits(model: string): number {
+  return Math.min(STUDY_KIT_MAX_CREDITS_PER_SECTION, creditsFor(model, typicalTokens(model, "kitSection")));
+}
+
+/** The configured models' per-section figure (the default model's in a client bundle). */
+export const STUDY_KIT_CREDITS_PER_SECTION = quotedCost(studyKitSectionCredits);
 
 /**
  * What a study-kit run of `sections` sections costs: typical, at most, and
  * the balance needed to start it. A run is charged at most the balance, so a
  * run starts only with its typical cost AND at least one section's full cap
  * (otherwise an account with a few credits would get a section almost free).
+ * `perSection` is the typical section cost on the model that will run it
+ * (studyKitSectionCredits); client code gets it from the server.
  */
-export function studyKitCost(sections: number): { estimate: number; max: number; minBalance: number } {
+export function studyKitCost(
+  sections: number,
+  perSection: number = STUDY_KIT_CREDITS_PER_SECTION,
+): { estimate: number; max: number; minBalance: number } {
   const n = Math.max(0, Math.floor(sections));
-  const estimate = n * STUDY_KIT_CREDITS_PER_SECTION;
+  const estimate = n * Math.min(STUDY_KIT_MAX_CREDITS_PER_SECTION, Math.max(1, Math.floor(perSection)));
   const max = n * STUDY_KIT_MAX_CREDITS_PER_SECTION;
   return {
     estimate,

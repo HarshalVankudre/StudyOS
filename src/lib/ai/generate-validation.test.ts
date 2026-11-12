@@ -127,6 +127,50 @@ describe("the onboarding questions", () => {
     expect(result.questions[0].options[0].label.length).toBeLessThanOrEqual(40);
   });
 
+  describe("a reply cut off part-way", () => {
+    const q = (id: string, question: string, labels: string[]) => ({
+      id,
+      question,
+      type: "single",
+      options: labels.map((label, i) => ({ id: `${id}${i}`, label })),
+    });
+    const whole = JSON.stringify({
+      questions: [
+        q("level", "What level are you studying at?", ["Undergraduate", "Graduate"]),
+        q("load", "How many courses this term?", ["3 or fewer", "4 to 5", "6 or more"]),
+        q("track", "What should the workspace track?", ["Deadlines", "Grades", "Readings"]),
+      ],
+    });
+    // Cut inside the third question: two complete questions, no valid JSON.
+    const cut = whole.slice(0, whole.indexOf('"track"') + 30);
+
+    it("keeps its complete questions instead of falling back to the defaults", async () => {
+      stubModel([cut]);
+      const result = await planQuestionsDetailed("Econ student", "model");
+      expect(result.fromModel).toBe(true);
+      expect(result.questions.map((x) => x.id)).toEqual(["level", "load"]);
+    });
+
+    it("keeps them when the provider reports the cut-off (finish_reason length)", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(
+          async () =>
+            new Response(
+              JSON.stringify({
+                choices: [{ message: { content: cut }, finish_reason: "length" }],
+                usage: { prompt_tokens: 100, completion_tokens: 50 },
+              }),
+              { status: 200, headers: { "Content-Type": "application/json" } },
+            ),
+        ),
+      );
+      const result = await planQuestionsDetailed("Econ student", "model");
+      expect(result.fromModel).toBe(true);
+      expect(result.questions.map((x) => x.id)).toEqual(["level", "load"]);
+    });
+  });
+
   it("uses the default questions when the reply has none", async () => {
     stubModel(['{"questions":[]}']);
     const result = await planQuestionsDetailed("Econ student", "model");

@@ -30,7 +30,7 @@ export function ShortcutSheet({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={false}
-        className="flex max-h-[88dvh] flex-col gap-0 overflow-hidden border-line-strong bg-card p-0 text-ink sm:max-w-2xl"
+        className="flex max-h-[88dvh] flex-col gap-0 overflow-hidden border-line-strong bg-card p-0 text-ink sm:max-w-3xl"
       >
         <div className="flex items-start gap-3 border-b border-line px-4 py-3.5 sm:px-6">
           <div className="min-w-0 flex-1">
@@ -44,7 +44,7 @@ export function ShortcutSheet({
             <X className="h-4 w-4" aria-hidden />
           </DialogClose>
         </div>
-        <div className="grid gap-x-8 gap-y-6 overflow-y-auto px-4 py-4 sm:grid-cols-2 sm:px-6 sm:py-5">
+        <div className="grid gap-x-8 gap-y-6 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5 md:grid-cols-2">
           {SHORTCUT_GROUPS.map(({ group, items }) => (
             <section key={group} aria-labelledby={`shortcut-group-${group}`}>
               <h3
@@ -55,15 +55,24 @@ export function ShortcutSheet({
               </h3>
               <dl className="space-y-1.5">
                 {items.map((def) => (
-                  <div key={`${group}-${def.item}`} className="flex items-start justify-between gap-3 text-sm">
-                    <dt className="min-w-0 flex-1 text-ink-soft">{S.items[def.item]}</dt>
-                    <dd className="flex shrink-0 flex-wrap items-center justify-end gap-1" dir="ltr">
+                  // The label keeps a readable width: when the keys do not fit
+                  // beside it (two long chords), they move to the next line
+                  // instead of squeezing the label into a narrow column.
+                  <div
+                    key={`${group}-${def.item}`}
+                    className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1 text-sm"
+                  >
+                    <dt className="min-w-[min(100%,11rem)] flex-1 text-ink-soft">{S.items[def.item]}</dt>
+                    <dd className="ms-auto flex max-w-full flex-wrap items-center justify-end gap-1" dir="ltr">
                       {def.keys.map((chord, ci) => (
                         <Fragment key={ci}>
                           {ci > 0 && <span className="px-0.5 text-[11px] text-ink-faint">{def.typed ? "" : S.or}</span>}
-                          {chord.map((k, ki) => (
-                            <Kbd key={ki}>{def.typed ? k.trimEnd() + "␣" : keyLabel(k, apple)}</Kbd>
-                          ))}
+                          {/* A chord never breaks across lines. */}
+                          <span className="inline-flex items-center gap-1 whitespace-nowrap">
+                            {chord.map((k, ki) => (
+                              <Kbd key={ki}>{def.typed ? k.trimEnd() + "␣" : keyLabel(k, apple)}</Kbd>
+                            ))}
+                          </span>
                         </Fragment>
                       ))}
                     </dd>

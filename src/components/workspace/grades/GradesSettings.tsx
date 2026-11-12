@@ -4,6 +4,7 @@ import { RotateCcw } from "lucide-react";
 import { useI18n } from "@/lib/i18n/client";
 import type { GradeBand, GradeScalePreset } from "@/lib/workspace/types";
 import { GRADE_SCALE_PRESETS, parseLocaleNumber, type ScaleDefinition } from "@/lib/grades";
+import { DraftInput } from "../editor/DraftInput";
 import { ScoreInput } from "./ScoreInput";
 import { TargetPicker } from "./TargetPicker";
 
@@ -77,9 +78,10 @@ export function GradesSettings({
               const name = scale.display === "points" && band.points !== undefined ? fmt(band.points) : band.label;
               return (
                 <li key={i} className="flex items-center gap-2">
-                  <input
+                  <DraftInput
                     value={band.label}
-                    onChange={(e) => editBand(i, { label: e.target.value.slice(0, 40) })}
+                    onCommit={(value) => editBand(i, { label: value.slice(0, 40) })}
+                    maxLength={40}
                     aria-label={t(g.bandLabelAria, { index: i + 1 })}
                     className="h-11 w-24 min-w-0 rounded-lg border border-line-strong bg-paper px-2 text-sm font-semibold text-ink outline-none focus:border-lime"
                   />

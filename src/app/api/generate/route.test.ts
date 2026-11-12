@@ -342,7 +342,23 @@ describe("POST /api/generate", () => {
     expect(stream).toContainEqual(expect.objectContaining({ type: "phase", message: "Courses: 2 items so far" }));
     const grades = stream.find((event) => event.type === "component" && event.componentId === "grades" && event.status === "complete");
     // The sample's grades block reads its 8 assignments (there is no grades table).
-    expect(grades).toMatchObject({ detail: fmt(en.ai.generate.detail.grades, { count: 8 }) });
+    expect(grades).toMatchObject({ detail: "Grade calculator connected to 8 graded items" });
+  });
+
+  it("says “1 course”, not “1 courses”, in its progress lines", async () => {
+    const oneCourse = structuredClone(sampleWorkspace);
+    const courses = oneCourse.databases.find((db) => `${db.name} ${db.description ?? ""}`.toLowerCase().includes("course"))!;
+    courses.rows = courses.rows.slice(0, 1);
+    mocks.generateWorkspace.mockImplementation(async (...args: unknown[]) => {
+      const { onProgress } = args[6] as { onProgress: (event: unknown) => void };
+      onProgress({ type: "database", name: "Courses", chars: 120, attempt: 1 });
+      onProgress({ type: "rows", database: "Courses", count: 1, chars: 600, attempt: 1 });
+      return oneCourse;
+    });
+    const stream = await events(await POST(request({ prompt: "CS student" })));
+    expect(stream).toContainEqual(expect.objectContaining({ type: "phase", message: "Courses: 1 item so far" }));
+    const done = stream.find((event) => event.type === "component" && event.componentId === "courses" && event.status === "complete");
+    expect(done).toMatchObject({ detail: "1 course added" });
   });
 
   it("a client disconnect also stops the run before anything is saved", async () => {

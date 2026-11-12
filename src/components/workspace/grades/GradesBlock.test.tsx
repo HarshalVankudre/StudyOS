@@ -336,6 +336,36 @@ describe("GradesBlock: settings", () => {
   });
 });
 
+describe("GradesBlock: names write once per typing burst", () => {
+  it("the title is written when typing ends, not per keystroke", async () => {
+    const user = userEvent.setup();
+    setStore({ ...configured, title: "Grades" });
+    render(<Harness />);
+    const title = screen.getByRole("textbox", { name: G.titleAria });
+    await user.type(title, " 2026");
+    expect(h.update).not.toHaveBeenCalled();
+    expect(title).toHaveValue("Grades 2026");
+    await user.tab();
+    expect(h.update).toHaveBeenCalledTimes(1);
+    expect(block().title).toBe("Grades 2026");
+  });
+
+  it("a grade band's name is written when typing ends, not per keystroke", async () => {
+    const user = userEvent.setup();
+    setStore({ ...configured, scale: "us_letter" });
+    render(<Harness />);
+    await user.click(screen.getByRole("button", { name: G.settings }));
+    const label = screen.getByRole("textbox", { name: fmt(G.bandLabelAria, { index: 1 }) }) as HTMLInputElement;
+    const first = label.value;
+    const before = h.update.mock.calls.length;
+    await user.type(label, "+");
+    expect(h.update.mock.calls.length).toBe(before);
+    await user.tab();
+    expect(h.update.mock.calls.length).toBe(before + 1);
+    expect(block().bands?.[0].label).toBe(`${first}+`);
+  });
+});
+
 describe("GradesBlock: keyboard focus", () => {
   it("Escape closes the settings panel and returns focus to its button", async () => {
     const user = userEvent.setup();

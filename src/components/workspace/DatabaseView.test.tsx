@@ -431,6 +431,7 @@ describe("database name label", () => {
     await user.click(screen.getByText(en.dbSettings.customize));
     await user.clear(field);
     await user.type(field, "Coursework");
+    await user.tab(); // the name is written once the typing burst ends
     expect(db0().name).toBe("Coursework");
     // No longer the same as the title: the label is back.
     expect(screen.getAllByRole("textbox", { name: "Database name" })).toHaveLength(2);
@@ -441,6 +442,77 @@ describe("database name label", () => {
     const [label] = screen.getAllByRole("textbox", { name: "Database name" });
     expect(label.closest("details")).toBeNull();
     expect(label).toHaveValue("Assignments");
+  });
+});
+
+describe("names and labels write once per typing burst", () => {
+  function renderRegistered(db: Database) {
+    const fields = new Set<PendingField>();
+    const register = (field: PendingField) => {
+      fields.add(field);
+      return () => fields.delete(field);
+    };
+    latest = { id: "w", name: "W", pages: [], databases: [db] };
+    render(
+      <PendingFieldsContext.Provider value={{ register, rev: 0 }}>
+        <Harness initial={latest} viewId={db.views[0].id} />
+      </PendingFieldsContext.Provider>,
+    );
+    return () => [...fields].filter((f) => f.hasPending());
+  }
+
+  it("the header's name and icon: one write when typing ends, and registered while pending", async () => {
+    const user = userEvent.setup();
+    const pending = renderRegistered(assignments());
+    const [name] = screen.getAllByRole("textbox", { name: "Database name" });
+    const before = updates;
+    await user.type(name, " 2026");
+    expect(updates).toBe(before);
+    expect(db0().name).toBe("Assignments");
+    // What the engine does before the tab is hidden, undo or a merge.
+    expect(pending()).toHaveLength(1);
+    act(() => pending()[0].commit());
+    expect(db0().name).toBe("Assignments 2026");
+    expect(updates).toBe(before + 1);
+
+    const icon = screen.getByRole("textbox", { name: en.db.databaseIcon });
+    await user.clear(icon);
+    await user.type(icon, "🧪");
+    expect(pending()).toHaveLength(1);
+    await user.tab();
+    expect(db0().icon).toBe("🧪");
+    expect(updates).toBe(before + 2);
+    expect(pending()).toHaveLength(0);
+  });
+
+  it("the settings: description, field, option and view names", async () => {
+    const user = userEvent.setup();
+    const pending = renderRegistered(assignments());
+    await user.click(screen.getByText(en.dbSettings.customize));
+    const before = updates;
+
+    await user.type(screen.getByPlaceholderText(en.dbSettings.descriptionPlaceholder), "Everything due");
+    const field = screen.getAllByRole("textbox", { name: en.dbSettings.fieldName })[0];
+    await user.click(field); // leaving the description writes it, once
+    expect(db0().description).toBe("Everything due");
+    expect(updates).toBe(before + 1);
+
+    await user.type(field, "s");
+    const option = screen.getAllByRole("textbox", { name: en.dbSettings.optionLabel })[0];
+    await user.click(option);
+    expect(db0().properties[0].name).toBe("Assignments");
+    expect(updates).toBe(before + 2);
+
+    await user.type(option, "!");
+    const view = screen.getAllByRole("textbox", { name: en.dbSettings.viewName })[0];
+    await user.click(view);
+    expect(updates).toBe(before + 3);
+
+    await user.type(view, " rows");
+    expect(pending()).toHaveLength(1);
+    act(() => pending()[0].commit());
+    expect(db0().views[0].name).toBe("All rows");
+    expect(updates).toBe(before + 4);
   });
 });
 

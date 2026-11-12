@@ -19,6 +19,7 @@ import { relationLabeler, useToday, visibleProps } from "./database/shared";
 import { TableView } from "./database/TableView";
 import { ViewToolbar } from "./database/Toolbar";
 import { useNarrowScreen } from "./useMediaQuery";
+import { DraftInput } from "./editor/DraftInput";
 
 const VIEW_ICON: Record<DBView["type"], typeof Table2> = {
   table: Table2,
@@ -224,22 +225,22 @@ function DatabaseBody({
             onFocus={() => setEditingName(true)}
             onBlur={() => setEditingName(false)}
           >
-            <input
+            <DraftInput
               value={database.icon ?? ""}
-              onChange={(e) =>
+              onCommit={(value) =>
                 actions.withDb((db) => {
-                  db.icon = e.target.value;
+                  db.icon = value;
                 })
               }
               aria-label={dict.db.databaseIcon}
               maxLength={8}
               className="h-8 w-8 rounded bg-transparent text-center outline-none hover:bg-hover focus:bg-card focus:ring-1 focus:ring-ink/20"
             />
-            <input
+            <DraftInput
               value={database.name}
-              onChange={(e) =>
+              onCommit={(value) =>
                 actions.withDb((db) => {
-                  db.name = e.target.value;
+                  db.name = value;
                 })
               }
               dir="auto"

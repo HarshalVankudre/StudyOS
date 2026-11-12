@@ -48,12 +48,19 @@ export function StudyKitDialog({
   afterPageId,
   onClose,
   onCreated,
+  creditsPerSection,
 }: {
   intent: StudyKitIntent;
   /** Insert the new page after this one (else at the end). */
   afterPageId?: string;
   onClose: () => void;
   onCreated: (pageId: string) => void;
+  /**
+   * Typical credits per section on the model that will run the kit, priced
+   * on the server (studyKitSectionCredits): a client bundle cannot read the
+   * configured model. Without it, the default model's figure is shown.
+   */
+  creditsPerSection?: number;
 }) {
   const { workspace, update } = useWorkspace();
   const { dict, t, locale, plural } = useI18n();
@@ -115,7 +122,7 @@ export function StudyKitDialog({
   const pageCount = pageChars.length;
   const effectiveRange = useMemo(() => range ?? { from: 1, to: pageCount }, [range, pageCount]);
   const plan = useMemo(() => planRun(pageChars, effectiveRange), [pageChars, effectiveRange]);
-  const cost = studyKitCost(plan.sections.length);
+  const cost = studyKitCost(plan.sections.length, creditsPerSection);
   const targets = kitTargets(amount, outputs, plan.chars);
   const anyOutput = outputs.notes || outputs.flashcards || outputs.quiz;
   const languageName = localeMeta(locale).nativeName;

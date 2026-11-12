@@ -9,6 +9,7 @@ import {
 } from "@/lib/credits";
 import { estimatedEdits, estimatedGenerations } from "@/lib/credits-info";
 import { getI18n } from "@/lib/i18n/server";
+import { formatUsd } from "@/lib/plan-pricing";
 import { buyCreditsAction } from "../billing-actions";
 import {
   BillingNotice,
@@ -86,12 +87,12 @@ export default async function BuyCreditsPage({
           </div>
           <p className="text-sm text-ink-soft">{P.unit}</p>
           <div className="mt-4 font-display text-3xl font-bold">
-            ${CREDIT_PACK_PRICE_USD}
+            {formatUsd(CREDIT_PACK_PRICE_USD, locale)}
           </div>
           <p className="mt-2 text-xs text-ink-soft">
             {t(dict.credits.buysApprox, {
-              gens: estimatedGenerations(CREDIT_PACK_SIZE),
-              edits: estimatedEdits(CREDIT_PACK_SIZE),
+              gens: estimatedGenerations(CREDIT_PACK_SIZE).toLocaleString(locale),
+              edits: estimatedEdits(CREDIT_PACK_SIZE).toLocaleString(locale),
             })}
           </p>
           <form action={buyCreditsAction} className="mt-6">

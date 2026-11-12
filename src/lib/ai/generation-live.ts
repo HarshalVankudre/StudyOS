@@ -10,14 +10,17 @@
 import type { GenerationStreamProgress } from "./generate";
 import type { GenerationComponent, GenerationEvent, WorkspaceGenerationPlan } from "./generation-progress";
 import { fmt } from "@/lib/i18n/interpolate";
+import { plural, type PluralForms } from "@/lib/i18n/plural";
 
 export interface LiveProgressMessages {
+  /** The student's language, for the plural form of counts. */
+  locale: string;
   /** Shown until the first piece arrives (the model is still thinking). */
   generating: string;
   /** "{name}" — a database is being set up. */
   database: string;
-  /** "{name}" and "{count}" — rows written into it so far. */
-  rows: string;
+  /** "{name}" and "{count}" — rows written into it so far (plural forms). */
+  rows: PluralForms;
   /** "{title}" — a page is being written. */
   page: string;
 }
@@ -111,7 +114,7 @@ export function createLiveProgress(plan: WorkspaceGenerationPlan, messages: Live
           ];
         }
         case "rows": {
-          const events = phase(fmt(messages.rows, { name: event.database, count: event.count }), event.chars);
+          const events = phase(plural(messages.locale, messages.rows, event.count, { name: event.database }), event.chars);
           const component = componentFor(components, event.database);
           if (component && status.get(component.id) === "generating") {
             const at = Math.min(88, Math.max(progress.get(component.id) ?? 0, 30 + event.count * 5));

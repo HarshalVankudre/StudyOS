@@ -33,6 +33,7 @@ import { reportError } from "@/lib/ops/report-error";
 import { modelForPlan } from "./plans";
 import { streamChatCompletion } from "./openrouter";
 import { AiRefusalError } from "./anthropic";
+import { AiTruncatedError } from "./ai-errors";
 import { isAiConfigured, missingAiKeyMessage, providerForModel } from "./provider";
 import {
   forwardUsage as forwardMeteredUsage,
@@ -676,10 +677,16 @@ export async function planQuestionsDetailed(
         .filter(Boolean)
         .join("\n\n"),
       { timeoutMs: SMALL_CALL_TIMEOUT_MS, effort: "low", smallStep: true, maxTokens: SMALL_CALL_MAX_TOKENS },
-    );
+    ).catch((err: unknown) => {
+      // A reply cut off at the token limit still holds its first questions.
+      if (err instanceof AiTruncatedError && err.partial) return err.partial;
+      throw err;
+    });
     // Trimmed and repaired rather than all-or-nothing: one long label must
-    // not throw away questions the student is about to answer.
-    const questions = normalizeGenQuestions(extractJson(raw));
+    // not throw away questions the student is about to answer. A reply cut
+    // off mid-object is not JSON: the raw text goes to the tolerant parser,
+    // which salvages its complete questions.
+    const questions = normalizeGenQuestions(extractJson(raw) ?? raw);
     if (questions.length === 0) {
       reportError(new InvalidOutputError("questions reply has no usable question"), {
         source: "planQuestions",
@@ -835,7 +842,11 @@ async function callOpenRouter(
   // A reply cut off at max_tokens is incomplete JSON: say so (and let the
   // caller retry or fail honestly) instead of parsing half a workspace.
   if (choice?.finish_reason === "length") {
-    throw new Error("OpenRouter response was truncated (finish_reason: length)");
+    throw new AiTruncatedError(
+      "OpenRouter response was truncated (finish_reason: length)",
+      10000,
+      typeof content === "string" ? content : "",
+    );
   }
   if (typeof content !== "string" || content.length === 0) {
     throw new Error("OpenRouter returned no text content");

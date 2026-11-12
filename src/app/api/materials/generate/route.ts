@@ -14,7 +14,7 @@ import {
   settleCreditHold,
   usageToCredits,
 } from "@/lib/credits";
-import { studyKitCost } from "@/lib/credits-info";
+import { studyKitCost, studyKitSectionCredits } from "@/lib/credits-info";
 import { englishName } from "@/lib/i18n/config";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { fmt } from "@/lib/i18n/interpolate";
@@ -166,7 +166,8 @@ export async function POST(request: Request) {
         // A run is charged at most the balance, so require its typical cost
         // and at least one section's cap up front (otherwise a nearly empty
         // account would get a kit for a few credits).
-        const cost = studyKitCost(plan.sections.length);
+        // Priced for the model this run uses, as the dialog showed it.
+        const cost = studyKitCost(plan.sections.length, studyKitSectionCredits(planModel));
         maxCredits = cost.max;
         const minBalance = Math.max(1, cost.minBalance);
         const outOfCredits = () =>

@@ -105,6 +105,19 @@ describe("buildUserDataExport", () => {
     expect(m.creditLedger.findMany.mock.calls[0][0].where).toEqual({ userId: "user_1" });
   });
 
+  it("exports a database's grading scheme with its workspace (it lives in the workspace document)", async () => {
+    const grading = {
+      scale: "us_letter",
+      categories: [{ id: "c1", name: "Exams", weight: 60, dropLowest: 0 }],
+    };
+    const doc = { name: "Fall", pages: [], databases: [{ id: "d1", name: "Assignments", grading }] };
+    m.workspace.findMany.mockResolvedValue([
+      { id: "w1", name: "Fall", icon: null, data: JSON.stringify(doc), version: 3, createdAt: new Date(0), updatedAt: new Date(0) },
+    ]);
+    const data = await buildUserDataExport("user_1");
+    expect((data.workspaces[0].data as typeof doc).databases[0].grading).toEqual(grading);
+  });
+
   it("never includes credentials (calendar token value, Stripe ids)", async () => {
     const json = JSON.stringify(await buildUserDataExport("user_1"));
     expect(json).not.toContain("cus_secret");

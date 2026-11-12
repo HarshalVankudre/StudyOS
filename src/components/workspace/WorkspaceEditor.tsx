@@ -50,12 +50,15 @@ export function WorkspaceEditor({
   initialWorkspace,
   initialVersion = 1,
   initialCredits = 0,
+  kitCreditsPerSection,
 }: {
   id: string;
   initialWorkspace: Workspace;
   /** The saved version `initialWorkspace` was read at (for conflict checks). */
   initialVersion?: number;
   initialCredits?: number;
+  /** Typical credits per study-kit section on the student's model (server-priced). */
+  kitCreditsPerSection?: number;
 }) {
   const { dict, t, dir, plural } = useI18n();
   const S = dict.safety;
@@ -308,7 +311,11 @@ export function WorkspaceEditor({
      <PendingFieldsContext.Provider value={fieldSync}>
       <Toaster dir={dir} position="bottom-center" />
       <FeedAutoSync />
-      <StudyKitHost activePageId={activePage?.id} onOpenPage={setActivePageId} />
+      <StudyKitHost
+        activePageId={activePage?.id}
+        onOpenPage={setActivePageId}
+        creditsPerSection={kitCreditsPerSection}
+      />
       <div className="flex h-[100dvh] w-full overflow-hidden bg-paper text-ink">
         {sidebarOpen && (
           <button

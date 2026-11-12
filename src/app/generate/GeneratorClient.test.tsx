@@ -25,10 +25,10 @@ const QUESTIONS = [
   { id: "q", question: "Level?", type: "single", options: [{ id: "a", label: "Undergrad" }, { id: "b", label: "Grad" }] },
 ];
 
-function renderClient(props: { outOfCredits?: boolean } = {}) {
+function renderClient(props: { outOfCredits?: boolean; minCredits?: number } = {}) {
   return render(
     <I18nProvider locale="en" dictionary={en}>
-      <GeneratorClient initialPrompt="CS student taking Data Structures" {...props} />
+      <GeneratorClient initialPrompt="CS student taking Data Structures" minCredits={2} {...props} />
     </I18nProvider>,
   );
 }
@@ -62,8 +62,10 @@ async function goToQuestions() {
 
 describe("GeneratorClient", () => {
   it("shows the out-of-credits path before the student invests any effort", () => {
-    renderClient({ outOfCredits: true });
+    renderClient({ outOfCredits: true, minCredits: 3 });
     expect(screen.getByText(en.generate.outOfCredits.title)).toBeInTheDocument();
+    // The minimum is the server's figure for the student's model, not a constant.
+    expect(screen.getByText(/needs at least 3 AI credits/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: en.generate.outOfCredits.buy })).toHaveAttribute(
       "href",
       "/app/credits",

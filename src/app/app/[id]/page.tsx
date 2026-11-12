@@ -4,6 +4,9 @@ import { auth } from "@clerk/nextjs/server";
 import { WorkspaceEditor } from "@/components/workspace/WorkspaceEditor";
 import { getWorkspaceState } from "@/lib/workspace/store";
 import { getCreditBalance } from "@/lib/credits";
+import { studyKitSectionCredits } from "@/lib/credits-info";
+import { modelForPlan } from "@/lib/ai/plans";
+import { getUserPlan } from "@/lib/billing";
 import { getI18n } from "@/lib/i18n/server";
 import { fmt } from "@/lib/i18n/interpolate";
 
@@ -28,12 +31,18 @@ export default async function WorkspacePage({ params }: Props) {
   if (!state) notFound();
   const { userId } = await auth();
   const credits = userId ? await getCreditBalance(userId) : 0;
+  // The study kit's cost is shown before a run, in the browser, which cannot
+  // read the configured model: price it here for the student's plan.
+  const kitCreditsPerSection = studyKitSectionCredits(
+    modelForPlan(await getUserPlan().catch(() => "free" as const)),
+  );
   return (
     <WorkspaceEditor
       id={id}
       initialWorkspace={state.workspace}
       initialVersion={state.version}
       initialCredits={credits}
+      kitCreditsPerSection={kitCreditsPerSection}
     />
   );
 }

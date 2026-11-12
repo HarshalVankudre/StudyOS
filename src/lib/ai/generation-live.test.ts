@@ -13,9 +13,10 @@ const PLAN: WorkspaceGenerationPlan = {
 };
 
 const MESSAGES = {
+  locale: "en",
   generating: "Generating",
   database: "Setting up {name}",
-  rows: "{name}: {count} items so far",
+  rows: { one: "{name}: {count} item so far", other: "{name}: {count} items so far" },
   page: "Writing the “{title}” page",
 };
 

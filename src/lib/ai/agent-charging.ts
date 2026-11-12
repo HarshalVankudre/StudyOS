@@ -14,7 +14,9 @@
  *    shown on the pricing page), its sandbox renders included: the model
  *    charge is clamped to the cap minus what the turn's renders were charged
  *    (the loop sizes calls from estimates and credits round up, so without
- *    the clamp a turn could end a little above it).
+ *    the clamp a turn could end a little above it). A render that finishes
+ *    after the turn was settled (a cancel while it ran) is charged only
+ *    within the room the settle left under the cap (closeSandboxTally).
  */
 import "server-only";
 
@@ -27,7 +29,7 @@ import {
   type CreditHold,
 } from "@/lib/credits";
 import type { TokenUsage } from "./usage-meter";
-import { takeSandboxCreditsCharged } from "./tools/sandbox-tool";
+import { closeSandboxTally, takeSandboxCreditsCharged } from "./tools/sandbox-tool";
 
 /** Uncharged failed turns allowed per student per rolling day. */
 export const FREE_FAILURES_PER_DAY = 3;
@@ -69,14 +71,20 @@ export async function settleAgentTurn(input: {
   capCredits?: number;
   taskId?: string | null;
 }): Promise<number> {
-  const free = async () => {
-    if (input.hold) await releaseCreditHold(input.hold);
-    return 0;
-  };
   const sandbox = input.taskId ? takeSandboxCreditsCharged(input.taskId) : 0;
   const raw = creditsForOutcome(input.usage, input.model);
   const credits =
     input.capCredits === undefined ? raw : Math.min(raw, Math.max(0, input.capCredits - sandbox));
+  // Close the render tally first (synchronously, before any await), with
+  // the room this charge leaves, so a render landing mid-settle cannot use
+  // room the model charge is about to take.
+  if (input.taskId) {
+    closeSandboxTally(input.taskId, input.capCredits === undefined ? Infinity : input.capCredits - sandbox - credits);
+  }
+  const free = async () => {
+    if (input.hold) await releaseCreditHold(input.hold);
+    return 0;
+  };
   if (credits <= 0) return free();
   if (input.outcome === "failed" && (await claimFreeFailure(input.userId))) return free();
   const reason =

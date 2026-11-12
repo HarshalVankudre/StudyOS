@@ -37,6 +37,7 @@ describe("buildAppCsp", () => {
     expect(sources).toEqual([
       "'self'",
       "https://good-cat-12.clerk.accounts.dev",
+      "https://*.protect.clerk.com:*",
       "https://clerk-telemetry.com",
       "https://*.clerk-telemetry.com",
       "https://img.clerk.com",
@@ -64,5 +65,27 @@ describe("buildAppCsp", () => {
     expect(directive(csp, "object-src")).toBe("object-src 'none'");
     expect(directive(csp, "base-uri")).toBe("base-uri 'self'");
     expect(csp).not.toMatch(/script-src|style-src|default-src/);
+  });
+
+  it("lets Clerk's sign-up bot check (Clerk Protect, Turnstile) run in development and production", () => {
+    // Development instance (pk_test_, *.clerk.accounts.dev) and production
+    // instance on our own domain (pk_live_, clerk.<domain>): both derive the
+    // frontend API from the key, and both allow the same bot-check hosts.
+    for (const key of [clerk, keyFor("clerk.studyos.app", "live")]) {
+      const csp = buildAppCsp({ clerkPublishableKey: key });
+      const connect = directive(csp, "connect-src")!.split(/\s+/);
+      const frame = directive(csp, "frame-src")!.split(/\s+/);
+      expect(connect).toContain(clerkFrontendApiOrigin(key));
+      // Protect probes <id>.client.protect.clerk.com on 443, 8443, 18443, 2082
+      // and 992; a source without a port would match 443 only.
+      expect(connect).toContain("https://*.protect.clerk.com:*");
+      expect(frame).toEqual(expect.arrayContaining(["https://challenges.cloudflare.com", "https://*.protect.clerk.com"]));
+      expect(frame).toEqual(expect.arrayContaining(["https://js.stripe.com", "https://hooks.stripe.com"]));
+      expect(directive(csp, "img-src")).toContain("https://img.clerk.com");
+      expect(directive(csp, "worker-src")).toBe("worker-src 'self' blob:");
+    }
+    expect(directive(buildAppCsp({ clerkPublishableKey: keyFor("clerk.studyos.app", "live") }), "connect-src")).toContain(
+      "https://clerk.studyos.app",
+    );
   });
 });

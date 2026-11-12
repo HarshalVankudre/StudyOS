@@ -12,6 +12,7 @@ import {
 } from "@/lib/credits";
 import { getI18n } from "@/lib/i18n/server";
 import { DeleteAccountButton } from "@/components/account/DeleteAccountButton";
+import { formatUsd } from "@/lib/plan-pricing";
 import { SignOutButton } from "@/components/account/SignOutButton";
 import { DownloadDataButton } from "@/components/account/DownloadDataButton";
 import { CalendarSubscribe } from "@/components/account/CalendarSubscribe";
@@ -175,7 +176,7 @@ export default async function SettingsPage() {
               >
                 {t(S.buyPack, {
                   count: CREDIT_PACK_SIZE.toLocaleString(locale),
-                  price: CREDIT_PACK_PRICE_USD,
+                  price: formatUsd(CREDIT_PACK_PRICE_USD, locale),
                 })}
               </button>
             </form>

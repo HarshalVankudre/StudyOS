@@ -20,7 +20,7 @@ import { TURN_CREDIT_CAP } from "@/lib/ai/budgets";
 import { FREE_MONTHLY_CREDITS, FREE_SIGNUP_CREDITS, PRO_MONTHLY_CREDITS } from "@/lib/credits";
 import type { Dictionary } from "@/lib/i18n/dictionaries/en";
 import { getI18n } from "@/lib/i18n/server";
-import { formatUsd, proPricing } from "@/lib/plan-pricing";
+import { formatPrice, getProPricing } from "@/lib/plan-pricing";
 import { supportEmail } from "@/lib/site";
 import { cn } from "@/lib/utils";
 
@@ -31,7 +31,10 @@ export default async function Home() {
   const { dict, locale, t } = await getI18n();
   const L = dict.landing;
   const today = renderDay();
-  const price = formatUsd(proPricing().monthlyUsd, locale);
+  // The same source as the pricing page and checkout: Stripe's price when
+  // billing is configured, the configured fallback otherwise (lib/plan-pricing).
+  const { monthly } = await getProPricing();
+  const price = formatPrice(monthly.amount, monthly.currency, locale);
   const n = (value: number) => value.toLocaleString(locale);
   const email = supportEmail();
   const start = userId ? "/generate" : "/sign-up";
@@ -241,7 +244,7 @@ export default async function Home() {
             <div className="mt-8 grid gap-4 md:grid-cols-2">
               <PlanSummary
                 name={L.plans.free}
-                price={formatUsd(0, locale)}
+                price={formatPrice(0, monthly.currency, locale)}
                 per={L.plans.perMonth}
                 bullets={L.plans.freeBullets.map((b) =>
                   t(b, { signup: n(FREE_SIGNUP_CREDITS), monthly: n(FREE_MONTHLY_CREDITS) }),

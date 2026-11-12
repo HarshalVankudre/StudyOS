@@ -15,7 +15,6 @@ import type {
 } from "@/lib/ai/generation-progress";
 import type { GenQuestion, QuestionAnswer } from "@/lib/ai/onboarding";
 import { TIME_ZONE_COOKIE, validTimeZone } from "@/lib/ai/student-clock";
-import { MIN_GENERATION_BALANCE } from "@/lib/credits-info";
 import {
   MAX_SOURCE_INPUT,
   MAX_SOURCE_TEXT,
@@ -52,10 +51,17 @@ function newGenerationId(): string {
 export function GeneratorClient({
   initialPrompt = "",
   outOfCredits: initiallyOutOfCredits = false,
+  minCredits,
 }: {
   initialPrompt?: string;
   /** Known before the student types anything, so they never invest effort first. */
   outOfCredits?: boolean;
+  /**
+   * Credits needed to start a build, from the server page: about one typical
+   * build on the model the student's plan runs (a client bundle cannot read
+   * the configured model).
+   */
+  minCredits: number;
 }) {
   const router = useRouter();
   const { dict } = useI18n();
@@ -403,7 +409,7 @@ export function GeneratorClient({
       </header>
 
       <div className="mx-auto flex max-w-2xl flex-col px-6 pb-24 pt-14 sm:pt-20">
-        {outOfCredits && <OutOfCreditsPanel />}
+        {outOfCredits && <OutOfCreditsPanel minCredits={minCredits} />}
 
         {stage === "describe" ? (
           <DescribeStage
@@ -452,7 +458,7 @@ export function GeneratorClient({
 // Out of credits / failed generation
 // ---------------------------------------------------------------------------
 
-function OutOfCreditsPanel() {
+function OutOfCreditsPanel({ minCredits }: { minCredits: number }) {
   const { dict, t } = useI18n();
   const C = dict.generate.outOfCredits;
   return (
@@ -465,7 +471,7 @@ function OutOfCreditsPanel() {
         <div className="min-w-0">
           <h2 className="font-display text-lg font-bold text-ink">{C.title}</h2>
           <p className="mt-1 text-sm leading-relaxed text-ink-soft">
-            {t(C.body, { min: MIN_GENERATION_BALANCE })}
+            {t(C.body, { min: minCredits })}
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
             <Link

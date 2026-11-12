@@ -133,6 +133,15 @@ describe("StudyKitDialog", () => {
     material.pageChars = Array.from({ length: 30 }, () => 2900);
   });
 
+  it("prices the run for the student's model, from the figure the server passes", async () => {
+    // Claude Haiku: about 1 credit a section; the cap per section stays 20.
+    render(
+      <StudyKitDialog intent={{ mode: "material" }} onClose={() => {}} onCreated={() => {}} creditsPerSection={1} />,
+    );
+    expect(await screen.findByText(plural("en", M.coverage, 8, { from: 1, to: 30 }))).toBeInTheDocument();
+    expect(screen.getByText(plural("en", M.cost, 8, { max: 160 }))).toBeInTheDocument();
+  });
+
   it("asks before deleting a material", async () => {
     const user = userEvent.setup();
     render(<StudyKitDialog intent={{ mode: "material" }} onClose={() => {}} onCreated={() => {}} />);

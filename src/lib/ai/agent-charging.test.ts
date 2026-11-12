@@ -124,4 +124,52 @@ describe("round 2, finding 8: a turn never costs more than the plan's per-messag
       await settleAgentTurn({ userId: "u", usage: USAGE, model: "claude-haiku-5-5", outcome: "completed", hold: CEILING, capCredits: 30, taskId: "task_x" }),
     ).toBe(4);
   });
+
+  describe("a render that finishes after its turn was settled", () => {
+    async function lateRender(taskId: string) {
+      const { createSandboxTool } = await import("./tools/sandbox-tool");
+      const { FakeSandboxRunner } = await import("@/lib/ai/sandbox/runner.fake");
+      const events: string[] = [];
+      const tool = createSandboxTool({
+        runner: new FakeSandboxRunner({ exitCode: 0, logTail: "", artifacts: [{ path: "out/a.png", bytes: new Uint8Array([1]) }] }),
+        createAsset: async (i) => ({ assetId: "a1", mime: i.mime, filename: i.filename }),
+        enabled: true,
+        quota: {
+          reserve: async () => ({
+            ok: true as const,
+            charge: {
+              settle: async () => void events.push("settle"),
+              release: async () => void events.push("release"),
+            },
+          }),
+        },
+      });
+      const input = { inputs: [], setup: [], run: ["render"], outputs: ["out/a.png"], timeoutSec: 60 };
+      await tool.handler(input, { taskId, ownerId: "u" });
+      return events;
+    }
+
+    it("is not charged when the cancelled turn already took the whole cap", async () => {
+      expect(
+        await settleAgentTurn({ userId: "u", usage: BIG, model: "m", outcome: "cancelled", hold: CEILING, capCredits: 30, taskId: "task_late" }),
+      ).toBe(30);
+      // Its reserved credits go back instead: the turn stays at 30.
+      expect(await lateRender("task_late")).toEqual(["release"]);
+    });
+
+    it("is charged when it still fits under the cap, and only as many as fit", async () => {
+      // 4 credits of model work leaves 26: room for 13 renders of 2.
+      await settleAgentTurn({ userId: "u", usage: USAGE, model: "claude-haiku-5-5", outcome: "cancelled", hold: CEILING, capCredits: 30, taskId: "task_room" });
+      const outcomes: string[] = [];
+      for (let i = 0; i < 14; i++) outcomes.push((await lateRender("task_room"))[0]);
+      expect(outcomes.filter((o) => o === "settle")).toHaveLength(13);
+      expect(outcomes.at(-1)).toBe("release");
+    });
+
+    it("is charged normally when the turn had no cap", async () => {
+      await settleAgentTurn({ userId: "u", usage: USAGE, model: "claude-haiku-5-5", outcome: "cancelled", taskId: "task_nocap" });
+      expect((await lateRender("task_nocap"))[0]).toBe("settle");
+    });
+  });
 });
+

@@ -42,9 +42,11 @@ import {
   workspaceLimitReached,
 } from "@/lib/usage-limits";
 import { getLocale } from "@/lib/i18n/server";
+import type { Locale } from "@/lib/i18n/config";
 import { MAX_SOURCE_INPUT, normalizeSourceText } from "@/lib/import/syllabus";
 import { getDictionary, type Dictionary } from "@/lib/i18n/dictionaries";
 import { fmt } from "@/lib/i18n/interpolate";
+import { plural } from "@/lib/i18n/plural";
 import { saveNewWorkspace } from "@/lib/workspace/store";
 import { reportError } from "@/lib/ops/report-error";
 import type { Workspace } from "@/lib/workspace/types";
@@ -312,6 +314,7 @@ export async function POST(request: Request) {
         // Progress follows what the model has actually written (databases,
         // rows, pages as they stream); the timer only fills the gaps.
         const live = createLiveProgress(plan, {
+          locale,
           generating: T.ai.generate.phase.generating,
           ...T.ai.generate.live,
         });
@@ -347,7 +350,7 @@ export async function POST(request: Request) {
             componentId: component.id,
             status: "complete",
             progress: 100,
-            detail: componentDetail(workspace, component.kind, T),
+            detail: componentDetail(workspace, component.kind, T, locale),
           });
           await sleep(55);
         }
@@ -431,6 +434,7 @@ function componentDetail(
   workspace: Workspace,
   kind: GenerationComponentKind,
   T: Dictionary,
+  locale: Locale,
 ): string {
   const database = (term: string) =>
     workspace.databases.find((item) =>
@@ -440,15 +444,17 @@ function componentDetail(
 
   switch (kind) {
     case "dashboard":
-      return fmt(d.dashboard, { count: workspace.pages.length });
+      return plural(locale, d.dashboard, workspace.pages.length);
     case "courses":
-      return fmt(d.courses, { count: database("course")?.rows.length ?? 0 });
+      return plural(locale, d.courses, database("course")?.rows.length ?? 0);
     case "assignments":
     case "projects":
     case "exams":
-      return fmt(d.trackedItems, {
-        count: (database("assignment") ?? findDeadlineDatabase(workspace))?.rows.length ?? 0,
-      });
+      return plural(
+        locale,
+        d.trackedItems,
+        (database("assignment") ?? findDeadlineDatabase(workspace))?.rows.length ?? 0,
+      );
     case "planner": {
       const datedRows = workspace.databases.reduce(
         (total, item) =>
@@ -463,18 +469,18 @@ function componentDetail(
         0,
       );
       // No dates yet (the student gave none, and none are invented).
-      return datedRows > 0 ? fmt(d.scheduled, { count: datedRows }) : d.scheduledNone;
+      return datedRows > 0 ? plural(locale, d.scheduled, datedRows) : d.scheduledNone;
     }
     case "readings":
-      return fmt(d.readings, { count: database("reading")?.rows.length ?? 0 });
+      return plural(locale, d.readings, database("reading")?.rows.length ?? 0);
     case "habits":
-      return fmt(d.habits, { count: database("habit")?.rows.length ?? 0 });
+      return plural(locale, d.habits, database("habit")?.rows.length ?? 0);
     case "grades": {
       // Grades are a calculator over the graded-work list (no grades table):
       // report how many graded items it reads.
       const block = workspace.pages.flatMap((page) => page.blocks).find((b) => b.type === "grades");
       const graded = block?.type === "grades" ? workspace.databases.find((db) => db.id === block.databaseId) : undefined;
-      return fmt(d.grades, { count: graded?.rows.length ?? 0 });
+      return plural(locale, d.grades, graded?.rows.length ?? 0);
     }
     case "notes":
       return d.notes;

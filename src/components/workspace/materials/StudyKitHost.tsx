@@ -12,9 +12,12 @@ import { StudyKitDialog } from "./StudyKitDialog";
 export function StudyKitHost({
   activePageId,
   onOpenPage,
+  creditsPerSection,
 }: {
   activePageId?: string;
   onOpenPage: (pageId: string) => void;
+  /** Typical credits per section on the student's model (see StudyKitDialog). */
+  creditsPerSection?: number;
 }) {
   const [intent, setIntent] = useState<StudyKitIntent | null>(null);
   const [afterPageId, setAfterPageId] = useState<string | undefined>(undefined);
@@ -37,6 +40,7 @@ export function StudyKitHost({
       afterPageId={afterPageId}
       onClose={() => setIntent(null)}
       onCreated={onOpenPage}
+      creditsPerSection={creditsPerSection}
     />
   );
 }
