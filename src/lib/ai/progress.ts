@@ -38,12 +38,7 @@ export interface AgentActivityState {
   discoveries: AgentDiscovery[];
   plan?: { summary: string; areas: AgentArea[] };
   areas: { id: string; status: AgentAreaStatus; label: string }[];
-  /** Rolling buffer of streamed reasoning ("thinking") text; capped, live-only. */
-  thinking?: string;
 }
-
-/** Cap the live thinking buffer so the DOM/state can't grow without bound. */
-export const THINKING_BUFFER_MAX = 4000;
 
 export function createInitialAgentActivity(
   message: string,
@@ -89,16 +84,10 @@ export function reduceAgentActivity(
     };
   }
 
-  if (event.type === "thinking") {
-    const next = (state.thinking ?? "") + event.delta;
-    return {
-      ...state,
-      thinking:
-        next.length > THINKING_BUFFER_MAX
-          ? next.slice(next.length - THINKING_BUFFER_MAX)
-          : next,
-    };
-  }
+  // Streamed reasoning ("thinking") is the model talking to itself, full of
+  // internal names and ids, so it is deliberately neither kept nor shown.
+  // Students see the plan's goal and friendly step lines (agent-steps.ts).
+  if (event.type === "thinking") return state;
 
   if (event.type === "result") {
     return { ...state, progress: 100 };

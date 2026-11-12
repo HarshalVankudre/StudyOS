@@ -1,0 +1,455 @@
+{
+  "source": "scratchpad gen-samples/final-fr-droit.json (final, fr-droit, claude-haiku-5-5), trimmed; polish-added blocks removed",
+  "locale": "fr",
+  "today": "2026-11-12",
+  "workspace": {
+    "id": "ws-droit-l2-lyon",
+    "name": "Droit L2 — Semestre Lyon",
+    "icon": "⚖️",
+    "pages": [
+      {
+        "id": "page-home",
+        "title": "Tableau de bord",
+        "icon": "🏠",
+        "blocks": [
+          {
+            "id": "h-welcome",
+            "type": "callout",
+            "text": "Bienvenue dans ton espace de L2 droit : fiches d'arrêts chaque semaine et préparation des partiels de décembre.",
+            "emoji": "⚖️"
+          },
+          {
+            "id": "h-h-fiches",
+            "type": "heading",
+            "level": 2,
+            "text": "📑 Fiches d'arrêts"
+          },
+          {
+            "id": "h-board",
+            "type": "database_view",
+            "databaseId": "db-fiches",
+            "viewId": "v-fiches-board"
+          },
+          {
+            "id": "h-h-partiels",
+            "type": "heading",
+            "level": 2,
+            "text": "🎓 Partiels de décembre"
+          },
+          {
+            "id": "h-partiels",
+            "type": "database_view",
+            "databaseId": "db-partiels",
+            "viewId": "v-partiels-table"
+          },
+          {
+            "id": "b-grades",
+            "type": "grades",
+            "title": "Notes",
+            "databaseId": "db-fiches",
+            "columns": {
+              "course": "f-matiere",
+              "score": "f-note",
+              "weight": "f-poids",
+              "due": "f-echeance"
+            }
+          }
+        ]
+      },
+      {
+        "id": "page-fiches",
+        "title": "Fiches d'arrêts",
+        "icon": "📑",
+        "blocks": [
+          {
+            "id": "fa-p",
+            "type": "paragraph",
+            "text": "Une fiche d'arrêt à rendre chaque semaine, par matière."
+          },
+          {
+            "id": "fa-table",
+            "type": "database_view",
+            "databaseId": "db-fiches",
+            "viewId": "v-fiches-table"
+          },
+          {
+            "id": "fa-cal",
+            "type": "database_view",
+            "databaseId": "db-fiches",
+            "viewId": "v-fiches-cal"
+          }
+        ]
+      },
+      {
+        "id": "page-planning",
+        "title": "Planning",
+        "icon": "📅",
+        "blocks": [
+          {
+            "id": "pn-p",
+            "type": "paragraph",
+            "text": "Tes révisions jusqu'aux partiels de décembre."
+          },
+          {
+            "id": "pn-cal",
+            "type": "database_view",
+            "databaseId": "db-planning",
+            "viewId": "v-planning-cal"
+          }
+        ]
+      },
+      {
+        "id": "page-partiels",
+        "title": "Partiels",
+        "icon": "🎓",
+        "blocks": [
+          {
+            "id": "pt-table",
+            "type": "database_view",
+            "databaseId": "db-partiels",
+            "viewId": "v-partiels-table"
+          },
+          {
+            "id": "pt-cal",
+            "type": "database_view",
+            "databaseId": "db-partiels",
+            "viewId": "v-partiels-cal"
+          }
+        ]
+      }
+    ],
+    "databases": [
+      {
+        "id": "db-fiches",
+        "name": "Fiches d'arrêts",
+        "icon": "📑",
+        "description": "Une fiche par arrêt à rendre chaque semaine.",
+        "properties": [
+          {
+            "id": "f-nom",
+            "name": "Arrêt",
+            "type": "text"
+          },
+          {
+            "id": "f-matiere",
+            "name": "Matière",
+            "type": "select",
+            "options": [
+              {
+                "id": "fm-obl",
+                "label": "Droit des obligations",
+                "color": "blue"
+              },
+              {
+                "id": "fm-admin",
+                "label": "Droit administratif",
+                "color": "violet"
+              },
+              {
+                "id": "fm-hist",
+                "label": "Histoire du droit",
+                "color": "amber"
+              },
+              {
+                "id": "fm-ang",
+                "label": "Anglais juridique",
+                "color": "emerald"
+              }
+            ]
+          },
+          {
+            "id": "f-statut",
+            "name": "Statut",
+            "type": "status",
+            "options": [
+              {
+                "id": "fs-todo",
+                "label": "À faire",
+                "color": "zinc"
+              },
+              {
+                "id": "fs-doing",
+                "label": "En cours",
+                "color": "amber"
+              },
+              {
+                "id": "fs-done",
+                "label": "Rendue",
+                "color": "green"
+              }
+            ]
+          },
+          {
+            "id": "f-echeance",
+            "name": "Échéance",
+            "type": "date"
+          },
+          {
+            "id": "f-poids",
+            "name": "Poids %",
+            "type": "number"
+          },
+          {
+            "id": "f-note",
+            "name": "Note",
+            "type": "number"
+          }
+        ],
+        "rows": [
+          {
+            "id": "fi-1",
+            "cells": {
+              "f-nom": "Fiche d'arrêt — Cass. civ. 1re (responsabilité contractuelle)",
+              "f-matiere": "fm-obl",
+              "f-statut": "fs-todo",
+              "f-echeance": null,
+              "f-poids": null,
+              "f-note": null
+            }
+          },
+          {
+            "id": "fi-2",
+            "cells": {
+              "f-nom": "Fiche d'arrêt — CE (acte administratif unilatéral)",
+              "f-matiere": "fm-admin",
+              "f-statut": "fs-todo",
+              "f-echeance": null,
+              "f-poids": null,
+              "f-note": null
+            }
+          }
+        ],
+        "views": [
+          {
+            "id": "v-fiches-table",
+            "name": "Toutes",
+            "type": "table"
+          },
+          {
+            "id": "v-fiches-board",
+            "name": "Par statut",
+            "type": "board",
+            "groupByPropertyId": "f-statut"
+          },
+          {
+            "id": "v-fiches-cal",
+            "name": "Calendrier",
+            "type": "calendar",
+            "datePropertyId": "f-echeance"
+          }
+        ]
+      },
+      {
+        "id": "db-partiels",
+        "name": "Partiels",
+        "icon": "🎓",
+        "description": "Dates, matières et coefficients des partiels de décembre.",
+        "properties": [
+          {
+            "id": "p-nom",
+            "name": "Épreuve",
+            "type": "text"
+          },
+          {
+            "id": "p-matiere",
+            "name": "Matière",
+            "type": "select",
+            "options": [
+              {
+                "id": "pm-obl",
+                "label": "Droit des obligations",
+                "color": "blue"
+              },
+              {
+                "id": "pm-admin",
+                "label": "Droit administratif",
+                "color": "violet"
+              },
+              {
+                "id": "pm-hist",
+                "label": "Histoire du droit",
+                "color": "amber"
+              },
+              {
+                "id": "pm-ang",
+                "label": "Anglais juridique",
+                "color": "emerald"
+              }
+            ]
+          },
+          {
+            "id": "p-date",
+            "name": "Date",
+            "type": "date"
+          },
+          {
+            "id": "p-coef",
+            "name": "Coefficient",
+            "type": "number"
+          },
+          {
+            "id": "p-statut",
+            "name": "Statut",
+            "type": "status",
+            "options": [
+              {
+                "id": "ps-todo",
+                "label": "À réviser",
+                "color": "zinc"
+              },
+              {
+                "id": "ps-doing",
+                "label": "En révision",
+                "color": "amber"
+              },
+              {
+                "id": "ps-done",
+                "label": "Prêt",
+                "color": "green"
+              }
+            ]
+          }
+        ],
+        "rows": [
+          {
+            "id": "pa-obl",
+            "cells": {
+              "p-nom": "Partiel — Droit des obligations",
+              "p-matiere": "pm-obl",
+              "p-date": null,
+              "p-coef": null,
+              "p-statut": "ps-todo"
+            }
+          },
+          {
+            "id": "pa-admin",
+            "cells": {
+              "p-nom": "Partiel — Droit administratif",
+              "p-matiere": "pm-admin",
+              "p-date": null,
+              "p-coef": null,
+              "p-statut": "ps-todo"
+            }
+          },
+          {
+            "id": "pa-hist",
+            "cells": {
+              "p-nom": "Partiel — Histoire du droit",
+              "p-matiere": "pm-hist",
+              "p-date": null,
+              "p-coef": null,
+              "p-statut": "ps-todo"
+            }
+          },
+          {
+            "id": "pa-ang",
+            "cells": {
+              "p-nom": "Partiel — Anglais juridique",
+              "p-matiere": "pm-ang",
+              "p-date": null,
+              "p-coef": null,
+              "p-statut": "ps-todo"
+            }
+          }
+        ],
+        "views": [
+          {
+            "id": "v-partiels-table",
+            "name": "Tous",
+            "type": "table"
+          },
+          {
+            "id": "v-partiels-cal",
+            "name": "Calendrier",
+            "type": "calendar",
+            "datePropertyId": "p-date"
+          }
+        ]
+      },
+      {
+        "id": "db-planning",
+        "name": "Planning de révision",
+        "icon": "📅",
+        "description": "Séances de révision jusqu'aux partiels.",
+        "properties": [
+          {
+            "id": "pl-nom",
+            "name": "Séance",
+            "type": "text"
+          },
+          {
+            "id": "pl-matiere",
+            "name": "Matière",
+            "type": "select",
+            "options": [
+              {
+                "id": "plm-obl",
+                "label": "Droit des obligations",
+                "color": "blue"
+              },
+              {
+                "id": "plm-admin",
+                "label": "Droit administratif",
+                "color": "violet"
+              },
+              {
+                "id": "plm-hist",
+                "label": "Histoire du droit",
+                "color": "amber"
+              },
+              {
+                "id": "plm-ang",
+                "label": "Anglais juridique",
+                "color": "emerald"
+              }
+            ]
+          },
+          {
+            "id": "pl-date",
+            "name": "Date",
+            "type": "date"
+          },
+          {
+            "id": "pl-fait",
+            "name": "Fait",
+            "type": "checkbox"
+          }
+        ],
+        "rows": [
+          {
+            "id": "pl-1",
+            "cells": {
+              "pl-nom": "Révision des fiches d'arrêts — semaine 1",
+              "pl-matiere": "plm-obl",
+              "pl-date": "2026-11-18",
+              "pl-fait": false
+            }
+          },
+          {
+            "id": "pl-2",
+            "cells": {
+              "pl-nom": "Relecture du cours de droit administratif",
+              "pl-matiere": "plm-admin",
+              "pl-date": "2026-11-20",
+              "pl-fait": false
+            }
+          }
+        ],
+        "views": [
+          {
+            "id": "v-planning-table",
+            "name": "Séances",
+            "type": "table"
+          },
+          {
+            "id": "v-planning-cal",
+            "name": "Calendrier",
+            "type": "calendar",
+            "datePropertyId": "pl-date"
+          }
+        ]
+      }
+    ],
+    "homePageId": "page-home"
+  }
+}

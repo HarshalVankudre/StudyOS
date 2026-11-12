@@ -11,6 +11,7 @@ vi.mock("@/lib/i18n/client", () => ({
         undo: "Undo",
         undoing: "Undoing…",
         undoFailed: "Could not undo",
+        undoBlockedByEdits: "You edited after this change. Use Ctrl/Cmd+Z.",
       },
     },
   }),
@@ -57,5 +58,25 @@ describe("AgentUndoButton", () => {
     );
     await userEvent.click(screen.getByRole("button", { name: "Undo" }));
     expect(screen.getByText("Could not undo")).toBeInTheDocument();
+  });
+
+  it("says plainly when later edits block Undo and points to the editor's undo", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: "x", reason: "newer_edits" }), {
+          status: 409,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    const onUnavailable = vi.fn();
+    render(
+      <AgentUndoButton changeId="change-1" onUndone={vi.fn()} onUnavailable={onUnavailable} />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(screen.getByText("You edited after this change. Use Ctrl/Cmd+Z.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Undo" })).not.toBeInTheDocument();
+    expect(onUnavailable).toHaveBeenCalled();
   });
 });

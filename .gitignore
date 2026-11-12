@@ -64,3 +64,6 @@ next-env.d.ts
 /test-results/
 /playwright-report/
 /e2e-results/
+
+# The documented variable list is committed (names only, no values).
+!.env.example

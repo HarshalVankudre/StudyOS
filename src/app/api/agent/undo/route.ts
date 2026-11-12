@@ -1,7 +1,9 @@
+import { rejectCrossSite } from "@/lib/http/same-origin";
 import { auth } from "@clerk/nextjs/server";
 import { z } from "zod";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { getLocale } from "@/lib/i18n/server";
+import { reportError } from "@/lib/ops/report-error";
 import {
   WorkspaceChangeUnavailableError,
   WorkspaceNotFoundError,
@@ -15,6 +17,8 @@ const requestSchema = z.object({
 });
 
 export async function POST(request: Request) {
+  const crossSite = rejectCrossSite(request);
+  if (crossSite) return crossSite;
   const T = getDictionary(await getLocale());
   const { userId } = await auth();
   if (!userId) {
@@ -37,6 +41,7 @@ export async function POST(request: Request) {
     const result = await undoAgentWorkspaceChange(parsed.data.changeId);
     return Response.json({
       workspace: result.workspace,
+      version: result.version,
       changeId: result.changeId,
     });
   } catch (error) {
@@ -47,12 +52,14 @@ export async function POST(request: Request) {
       );
     }
     if (error instanceof WorkspaceChangeUnavailableError) {
+      // "newer_edits": the student's own edits were saved on top of the
+      // change, so only the editor's undo (Ctrl/Cmd+Z) can step back now.
       return Response.json(
-        { error: T.ai.agent.undoUnavailable },
+        { error: T.ai.agent.undoUnavailable, reason: error.reason },
         { status: 409 },
       );
     }
-    console.error("[StudyOS] agent undo failed:", error);
+    reportError(error, { source: "api", route: "/api/agent/undo", method: "POST", userId });
     return Response.json(
       { error: T.ai.agent.error },
       { status: 500 },

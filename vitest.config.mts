@@ -26,6 +26,9 @@ export default defineConfig({
       "**/.next/**",
       "**/.worktrees/**",
       "**/dist/**",
+      // Anything that calls a real AI provider must never run in the unit
+      // suite: it would spend credits on every run.
+      "**/*.live.test.*",
     ],
   },
 });

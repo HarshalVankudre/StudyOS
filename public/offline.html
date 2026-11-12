@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0b0b0a">
+<meta name="robots" content="noindex">
+<title>StudyOS</title>
+<!--
+  Offline fallback served by /sw.js when a page cannot load. It must work with
+  no network and no app bundle, so it is plain HTML with its strings inline.
+  The strings are the `offline` section of src/lib/i18n/dictionaries/*.ts;
+  src/lib/export/offline-page.test.ts fails if they drift apart.
+-->
+<style>
+  :root { --bg:#0b0b0a; --card:#131312; --text:#f4f3ef; --soft:#a8a89e; --line:rgba(255,255,255,0.14); --accent:#2dd4bf; --on:#0b0b0a; color-scheme: dark; }
+  :root.light { --bg:#fafafa; --card:#ffffff; --text:#18181b; --soft:#52525b; --line:rgba(24,24,27,0.16); --accent:#0d9488; --on:#0b0b0a; color-scheme: light; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); }
+  body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; display: grid; place-items: center; min-height: 100dvh; padding: 16px; }
+  main { width: 100%; max-width: 26rem; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 28px 24px; text-align: center; }
+  img { width: 56px; height: 56px; border-radius: 12px; }
+  h1 { font-family: Georgia, "Times New Roman", serif; font-size: 1.5rem; margin: 16px 0 8px; }
+  p { color: var(--soft); line-height: 1.5; margin: 0 0 20px; font-size: 0.95rem; }
+  button { min-height: 44px; padding: 0 20px; border: 0; border-radius: 10px; background: var(--accent); color: var(--on); font: inherit; font-weight: 600; cursor: pointer; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+</style>
+</head>
+<body>
+<main>
+  <img src="/icons/icon-192.png" alt="">
+  <h1 id="title">You’re offline</h1>
+  <p id="body">StudyOS needs a connection to open your workspaces. Your saved work is safe. Reconnect and try again.</p>
+  <button id="retry" type="button">Try again</button>
+</main>
+<script id="strings" type="application/json">
+{
+  "en": {
+    "title": "You’re offline",
+    "body": "StudyOS needs a connection to open your workspaces. Your saved work is safe. Reconnect and try again.",
+    "retry": "Try again"
+  },
+  "es": {
+    "title": "Estás sin conexión",
+    "body": "StudyOS necesita conexión para abrir tus espacios. Tu trabajo guardado está a salvo. Vuelve a conectarte e inténtalo de nuevo.",
+    "retry": "Reintentar"
+  },
+  "de": {
+    "title": "Du bist offline",
+    "body": "StudyOS braucht eine Verbindung, um deine Workspaces zu öffnen. Deine gespeicherte Arbeit ist sicher. Verbinde dich wieder und versuch es erneut.",
+    "retry": "Erneut versuchen"
+  },
+  "fr": {
+    "title": "Tu es hors ligne",
+    "body": "StudyOS a besoin d’une connexion pour ouvrir tes espaces. Ton travail enregistré est en sécurité. Reconnecte-toi et réessaie.",
+    "retry": "Réessayer"
+  },
+  "it": {
+    "title": "Sei offline",
+    "body": "StudyOS ha bisogno di una connessione per aprire i tuoi workspace. Il lavoro salvato è al sicuro. Riconnettiti e riprova.",
+    "retry": "Riprova"
+  },
+  "pt": {
+    "title": "Você está offline",
+    "body": "O StudyOS precisa de conexão para abrir seus workspaces. Seu trabalho salvo está seguro. Reconecte e tente de novo.",
+    "retry": "Tentar de novo"
+  },
+  "nl": {
+    "title": "Je bent offline",
+    "body": "StudyOS heeft een verbinding nodig om je workspaces te openen. Je opgeslagen werk is veilig. Maak opnieuw verbinding en probeer het nog eens.",
+    "retry": "Opnieuw proberen"
+  },
+  "zh": {
+    "title": "你已离线",
+    "body": "StudyOS 需要网络连接才能打开你的工作区。已保存的内容是安全的。请重新连接后再试。",
+    "retry": "重试"
+  },
+  "ja": {
+    "title": "オフラインです",
+    "body": "ワークスペースを開くには StudyOS がインターネットに接続されている必要があります。保存済みの内容は安全です。再接続してからもう一度お試しください。",
+    "retry": "再試行"
+  },
+  "ar": {
+    "title": "أنت غير متصل",
+    "body": "يحتاج StudyOS إلى اتصال لفتح مساحات عملك. عملك المحفوظ في أمان. أعد الاتصال وحاول مرة أخرى.",
+    "retry": "حاول مرة أخرى"
+  }
+}
+</script>
+<script>
+  (function () {
+    var strings = JSON.parse(document.getElementById("strings").textContent);
+    function cookie(name) {
+      var m = document.cookie.match(new RegExp("(?:^|; )" + name + "=([^;]*)"));
+      return m ? decodeURIComponent(m[1]) : null;
+    }
+    var wanted = [cookie("studyos_locale")].concat(navigator.languages || [navigator.language || "en"]);
+    var locale = "en";
+    for (var i = 0; i < wanted.length; i++) {
+      var code = String(wanted[i] || "").toLowerCase().split("-")[0];
+      if (strings[code]) { locale = code; break; }
+    }
+    var s = strings[locale];
+    document.documentElement.lang = locale;
+    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
+    document.title = s.title + " · StudyOS";
+    document.getElementById("title").textContent = s.title;
+    document.getElementById("body").textContent = s.body;
+    document.getElementById("retry").textContent = s.retry;
+    try { if (localStorage.getItem("theme") === "light") document.documentElement.classList.add("light"); } catch (e) {}
+    document.getElementById("retry").addEventListener("click", function () { location.reload(); });
+    window.addEventListener("online", function () { location.reload(); });
+  })();
+</script>
+</body>
+</html>

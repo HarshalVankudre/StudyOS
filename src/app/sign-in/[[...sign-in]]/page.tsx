@@ -12,7 +12,10 @@ export default function Page() {
         StudyOS
         <span className="mb-3 h-2 w-2 rounded-full bg-lime" aria-hidden />
       </Link>
-      <SignIn />
+      {/* After auth, students land in the app, not on the marketing page. A
+          redirect_url from a protected page still wins (Clerk: force props,
+          then redirect_url, then these fallbacks). */}
+      <SignIn fallbackRedirectUrl="/app" signUpFallbackRedirectUrl="/app" />
       <div className="mt-8">
         <LanguageSwitcher />
       </div>

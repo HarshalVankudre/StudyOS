@@ -10,7 +10,7 @@ vi.mock("streamdown", () => ({
   ),
 }));
 // Stub the plugin set so the @streamdown/* factories never load in jsdom.
-vi.mock("@/lib/streamdown-plugins", () => ({ streamdownPlugins: {} }));
+vi.mock("@/lib/streamdown-plugins", () => ({ streamdownPlugins: {}, streamdownRehypePlugins: [] }));
 
 import { RichText } from "./RichText";
 

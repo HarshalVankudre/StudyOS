@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useId, useState, useTransition } from "react";
 import { useI18n } from "@/lib/i18n/client";
 import { resetCalendarFeedAction } from "@/app/app/calendar-actions";
 
@@ -15,14 +15,18 @@ export function CalendarSubscribe({ initialUrl }: { initialUrl: string | null })
   const C = dict.calendar;
   const [url, setUrl] = useState(initialUrl);
   const [copied, setCopied] = useState(false);
+  // Completed items are left out of the feed unless the link asks for them.
+  const [includeCompleted, setIncludeCompleted] = useState(false);
   const [pending, startTransition] = useTransition();
+  const completedId = useId();
 
   if (!url) return null;
-  const webcal = url.replace(/^https?:\/\//, "webcal://");
+  const feedUrl = includeCompleted ? withCompleted(url) : url;
+  const webcal = feedUrl.replace(/^https?:\/\//, "webcal://");
 
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(url);
+      await navigator.clipboard.writeText(feedUrl);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
@@ -41,7 +45,7 @@ export function CalendarSubscribe({ initialUrl }: { initialUrl: string | null })
       <div className="flex items-stretch gap-2">
         <input
           readOnly
-          value={url}
+          value={feedUrl}
           onFocus={(e) => e.currentTarget.select()}
           aria-label={C.urlLabel}
           className="min-w-0 flex-1 rounded-lg border border-ink/15 bg-paper px-3 py-2 font-mono text-xs text-ink-soft outline-none focus:border-ink/40"
@@ -53,6 +57,21 @@ export function CalendarSubscribe({ initialUrl }: { initialUrl: string | null })
           {copied ? C.copied : C.copy}
         </button>
       </div>
+
+      <label
+        htmlFor={completedId}
+        className="mt-3 flex min-h-11 cursor-pointer items-center gap-2 text-sm text-ink"
+      >
+        <input
+          id={completedId}
+          type="checkbox"
+          checked={includeCompleted}
+          onChange={(e) => setIncludeCompleted(e.target.checked)}
+          className="size-4 shrink-0 accent-lime"
+        />
+        {C.includeCompleted}
+      </label>
+      <p className="text-xs text-ink-soft">{C.completedHint}</p>
 
       <div className="mt-3 flex flex-wrap items-center gap-3">
         <a
@@ -73,4 +92,9 @@ export function CalendarSubscribe({ initialUrl }: { initialUrl: string | null })
       <p className="mt-3 text-xs text-ink-soft">{C.instructions}</p>
     </div>
   );
+}
+
+/** The feed link that also lists completed items (see the calendar route). */
+export function withCompleted(url: string): string {
+  return `${url}${url.includes("?") ? "&" : "?"}completed=1`;
 }

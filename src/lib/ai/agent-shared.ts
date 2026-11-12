@@ -10,6 +10,12 @@ import type { Workspace } from "@/lib/workspace/types";
 export interface AgentMessage {
   role: "user" | "assistant";
   content: string;
+  /**
+   * The id-bearing note of what that turn changed (assistant turns). Kept
+   * apart from `content` because it quotes workspace text (titles, labels):
+   * the agent loop places it in the prompt inside the data fence.
+   */
+  note?: string;
 }
 
 export interface AgentChoice {
@@ -44,6 +50,35 @@ export interface AgentResponse {
   creditsCost?: number;
   /** The user's credit balance after this turn was charged. */
   creditsBalance?: number;
+  /**
+   * Set when the turn stopped early at its limit (credits, steps or time)
+   * instead of finishing; any changes made before the stop were kept.
+   */
+  stopReason?: "budget" | "time";
+  /**
+   * Server-only: compact, id-bearing note of what changed, stored with the
+   * reply so follow-ups can refer back. Stripped before reaching the client.
+   */
+  changeNote?: string;
+}
+
+/** Undo state of a stored agent change, as the server can honour it now. */
+export type AgentUndoState = "available" | "undone" | "unavailable";
+
+/** One persisted chat message, as the history endpoint returns it. */
+export interface AgentChatHistoryItem {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  modelContent?: string;
+  changed?: boolean;
+  choices?: AgentChoice[];
+  affectedAreas?: AgentArea[];
+  changeId?: string;
+  undo?: AgentUndoState;
+  creditsCost?: number;
+  stopReason?: "budget" | "time";
+  createdAt: string;
 }
 
 export type AgentPhase =
@@ -58,8 +93,19 @@ export type AgentAreaStatus = "queued" | "working" | "complete";
 /** A completed, user-facing milestone in the Living Story (no technical detail). */
 export interface AgentDiscovery {
   id: string;
+  /** Server-side English summary; the interface shows `step` instead when present. */
   title: string;
   detail?: string;
+  /** What the step did, as data the client turns into a translated sentence. */
+  step?: AgentStepInfo;
+}
+
+/** The machine-readable side of one agent step (see lib/ai/agent-steps.ts). */
+export interface AgentStepInfo {
+  tool: string;
+  ok?: boolean;
+  /** For apply_ops: the distinct kinds of change in the batch ("add_page", ...). */
+  ops?: string[];
 }
 
 export type AgentStreamEvent =
@@ -105,4 +151,16 @@ export type AgentStreamEvent =
   | {
       type: "error";
       message: string;
+      /**
+       * Machine-readable reason. "insufficient_credits" and "stale_workspace"
+       * are refusals before any model ran (nothing was charged).
+       * "workspace_conflict": the work was done but overlaps edits saved
+       * during the task, so it was not applied (and not charged).
+       */
+      code?:
+        | "insufficient_credits"
+        | "stale_workspace"
+        | "workspace_conflict"
+        | "rate_limited"
+        | "failed";
     };

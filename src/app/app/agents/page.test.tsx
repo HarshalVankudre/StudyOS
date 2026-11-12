@@ -35,34 +35,42 @@ vi.mock("./TimezoneInput", () => ({
 vi.mock("./actions", () => ({
   runDailyStudyAgentAction: vi.fn(),
   saveDailyStudyAgentConfigAction: vi.fn(),
-  toggleDailyStudyItemAction: vi.fn(),
 }));
+vi.mock("@/components/today/TodayPlan", () => ({
+  TodayPlan: ({ plan, variant }: { plan: { items: { title: string }[] } | null; variant: string }) => (
+    <div data-testid="today-plan" data-variant={variant}>
+      {plan?.items.map((item) => <p key={item.title}>{item.title}</p>)}
+    </div>
+  ),
+}));
+vi.mock("@/components/ui/sonner", () => ({ Toaster: () => null }));
 
 import AgentCenterPage from "./page";
 
 describe("Agent Center page", () => {
   beforeEach(() => {
-    mocks.getI18n.mockResolvedValue({ dict: en, locale: "en", t: fmt });
+    mocks.getI18n.mockResolvedValue({ dict: en, locale: "en", t: fmt, dir: "ltr" });
     mocks.getAgentCenterSnapshot.mockResolvedValue({
       config: { enabled: true, dailyMinutes: 60, timeZone: "Europe/Berlin" },
       plan: {
         id: "plan-1",
         localDate: "2026-07-11",
         timeZone: "Europe/Berlin",
-        summary: "One focused session.",
         sourceCount: 2,
         candidateCount: 4,
-        generatedAt: new Date("2026-07-11T08:00:00.000Z"),
+        generatedAt: "2026-07-11T08:00:00.000Z",
+        details: { budgetMinutes: 60, workload: null, exams: [], progress: {} },
         items: [
           {
             id: "deadline:ws-1:assignments:essay",
             kind: "deadline",
+            mode: "finish",
             title: "Essay draft",
-            source: "Semester HQ · Assignments",
-            reason: "Due tomorrow — make visible progress today.",
-            workspaceId: "ws-1",
-            href: "/app/ws-1",
-            durationMinutes: 45,
+            workspaceName: "Semester HQ",
+            section: "Assignments",
+            target: { workspaceId: "ws-1", databaseId: "assignments", rowId: "essay" },
+            minutes: 45,
+            reason: { code: "due_tomorrow", days: 1 },
             dueDate: "2026-07-12",
             completed: false,
           },
@@ -73,30 +81,35 @@ describe("Agent Center page", () => {
           id: "run-1",
           trigger: "auto",
           status: "completed",
-          summary: "One focused session.",
-          error: null,
+          result: { v: 2, items: 3, minutes: 75, workspaces: 1 },
           startedAt: new Date("2026-07-11T08:00:00.000Z"),
           completedAt: new Date("2026-07-11T08:00:01.000Z"),
+        },
+        {
+          id: "run-0",
+          trigger: "manual",
+          status: "completed",
+          result: null,
+          startedAt: new Date("2026-07-10T08:00:00.000Z"),
+          completedAt: new Date("2026-07-10T08:00:01.000Z"),
         },
       ],
     });
   });
 
-  it("renders the plan, controls, boundaries, and transparent activity", async () => {
+  it("renders today's plan, settings, honest boundaries and localized activity", async () => {
     render(await AgentCenterPage());
 
-    expect(
-      screen.getByRole("heading", { name: en.agentCenter.title }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: en.agentCenter.title })).toBeInTheDocument();
     expect(screen.getByText(en.agentCenter.enabled)).toBeInTheDocument();
+    expect(screen.getByTestId("today-plan")).toHaveAttribute("data-variant", "center");
     expect(screen.getByText("Essay draft")).toBeInTheDocument();
-    expect(screen.getByText("Due tomorrow — make visible progress today.")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /open workspace/i })).toHaveAttribute(
-      "href",
-      "/app/ws-1",
-    );
-    expect(screen.getByText(en.agentCenter.writesBody)).toBeInTheDocument();
+    expect(screen.getByText(en.today.agentWrites)).toBeInTheDocument();
     expect(screen.getByText(en.agentCenter.autoTrigger)).toBeInTheDocument();
+    // Version 2 runs are summarized in the reader's language; older runs
+    // (stored as English sentences) show their status instead.
+    expect(screen.getByText("Planned 3 items · 1 h 15 min")).toBeInTheDocument();
     expect(screen.getAllByText(en.agentCenter.completedStatus)).not.toHaveLength(0);
+    expect(document.getElementById("settings")).not.toBeNull();
   });
 });

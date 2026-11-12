@@ -13,7 +13,7 @@ import { useLiveBalance } from "@/lib/credits-bus";
  * credit-pricing research calls essential. Links to buy more.
  */
 export function CreditMeter({ initial }: { initial: number }) {
-  const { dict, t, locale } = useI18n();
+  const { dict, plural } = useI18n();
   const balance = useLiveBalance(initial);
   const low = isLowBalance(balance);
 
@@ -33,7 +33,7 @@ export function CreditMeter({ initial }: { initial: number }) {
       >
         ●
       </span>
-      {t(dict.credits.amount, { count: balance.toLocaleString(locale) })}
+      {plural(dict.counts.credits, balance)}
       {low && (
         <span className="rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[10px] uppercase tracking-wide">
           {dict.credits.low}

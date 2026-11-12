@@ -2,30 +2,50 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@clerk/nextjs/server";
+import { getCreditBalance } from "@/lib/credits";
+import { getUserPlan } from "@/lib/billing";
+import { modelForPlan } from "@/lib/ai/plans";
 import {
   CREDIT_PACK_PRICE_USD,
   CREDIT_PACK_SIZE,
-  getCreditBalance,
-} from "@/lib/credits";
-import { estimatedEdits, estimatedGenerations } from "@/lib/credits-info";
+  creditExamples,
+  planQuotes,
+} from "@/lib/price-list";
 import { getI18n } from "@/lib/i18n/server";
+import { formatUsd } from "@/lib/plan-pricing";
 import { buyCreditsAction } from "../billing-actions";
+import { isBillingConfigured } from "@/lib/stripe";
+import { ComingSoon } from "@/components/account/ComingSoon";
+import {
+  BillingNotice,
+  parseBillingNotice,
+} from "@/components/account/BillingNotice";
 
 export async function generateMetadata(): Promise<Metadata> {
   const { dict } = await getI18n();
   return { title: dict.credits.metaTitle };
 }
 
-export default async function BuyCreditsPage() {
+export default async function BuyCreditsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ billing?: string | string[] }>;
+}) {
+  const billingNotice = parseBillingNotice((await searchParams).billing);
   const { userId } = await auth();
   if (!userId) redirect("/sign-in");
 
-  const [credits, { dict, t, locale }] = await Promise.all([
+  const [credits, { dict, t, locale, plural }] = await Promise.all([
     getCreditBalance(userId),
     getI18n(),
   ]);
   const C = dict.credits;
+  // What a pack buys at the prices this student is charged (lib/price-list.ts).
+  const plan = await getUserPlan().catch(() => "free" as const);
+  const pack = creditExamples(CREDIT_PACK_SIZE, planQuotes(modelForPlan(plan), plan));
   const P = dict.pricing.credits;
+  // Without payments switched on, the pack is shown as coming soon.
+  const billing = isBillingConfigured();
 
   return (
     <div className="min-h-screen bg-paper text-ink antialiased">
@@ -50,16 +70,24 @@ export default async function BuyCreditsPage() {
       <main className="mx-auto max-w-2xl px-6 py-16">
         <div className="text-center">
           <h1 className="font-display text-4xl font-extrabold tracking-tight">
-            {C.buy}
+            {billing ? C.buy : C.label}
           </h1>
-          <p className="mx-auto mt-3 max-w-md text-ink-soft">{C.pageIntro}</p>
+          <p className="mx-auto mt-3 max-w-md text-ink-soft">
+            {billing ? C.pageIntro : dict.spend.purchasesComingSoon}
+          </p>
           <p className="mt-5 inline-flex items-center gap-2 rounded-full bg-ink/5 px-4 py-1.5 text-sm font-semibold text-ink">
             <span className="text-lime-deep" aria-hidden>
               ●
             </span>
-            {t(P.balance, { count: credits.toLocaleString(locale) })}
+            {plural(dict.counts.balance, credits)}
           </p>
         </div>
+
+        <BillingNotice
+          code={billingNotice}
+          messages={dict.billingNotice}
+          className="mx-auto mt-8 max-w-sm"
+        />
 
         {/* Credit pack */}
         <div className="mx-auto mt-10 max-w-sm rounded-2xl border-2 border-lime bg-card p-8 text-center shadow-pop">
@@ -71,31 +99,39 @@ export default async function BuyCreditsPage() {
           </div>
           <p className="text-sm text-ink-soft">{P.unit}</p>
           <div className="mt-4 font-display text-3xl font-bold">
-            ${CREDIT_PACK_PRICE_USD}
+            {formatUsd(CREDIT_PACK_PRICE_USD, locale)}
           </div>
           <p className="mt-2 text-xs text-ink-soft">
             {t(dict.credits.buysApprox, {
-              gens: estimatedGenerations(CREDIT_PACK_SIZE),
-              edits: estimatedEdits(CREDIT_PACK_SIZE),
+              gens: pack.builds.toLocaleString(locale),
+              edits: pack.messages.toLocaleString(locale),
             })}
           </p>
-          <form action={buyCreditsAction} className="mt-6">
-            <button
-              type="submit"
-              className="w-full rounded-lg bg-ink px-5 py-3.5 text-sm font-semibold text-paper transition hover:bg-ink/90"
-            >
-              {t(P.buy, { count: CREDIT_PACK_SIZE.toLocaleString(locale) })}
-            </button>
-          </form>
-          <p className="mt-3 text-xs text-ink-soft/70">{C.oneTimeExpire}</p>
+          {billing ? (
+            <>
+              <form action={buyCreditsAction} className="mt-6">
+                <button
+                  type="submit"
+                  className="w-full rounded-lg bg-ink px-5 py-3.5 text-sm font-semibold text-paper transition hover:bg-ink/90"
+                >
+                  {t(P.buy, { count: CREDIT_PACK_SIZE.toLocaleString(locale) })}
+                </button>
+              </form>
+              <p className="mt-3 text-xs text-ink-soft/70">{C.oneTimeExpire}</p>
+            </>
+          ) : (
+            <ComingSoon messages={dict.spend} className="mt-6" />
+          )}
         </div>
 
-        <p className="mt-8 text-center text-sm text-ink-soft">
-          {C.wantMore}{" "}
-          <Link href="/pricing" className="font-semibold text-ink underline">
-            {dict.settings.comparePlans}
-          </Link>
-        </p>
+        {billing && (
+          <p className="mt-8 text-center text-sm text-ink-soft">
+            {C.wantMore}{" "}
+            <Link href="/pricing" className="font-semibold text-ink underline">
+              {dict.settings.comparePlans}
+            </Link>
+          </p>
+        )}
       </main>
     </div>
   );

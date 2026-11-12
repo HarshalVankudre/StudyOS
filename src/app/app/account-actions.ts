@@ -2,24 +2,34 @@
 
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import { isPro } from "@/lib/billing";
+import {
+  isPro,
+  markAccountDeleted,
+  stopBillingForDeletedAccount,
+  unmarkAccountDeleted,
+} from "@/lib/billing";
 import { getCreditBalance } from "@/lib/credits";
-import { prisma } from "@/lib/db";
-import { stripe } from "@/lib/stripe";
-import { gcsAssetStore } from "@/lib/assets/storage";
+import { isBillingConfigured } from "@/lib/stripe";
+import { eraseUserData } from "@/lib/account/erase-user-data";
 
-/** Lightweight plan + credit snapshot for the sidebar profile menu. */
+/**
+ * Lightweight plan + credit snapshot for the sidebar profile menu. `billing`
+ * says whether payments are switched on here: without it the menu offers no
+ * purchase links.
+ */
 export async function getAccountSummaryAction(): Promise<{
   pro: boolean;
   credits: number;
+  billing: boolean;
 }> {
+  const billing = isBillingConfigured();
   const { userId } = await auth();
-  if (!userId) return { pro: false, credits: 0 };
+  if (!userId) return { pro: false, credits: 0, billing };
   const [pro, credits] = await Promise.all([
     isPro(),
     getCreditBalance(userId),
   ]);
-  return { pro, credits };
+  return { pro, credits, billing };
 }
 
 /**
@@ -32,52 +42,22 @@ export async function deleteAccountAction(): Promise<{ error: string } | void> {
   const { userId } = await auth();
   if (!userId) redirect("/sign-in");
 
-  // Stop billing first so nothing renews. Crucially, only proceed to purge the
-  // local record if we KNOW the subscription is gone (already canceled /
-  // missing). On a transient Stripe failure the subscription may still be
-  // active and charging the card — deleting the row that maps to it would
-  // orphan live billing with no way to reconcile. Abort instead; the user can
-  // retry.
-  const sub = await prisma.subscription.findUnique({ where: { userId } });
-  if (sub?.stripeSubscriptionId) {
-    try {
-      await stripe.subscriptions.cancel(sub.stripeSubscriptionId);
-    } catch (err) {
-      if (!isSubscriptionAlreadyGone(err)) {
-        return { error: "billing_cancel_failed" };
-      }
-      // Otherwise the subscription is already canceled/missing — safe to purge.
-    }
+  // Tombstone first: from here on no credit account can be recreated and no
+  // credits granted (a pack paid now is refunded), so nothing slips in while
+  // the data is erased. It also queues the durable cancellation job with the
+  // Stripe ids captured before they are erased.
+  await markAccountDeleted(userId);
+
+  // Stop billing now: every subscription the user has on Stripe (not just
+  // the tracked one), plus open checkouts. If Stripe cannot be reached, a
+  // subscription may still be live: withdraw the tombstone, keep everything,
+  // and let the user retry (they are still signed in to do so).
+  if (!(await stopBillingForDeletedAccount(userId))) {
+    await unmarkAccountDeleted(userId);
+    return { error: "billing_cancel_failed" };
   }
 
-  // Asset bytes live in object storage; collect keys before rows disappear.
-  const assets = await prisma.asset.findMany({
-    where: { ownerId: userId },
-    select: { storageKey: true },
-  });
-  if (assets.length > 0) {
-    try {
-      const store = gcsAssetStore();
-      await Promise.allSettled(assets.map((a) => store.delete(a.storageKey)));
-    } catch {
-      // Storage not configured (e.g. local dev) — rows still go.
-    }
-  }
-
-  await prisma.$transaction([
-    prisma.workspace.deleteMany({ where: { ownerId: userId } }),
-    prisma.workspaceChange.deleteMany({ where: { ownerId: userId } }),
-    prisma.agentTask.deleteMany({ where: { userId } }),
-    prisma.dailyStudyPlan.deleteMany({ where: { userId } }),
-    prisma.agentRun.deleteMany({ where: { userId } }),
-    prisma.dailyStudyAgentConfig.deleteMany({ where: { userId } }),
-    prisma.asset.deleteMany({ where: { ownerId: userId } }),
-    prisma.creditLedger.deleteMany({ where: { userId } }),
-    prisma.creditAccount.deleteMany({ where: { userId } }),
-    prisma.usageEvent.deleteMany({ where: { userId } }),
-    prisma.calendarToken.deleteMany({ where: { userId } }),
-    prisma.subscription.deleteMany({ where: { userId } }),
-  ]);
+  await eraseUserData(userId);
 
   try {
     const client = await clerkClient();
@@ -87,16 +67,4 @@ export async function deleteAccountAction(): Promise<{ error: string } | void> {
   }
 
   redirect("/");
-}
-
-/**
- * True when a Stripe cancel error means the subscription is already gone
- * (canceled or never existed) — a non-transient client (4xx) error we can
- * safely treat as "billing stopped". Transient errors (network, 5xx, rate
- * limit) return false so the caller aborts rather than orphaning live billing.
- */
-function isSubscriptionAlreadyGone(err: unknown): boolean {
-  if (typeof err !== "object" || err === null) return false;
-  const e = err as { code?: string; type?: string };
-  return e.code === "resource_missing" || e.type === "StripeInvalidRequestError";
 }

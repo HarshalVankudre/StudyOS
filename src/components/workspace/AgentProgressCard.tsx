@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/lib/i18n/client";
 import {
   PHASE_ORDER,
   advanceAnimatedProgress,
   type AgentActivityState,
 } from "@/lib/ai/progress";
+import { describeLiveStep } from "@/lib/ai/agent-steps";
 
 export function AgentProgressCard({
   activity,
@@ -21,13 +22,6 @@ export function AgentProgressCard({
 }) {
   const { dict } = useI18n();
   const [animatedProgress, setAnimatedProgress] = useState(activity.progress);
-  const thinkingRef = useRef<HTMLDivElement>(null);
-
-  // Keep the streamed reasoning pinned to its latest line as it grows.
-  useEffect(() => {
-    const el = thinkingRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [activity.thinking]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -43,6 +37,11 @@ export function AgentProgressCard({
   }, [activity.phase, activity.progress]);
 
   const activeIndex = PHASE_ORDER.indexOf(activity.phase);
+  // Finished steps as plain sentences; a repeat of the line before is dropped
+  // (three "Reading your workspace" in a row say nothing new).
+  const steps = activity.discoveries
+    .map((d) => ({ id: d.id, text: describeLiveStep(d.step, dict.agentChat.liveSteps) }))
+    .filter((step, index, list) => index === 0 || list[index - 1].text !== step.text);
   // Show whichever is higher: the smoothly-animated value or the latest
   // confirmed progress, so a real jump appears immediately without waiting for
   // the next animation tick. Deriving it (rather than syncing in an effect)
@@ -113,52 +112,31 @@ export function AgentProgressCard({
       </div>
 
       <div className="space-y-3 p-3">
-        {activity.thinking && (
-          <div className="rounded-lg border border-line bg-hover/50 p-2.5">
-            <div className="mb-1.5 flex items-center gap-1.5">
-              <span className="ai-orb h-1.5 w-1.5 rounded-full bg-lime-on" aria-hidden />
-              <span className="font-display text-[11px] font-semibold text-ink-soft">
-                {dict.agentChat.thinking}
-              </span>
-            </div>
-            <div
-              ref={thinkingRef}
-              className="max-h-28 overflow-y-auto whitespace-pre-wrap break-words font-mono text-[10.5px] leading-relaxed text-ink-soft/85"
-            >
-              {activity.thinking}
-            </div>
-          </div>
-        )}
+        {/* The model’s raw reasoning is never shown: only the plan’s
+            one-line goal and friendly descriptions of each finished step. */}
         {activity.plan && (
-          <p className="px-3 pt-2 text-xs font-medium text-ink">{activity.plan.summary}</p>
+          <p dir="auto" className="px-3 pt-2 text-xs font-medium text-ink">{activity.plan.summary}</p>
         )}
         {(activity.areas ?? []).length > 0 && (
           <div className="flex flex-wrap gap-1.5 px-3 pt-1">
             {(activity.areas ?? []).map((area) => (
               <span key={area.id} className="rounded-full bg-hover px-2 py-0.5 text-[10px] text-ink-soft">
-                {dict.agentChat.areaStatus[area.status]} · {area.label}
+                {dict.agentChat.areaStatus[area.status]} · <bdi>{area.label}</bdi>
               </span>
             ))}
           </div>
         )}
-        {activity.discoveries.map((discovery) => (
+        {steps.map((step) => (
           <div
-            key={discovery.id}
+            key={step.id}
             className="flex gap-2.5 rounded-lg bg-hover/70 p-2.5"
           >
             <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-lime/35 text-xs">
               ✓
             </span>
-            <div>
-              <p className="text-xs font-semibold text-ink">
-                {discovery.title}
-              </p>
-              {discovery.detail && (
-                <p className="mt-0.5 text-[11px] leading-relaxed text-ink-soft">
-                  {discovery.detail}
-                </p>
-              )}
-            </div>
+            <p className="self-center text-xs font-semibold text-ink">
+              {step.text}
+            </p>
           </div>
         ))}
 

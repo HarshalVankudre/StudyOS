@@ -1,4 +1,9 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+// @vitest-environment node
+import { readFileSync } from "node:fs";
+import https from "node:https";
+import type { AddressInfo } from "node:net";
+import path from "node:path";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ lookup: vi.fn() }));
 vi.mock("node:dns/promises", () => ({
@@ -8,6 +13,7 @@ vi.mock("node:dns/promises", () => ({
 
 import {
   FetchDeniedError,
+  FetchTooLargeError,
   assertResolvedIpsSafe,
   assertUrlAllowed,
   controlledFetch,
@@ -87,52 +93,134 @@ describe("controlled fetch SSRF defenses", () => {
     await expect(assertResolvedIpsSafe("example.com")).resolves.toBeUndefined();
   });
 
-  it("never calls fetch for a denied URL", async () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-    await expect(
-      controlledFetch("http://evil.com", { allowlist: ["example.com"] }),
-    ).rejects.toBeInstanceOf(FetchDeniedError);
-    expect(fetchMock).not.toHaveBeenCalled();
+
+  it("denies anything that is not a valid IP address (review: 'not-an-ip' passed)", () => {
+    for (const value of ["not-an-ip", "", "localhost", "999.1.1.1", "1.2.3", "::ffff:127.0.0.01", "0127.0.0.1", "[::1"]) {
+      expect(isDeniedIp(value), value).toBe(true);
+    }
   });
 
-  it("never calls fetch when DNS resolves to a denied IP", async () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-    mocks.lookup.mockResolvedValue([{ address: "169.254.169.254", family: 4 }]);
-    await expect(
-      controlledFetch("https://docs.example.com/x", { allowlist: ["example.com"] }),
-    ).rejects.toBeInstanceOf(FetchDeniedError);
-    expect(fetchMock).not.toHaveBeenCalled();
+  it("rejects credentials in the URL and any port but 443", () => {
+    const allow = ["example.com"];
+    expect(() => assertUrlAllowed("https://user:pass@example.com/", allow)).toThrow(FetchDeniedError);
+    expect(() => assertUrlAllowed("https://user@example.com/", allow)).toThrow(FetchDeniedError);
+    expect(() => assertUrlAllowed("https://example.com:8443/", allow)).toThrow(FetchDeniedError);
+    expect(() => assertUrlAllowed("https://example.com:22/", allow)).toThrow(FetchDeniedError);
+    expect(() => assertUrlAllowed("https://example.com:443/", allow)).not.toThrow();
+  });
+});
+
+/**
+ * The transport against a real local HTTPS server (self-signed test
+ * certificate, faked DNS). The server's loopback address stands in for a
+ * public host; every other address follows the real policy. Nothing here
+ * touches the network.
+ */
+describe("controlled fetch transport (pinned DNS)", () => {
+  const fixtures = path.join(process.cwd(), "src/lib/feeds/fixtures");
+  const key = readFileSync(path.join(fixtures, "test-server.key"));
+  const cert = readFileSync(path.join(fixtures, "test-server.crt"));
+  let port = 0;
+  const hits: string[] = [];
+  let handler: (req: { url?: string }, res: import("node:http").ServerResponse) => void = (_q, res) => res.end("hello");
+  const server = https.createServer({ key, cert }, (req, res) => {
+    hits.push(req.url ?? "");
+    handler(req, res);
+  });
+  beforeAll(async () => {
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    port = (server.address() as AddressInfo).port;
+  });
+  afterAll(async () => {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+  beforeEach(() => {
+    hits.length = 0;
+    handler = (_q, res) => res.end("hello");
   });
 
-  it("forwards caller cancellation to fetch", async () => {
-    mocks.lookup.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
-    const controller = new AbortController();
-    // Mirror the real fetch contract: reject immediately if the passed signal is
-    // already aborted, otherwise reject when it aborts. (The DNS check is awaited
-    // before fetch, so caller cancellation can land before fetch is even called.)
-    const fetchMock = vi.fn(
-      async (_url: URL, init?: RequestInit) =>
-        new Promise((_resolve, reject) => {
-          const signal = init?.signal;
-          if (signal?.aborted) {
-            reject(signal.reason);
-            return;
-          }
-          signal?.addEventListener("abort", () => reject(signal.reason), {
-            once: true,
-          });
-        }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    const pending = controlledFetch("https://example.com", {
-      allowlist: ["example.com"],
-      signal: controller.signal,
+  const hooks = (answers: (host: string, call: number) => string) => {
+    let calls = 0;
+    const resolve = vi.fn(async (host: string) => {
+      calls += 1;
+      const address = answers(host, calls);
+      return [{ address, family: address.includes(":") ? 6 : 4 }];
     });
-    controller.abort(new Error("cancelled"));
+    return {
+      resolve,
+      ca: cert,
+      allowedPorts: [port],
+      isAllowedAddress: (ip: string) => ip === "127.0.0.1" || !isDeniedIp(ip),
+    };
+  };
+  const url = (p = "/page") => `https://lms.university-test.edu:${port}${p}`;
 
+  it("reads an allowlisted page, resolving each hop exactly once", async () => {
+    const opts = hooks(() => "127.0.0.1");
+    const result = await controlledFetch(url(), { allowlist: ["university-test.edu"], ...opts });
+    expect(result.text).toBe("hello");
+    expect(result.status).toBe(200);
+    expect(opts.resolve).toHaveBeenCalledTimes(1);
+  });
+
+  it("connects only to the checked address: a private DNS answer never reaches a socket", async () => {
+    const opts = hooks(() => "169.254.169.254");
+    await expect(controlledFetch(url(), { allowlist: ["university-test.edu"], ...opts })).rejects.toBeInstanceOf(FetchDeniedError);
+    expect(hits).toEqual([]);
+  });
+
+  it("re-checks DNS on every redirect hop (rebinding between hops is refused)", async () => {
+    handler = (req, res) => {
+      if (req.url === "/start") {
+        res.writeHead(302, { location: "/next" });
+        res.end();
+      } else res.end("landed");
+    };
+    // First lookup public, second private: the second hop must not connect.
+    const opts = hooks((_h, call) => (call === 1 ? "127.0.0.1" : "10.0.0.1"));
+    await expect(controlledFetch(url("/start"), { allowlist: ["university-test.edu"], ...opts })).rejects.toBeInstanceOf(
+      FetchDeniedError,
+    );
+    expect(hits).toEqual(["/start"]);
+  });
+
+  it("rejects a redirect to userinfo or another port before connecting", async () => {
+    for (const location of [`https://u:p@lms.university-test.edu:${port}/x`, "https://lms.university-test.edu:8443/x"]) {
+      hits.length = 0;
+      handler = (_q, res) => {
+        res.writeHead(302, { location });
+        res.end();
+      };
+      const opts = hooks(() => "127.0.0.1");
+      await expect(controlledFetch(url("/start"), { allowlist: ["university-test.edu"], ...opts })).rejects.toBeInstanceOf(
+        FetchDeniedError,
+      );
+      expect(hits).toEqual(["/start"]);
+    }
+  });
+
+  it("caps the response size", async () => {
+    handler = (_q, res) => res.end(Buffer.alloc(5_000, 65));
+    const opts = hooks(() => "127.0.0.1");
+    await expect(
+      controlledFetch(url(), { allowlist: ["university-test.edu"], maxBytes: 1_000, ...opts }),
+    ).rejects.toBeInstanceOf(FetchTooLargeError);
+  });
+
+  it("forwards caller cancellation", async () => {
+    handler = () => {}; // never answers
+    const opts = hooks(() => "127.0.0.1");
+    const controller = new AbortController();
+    const pending = controlledFetch(url(), { allowlist: ["university-test.edu"], signal: controller.signal, ...opts });
+    setTimeout(() => controller.abort(new Error("cancelled")), 50);
     await expect(pending).rejects.toThrow("cancelled");
+  });
+
+  it("uses the system resolver through the same pinned check by default", async () => {
+    mocks.lookup.mockResolvedValue([{ address: "10.0.0.5", family: 4 }]);
+    await expect(controlledFetch("https://docs.example.com/x", { allowlist: ["example.com"] })).rejects.toBeInstanceOf(
+      FetchDeniedError,
+    );
   });
 });

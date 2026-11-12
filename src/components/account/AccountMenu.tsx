@@ -2,13 +2,17 @@
 
 import Link from "next/link";
 import { useClerk, useUser } from "@clerk/nextjs";
+import { useSignOutWithCleanup } from "@/components/account/SignOutButton";
 import { useEffect, useRef, useState } from "react";
 import { getAccountSummaryAction } from "@/app/app/account-actions";
 import { useI18n } from "@/lib/i18n/client";
+import { balanceReadStarted, reportCreditsBalance, useLiveBalance } from "@/lib/credits-bus";
 
 interface AccountSummary {
   pro: boolean;
   credits: number;
+  /** Payments are switched on (absent from older servers: treated as on). */
+  billing?: boolean;
 }
 
 /**
@@ -25,17 +29,26 @@ export function AccountMenu({
   variant?: "sidebar" | "header";
 }) {
   const { user } = useUser();
-  const { openUserProfile, signOut } = useClerk();
-  const { dict, t, locale, dir } = useI18n();
+  const { openUserProfile } = useClerk();
+  // Turns this device's notifications off first (shared devices).
+  const { signOut } = useSignOutWithCleanup("/");
+  const { dict, t, locale, dir, plural } = useI18n();
   const [open, setOpen] = useState(false);
   const [summary, setSummary] = useState<AccountSummary | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
+  // Plan and balance, re-read whenever the menu opens. The balance shown is
+  // the shared live one (lib/credits-bus), so it always matches the header.
   useEffect(() => {
+    const startedAt = balanceReadStarted();
     getAccountSummaryAction()
-      .then(setSummary)
+      .then((next) => {
+        setSummary(next);
+        reportCreditsBalance(next.credits, startedAt);
+      })
       .catch(() => setSummary(null));
   }, [open]);
+  const credits = useLiveBalance(summary?.credits);
 
   // Close on outside click or Escape.
   useEffect(() => {
@@ -58,6 +71,9 @@ export function AccountMenu({
   const name = user?.fullName || email || dict.account.fallbackName;
   const initial = (user?.firstName || name || "?").charAt(0).toUpperCase();
   const pro = summary?.pro ?? false;
+  // Purchase links only once the server said payments are on (never a
+  // "Buy credits" that ends in "payments aren't available").
+  const billing = summary ? summary.billing !== false : false;
   const isHeader = variant === "header";
 
   const menu = (
@@ -81,10 +97,8 @@ export function AccountMenu({
             {pro ? dict.account.pro : dict.account.free}
           </span>
           <span className="text-xs text-ink-soft">
-            {summary
-              ? t(dict.credits.amount, {
-                  count: summary.credits.toLocaleString(locale),
-                })
+            {credits !== undefined
+              ? plural(dict.counts.credits, credits)
               : "…"}
           </span>
         </div>
@@ -105,18 +119,22 @@ export function AccountMenu({
           href="/app/agents"
           onNavigate={() => setOpen(false)}
         />
-        <MenuLink
-          icon="💳"
-          label={dict.account.subscriptionPayments}
-          href="/app/settings#billing"
-          onNavigate={() => setOpen(false)}
-        />
-        <MenuLink
-          icon="✦"
-          label={dict.account.buyCredits}
-          href="/app/credits"
-          onNavigate={() => setOpen(false)}
-        />
+        {billing && (
+          <>
+            <MenuLink
+              icon="💳"
+              label={dict.account.subscriptionPayments}
+              href="/app/settings#billing"
+              onNavigate={() => setOpen(false)}
+            />
+            <MenuLink
+              icon="✦"
+              label={dict.account.buyCredits}
+              href="/app/credits"
+              onNavigate={() => setOpen(false)}
+            />
+          </>
+        )}
         <MenuLink
           icon="⚙"
           label={dict.account.settings}
@@ -130,7 +148,7 @@ export function AccountMenu({
           icon="⎋"
           label={dict.account.signOut}
           danger
-          onClick={() => signOut({ redirectUrl: "/" })}
+          onClick={() => void signOut()}
         />
       </div>
     </div>
@@ -176,9 +194,9 @@ export function AccountMenu({
             {name}
           </span>
           <span className="block truncate text-xs text-ink-soft">
-            {summary
+            {summary && credits !== undefined
               ? t(dict.account.creditsAndPlan, {
-                  credits: summary.credits.toLocaleString(locale),
+                  credits: credits.toLocaleString(locale),
                   plan: pro ? dict.account.pro : dict.account.free,
                 })
               : email || dict.account.viewProfile}

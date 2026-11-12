@@ -66,14 +66,43 @@ function renderSource(source: string) {
   }
 }
 
+const post = (m: unknown) => window.parent.postMessage(m, "*");
+
+// Handshake. The parent may start listening after this frame has loaded (a
+// slow hydration, a deep link on the dev server), so a single "ready" can be
+// lost. The frame announces "ready" again on a backoff until a "render"
+// arrives (the acknowledgement), and answers the parent's "hello" (sent when
+// it starts listening) at once. Only the parent window is ever listened to.
+let acknowledged = false;
+let lastSource: string | null = null;
+let retry: ReturnType<typeof setTimeout> | null = null;
+const RETRY_MS = [100, 200, 400, 800, 1600, 3200];
+function announce(attempt = 0) {
+  if (acknowledged) return;
+  post({ type: "ready" });
+  const wait = RETRY_MS[Math.min(attempt, RETRY_MS.length - 1)];
+  // Keep trying for about a minute, then stop: a parent that never answers is gone.
+  if (attempt < 25) retry = setTimeout(() => announce(attempt + 1), wait);
+}
+
 window.addEventListener("message", (ev) => {
   if (ev.source !== window.parent) return;
   const d = ev.data as { type?: string; source?: unknown };
-  if (d?.type === "render" && typeof d.source === "string") renderSource(d.source);
+  if (d?.type === "render" && typeof d.source === "string") {
+    acknowledged = true;
+    if (retry) clearTimeout(retry);
+    // The same component again (a repeated handshake): keep it and its state.
+    if (d.source === lastSource) return;
+    lastSource = d.source;
+    renderSource(d.source);
+  } else if (d?.type === "hello") {
+    // The parent is listening now. Re-announce even after a render, so a
+    // parent that remounted gets its handshake.
+    post({ type: "ready" });
+  }
 });
 
-const post = (m: unknown) => window.parent.postMessage(m, "*");
 new ResizeObserver(() =>
   post({ type: "height", px: document.documentElement.scrollHeight }),
 ).observe(document.documentElement);
-post({ type: "ready" });
+announce();

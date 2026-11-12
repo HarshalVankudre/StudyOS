@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import Link from "next/link";
 import { useI18n } from "@/lib/i18n/client";
+import { sendClientErrorReport } from "@/lib/ops/client-report";
 
 /**
  * Route-level error boundary: friendly, localized, and recoverable. Rendered
@@ -20,6 +21,7 @@ export default function ErrorPage({
 
   useEffect(() => {
     console.error("[StudyOS] route error:", error);
+    sendClientErrorReport(error, "route");
   }, [error]);
 
   return (

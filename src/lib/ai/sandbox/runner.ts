@@ -21,4 +21,14 @@ export interface SandboxRunResult {
 
 export interface SandboxRunner {
   run(spec: SandboxRunSpec, signal?: AbortSignal): Promise<SandboxRunResult>;
+  /**
+   * False when renders cannot work right now (the sandbox image lacks the
+   * offline toolchain): the tool then refuses before reserving anything.
+   */
+  available?(): boolean;
+}
+
+/** Thrown by a runner whose sandbox image lacks the offline render toolchain. */
+export function isImageOutdatedError(error: unknown): boolean {
+  return error instanceof Error && error.name === "SandboxImageOutdatedError";
 }

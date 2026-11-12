@@ -3,22 +3,29 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "@/lib/i18n/client";
+import { useLiveBalance } from "@/lib/credits-bus";
 
 /**
  * The credit-balance chip in the app header. Clicking it opens a small popover
  * with the balance and a "Buy credits" button that goes to the dedicated
- * buy-credits page (separate from the upgrade/pricing page).
+ * buy-credits page (separate from the upgrade/pricing page). Shows the shared
+ * live balance (lib/credits-bus), the same one every other surface shows;
+ * `credits` is the server-rendered value it starts from.
  */
 export function CreditChip({
-  credits,
+  credits: initial,
   locale,
+  billing = true,
 }: {
   credits: number;
   locale?: string;
+  /** Payments are switched on; without them the popover offers no "Buy credits". */
+  billing?: boolean;
 }) {
+  const credits = useLiveBalance(initial);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const { dict, t, dir } = useI18n();
+  const { dict, dir, plural } = useI18n();
 
   useEffect(() => {
     if (!open) return;
@@ -50,7 +57,7 @@ export function CreditChip({
         <span className="text-lime-deep" aria-hidden>
           ●
         </span>
-        {t(dict.credits.amount, { count: label })}
+        {plural(dict.counts.credits, credits)}
       </button>
 
       {open && (
@@ -67,13 +74,15 @@ export function CreditChip({
             {label}
           </p>
           <p className="mt-1 text-xs text-ink-soft">{dict.credits.spentOn}</p>
-          <Link
-            href="/app/credits"
-            onClick={() => setOpen(false)}
-            className="mt-4 block rounded-lg bg-ink px-4 py-2.5 text-center text-sm font-semibold text-paper transition hover:bg-ink/90"
-          >
-            {dict.credits.buy}
-          </Link>
+          {billing && (
+            <Link
+              href="/app/credits"
+              onClick={() => setOpen(false)}
+              className="mt-4 block rounded-lg bg-ink px-4 py-2.5 text-center text-sm font-semibold text-paper transition hover:bg-ink/90"
+            >
+              {dict.credits.buy}
+            </Link>
+          )}
         </div>
       )}
     </div>

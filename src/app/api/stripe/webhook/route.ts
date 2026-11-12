@@ -1,21 +1,38 @@
 import type Stripe from "stripe";
-import { setSubscription } from "@/lib/billing";
-import { prisma } from "@/lib/db";
 import {
-  CREDIT_PACK_SIZE,
-  grantCredits,
-  PRO_MONTHLY_CREDITS,
-} from "@/lib/credits";
+  applyLiveSubscription,
+  grantCreditPack,
+  grantProInvoice,
+  recordBillingEvent,
+  syncSubscription,
+  userForCustomer,
+} from "@/lib/billing";
+import { prisma } from "@/lib/db";
+import { reportError } from "@/lib/ops/report-error";
 import { recordFunnelEvent } from "@/lib/usage-limits";
-import { stripe } from "@/lib/stripe";
+import { stripe, stripeId } from "@/lib/stripe";
+import {
+  handleChargeRefunded,
+  handleDisputeClosed,
+  handleDisputeCreated,
+  handleRefundUpdated,
+} from "./reversals";
 
-// Stripe → us. Keeps subscription status in sync (renewals, cancellations)
-// and grants credits. In production, register this URL in the Stripe
-// dashboard with these events enabled:
-//   checkout.session.completed, invoice.paid,
-//   customer.subscription.created/updated/deleted
+// Stripe → us. Keeps subscription status in sync and grants credits only for
+// money received. Register this URL in the Stripe dashboard with these events:
+//   checkout.session.completed, checkout.session.async_payment_succeeded,
+//   invoice.paid,
+//   customer.subscription.created, customer.subscription.updated,
+//   customer.subscription.deleted,
+//   charge.refunded, charge.refund.updated (a refund that failed),
+//   charge.dispute.created, charge.dispute.closed
 // Locally, forward with: stripe listen --forward-to
 // localhost:3000/api/stripe/webhook
+//
+// Every handler is idempotent (Stripe retries and may deliver out of order):
+// subscription status is always re-read from the LIVE subscription, credit
+// grants are keyed in the ledger, and refunds/disputes are keyed by object id.
+// Any thrown error returns 500 so Stripe retries with backoff.
 export async function POST(req: Request) {
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
   const sig = req.headers.get("stripe-signature");
@@ -31,88 +48,140 @@ export async function POST(req: Request) {
     return new Response("Invalid signature", { status: 400 });
   }
 
-  if (event.type === "checkout.session.completed") {
-    const s = event.data.object as Stripe.Checkout.Session;
-    const userId = s.client_reference_id ?? s.metadata?.userId;
-    if (userId && s.mode === "subscription") {
-      // Status only — the Pro credit grant rides on invoice.paid, which fires
-      // for the first invoice AND every renewal (that's what keeps a
-      // subscriber's monthly credits refreshing).
-      await setSubscription(userId, {
-        status: "active",
-        stripeCustomerId: typeof s.customer === "string" ? s.customer : null,
-        stripeSubscriptionId:
-          typeof s.subscription === "string" ? s.subscription : null,
-      });
-      recordFunnelEvent(userId, "purchase_pro");
-    } else if (userId && s.mode === "payment" && s.metadata?.kind === "credits") {
-      const amount = Number(s.metadata.credits) || CREDIT_PACK_SIZE;
-      await grantCredits(userId, amount, "credit_purchase", `credit_purchase:${s.id}`);
-      recordFunnelEvent(userId, "purchase_credits");
-    }
-  } else if (event.type === "invoice.paid") {
-    const inv = event.data.object as Stripe.Invoice;
-    // Basil (2025-03-31)+ nests this under invoice.parent.subscription_details;
-    // older webhook API versions put it at the top level (invoice.subscription
-    // / invoice.subscription_details). Read both so a pre-Basil webhook version
-    // can't silently grant a paying Pro user 0 credits.
-    const legacy = inv as unknown as {
-      subscription?: string | { id: string };
-      subscription_details?: { metadata?: { userId?: string } };
-    };
-    const details = inv.parent?.subscription_details;
-    const rawSub = details?.subscription ?? legacy.subscription;
-    const metaUserId =
-      details?.metadata?.userId ??
-      legacy.subscription_details?.metadata?.userId ??
-      null;
-    if (rawSub) {
-      const subId = typeof rawSub === "string" ? rawSub : rawSub?.id;
-      let userId = metaUserId;
-      if (!userId && subId) {
-        const row = await prisma.subscription.findFirst({
-          where: { stripeSubscriptionId: subId },
-        });
-        userId = row?.userId ?? null;
+  try {
+    return await handleEvent(event);
+  } catch (err) {
+    reportError(err, { source: "api", route: "/api/stripe/webhook", method: "POST", eventType: event.type });
+    return new Response("Handler failed", { status: 500 });
+  }
+}
+
+const ok = () => new Response("ok", { status: 200 });
+
+async function handleEvent(event: Stripe.Event): Promise<Response> {
+  switch (event.type) {
+    case "checkout.session.completed":
+    case "checkout.session.async_payment_succeeded": {
+      const s = event.data.object;
+      const userId = s.client_reference_id ?? s.metadata?.userId;
+      if (!userId) return ok();
+      if (s.mode === "subscription") {
+        const subId = stripeId(s.subscription);
+        if (!subId) return ok();
+        const outcome = await syncSubscription(userId, subId);
+        if (outcome === "ok" && event.type === "checkout.session.completed") {
+          recordFunnelEvent(userId, "purchase_pro");
+        }
+      } else if (s.mode === "payment") {
+        // Delayed payment methods complete as "unpaid" here and are granted
+        // on async_payment_succeeded once the money has arrived.
+        const outcome = await grantCreditPack(userId, s);
+        if (outcome === "granted") recordFunnelEvent(userId, "purchase_credits");
       }
-      if (!userId) {
-        // A subscription invoice we can't attribute yet (e.g. this event beat
-        // checkout.session.completed). Non-2xx makes Stripe retry with backoff
-        // until the subscription row exists.
-        return new Response("Unknown subscription", { status: 500 });
-      }
-      await grantCredits(
-        userId,
-        PRO_MONTHLY_CREDITS,
-        "pro_monthly",
-        `pro_grant:${inv.id}`,
-      );
-      await setSubscription(userId, {
-        status: "active",
-        stripeSubscriptionId: subId ?? null,
+      return ok();
+    }
+
+    case "invoice.paid":
+      return handleInvoicePaid(event.data.object);
+
+    case "customer.subscription.created":
+    case "customer.subscription.updated":
+    case "customer.subscription.deleted": {
+      const sub = event.data.object;
+      const userId =
+        sub.metadata?.userId ||
+        (await userForSubscription(sub.id)) ||
+        (await userForCustomer(stripeId(sub.customer)));
+      // Not one of ours (or not attributable): nothing to do.
+      if (!userId) return ok();
+      // Re-read the live subscription: the payload may be stale or delivered
+      // out of order (e.g. an "updated: active" after "deleted").
+      await syncSubscription(userId, sub.id);
+      return ok();
+    }
+
+    case "charge.refunded":
+      await handleChargeRefunded(event.data.object);
+      return ok();
+
+    case "charge.refund.updated":
+    case "refund.updated":
+    case "refund.failed":
+      await handleRefundUpdated(event.data.object as Stripe.Refund);
+      return ok();
+
+    case "charge.dispute.created":
+      await handleDisputeCreated(event.data.object);
+      return ok();
+
+    case "charge.dispute.closed":
+      await handleDisputeClosed(event.data.object);
+      return ok();
+
+    default:
+      return ok();
+  }
+}
+
+async function handleInvoicePaid(inv: Stripe.Invoice): Promise<Response> {
+  // Basil (2025-03-31)+ nests this under invoice.parent.subscription_details;
+  // older webhook API versions put it at the top level (invoice.subscription
+  // / invoice.subscription_details). Read both so a pre-Basil webhook version
+  // can't silently grant a paying Pro user 0 credits.
+  const legacy = inv as unknown as {
+    subscription?: string | { id: string };
+    subscription_details?: { metadata?: { userId?: string } };
+  };
+  const details = inv.parent?.subscription_details;
+  const subId = stripeId(details?.subscription ?? legacy.subscription ?? null);
+  if (!subId) return ok(); // not a subscription invoice
+
+  // When the live state was read: an older read never overwrites a newer one.
+  const fetchedAt = new Date();
+  const live = await stripe.subscriptions.retrieve(subId);
+  const userId =
+    details?.metadata?.userId ??
+    legacy.subscription_details?.metadata?.userId ??
+    live.metadata?.userId ??
+    (await userForSubscription(subId)) ??
+    (await userForCustomer(stripeId(inv.customer)));
+  if (!userId) {
+    // A subscription this app did not create (another integration on the
+    // same Stripe account, or one made by hand for a customer we do not
+    // know). Retrying cannot attribute it, so acknowledge it and leave one
+    // audit row for the owner instead of failing every retry for days.
+    const first = await recordBillingEvent({
+      kind: "unattributed_invoice",
+      stripeObjectId: inv.id,
+      amountCents: typeof inv.amount_paid === "number" ? inv.amount_paid : null,
+      detail: `subscription ${subId}; customer ${stripeId(inv.customer) ?? "none"}`,
+    });
+    if (first) {
+      reportError(new Error("Paid invoice of a subscription no StudyOS user owns"), {
+        source: "api",
+        route: "/api/stripe/webhook",
+        eventType: "invoice.paid",
       });
     }
-  } else if (
-    event.type === "customer.subscription.created" ||
-    event.type === "customer.subscription.updated" ||
-    event.type === "customer.subscription.deleted"
-  ) {
-    const sub = event.data.object as Stripe.Subscription;
-    let userId: string | null = sub.metadata?.userId ?? null;
-    if (!userId) {
-      const row = await prisma.subscription.findFirst({
-        where: { stripeSubscriptionId: sub.id },
-      });
-      userId = row?.userId ?? null;
-    }
-    if (userId) {
-      const active = sub.status === "active" || sub.status === "trialing";
-      await setSubscription(userId, {
-        status: active ? "active" : "canceled",
-        stripeSubscriptionId: sub.id,
-      });
-    }
+    return ok();
   }
 
-  return new Response("ok", { status: 200 });
+  // Status follows the live subscription (an invoice arriving after a
+  // cancellation must not flip the user back to active). This also creates
+  // the row when the invoice beats checkout.session.completed.
+  const outcome = await applyLiveSubscription(userId, live, fetchedAt);
+  if (outcome === "deleted_account" || outcome === "duplicate") return ok();
+
+  // Money arrived for a real period: grant that period's allowance.
+  await grantProInvoice(userId, inv, subId);
+  return ok();
 }
+
+async function userForSubscription(subId: string): Promise<string | null> {
+  const row = await prisma.subscription.findFirst({
+    where: { stripeSubscriptionId: subId },
+    select: { userId: true },
+  });
+  return row?.userId ?? null;
+}
+

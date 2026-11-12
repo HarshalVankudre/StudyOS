@@ -1,0 +1,406 @@
+{
+  "source": "scratchpad gen-samples/after2-en-econ-syllabus.json (after2, en-econ-syllabus, claude-haiku-5-5), trimmed; polish-added blocks removed",
+  "locale": "en",
+  "today": "2026-11-11",
+  "workspace": {
+    "id": "ws-econ-calc-fall26",
+    "name": "Fall 2026 Econ & Calc HQ",
+    "icon": "🎓",
+    "pages": [
+      {
+        "id": "page-home",
+        "title": "Dashboard",
+        "icon": "🏠",
+        "blocks": [
+          {
+            "id": "b-welcome",
+            "type": "callout",
+            "text": "Your fall in one place. Midterm 2 for Calc is Thursday, November 19, and Problem Set 5 is due Tuesday, November 17.",
+            "emoji": "👋"
+          },
+          {
+            "id": "b-h-plan",
+            "type": "heading",
+            "level": 2,
+            "text": "🗓️ This week"
+          },
+          {
+            "id": "b-weekly",
+            "type": "database_view",
+            "databaseId": "db-weekly",
+            "viewId": "v-weekly-table"
+          },
+          {
+            "id": "b-h-grades",
+            "type": "heading",
+            "level": 2,
+            "text": "📊 Where your grades stand"
+          },
+          {
+            "id": "b-grades",
+            "type": "grades",
+            "title": "Grades",
+            "databaseId": "db-graded",
+            "columns": {
+              "course": "g-course",
+              "score": "g-score",
+              "weight": "g-weight",
+              "due": "g-due"
+            },
+            "scale": "percent"
+          },
+          {
+            "id": "b-h-board",
+            "type": "heading",
+            "level": 2,
+            "text": "📌 Everything by status"
+          },
+          {
+            "id": "b-board",
+            "type": "database_view",
+            "databaseId": "db-graded",
+            "viewId": "v-graded-board"
+          }
+        ]
+      },
+      {
+        "id": "page-planner",
+        "title": "Weekly Plan",
+        "icon": "🗓️",
+        "blocks": [
+          {
+            "id": "pwp-p",
+            "type": "paragraph",
+            "text": "Your weekly list of problem sets, quizzes, and project work."
+          },
+          {
+            "id": "pwp-table",
+            "type": "database_view",
+            "databaseId": "db-weekly",
+            "viewId": "v-weekly-table"
+          }
+        ]
+      },
+      {
+        "id": "page-exams",
+        "title": "Exams",
+        "icon": "📝",
+        "blocks": [
+          {
+            "id": "pe-p",
+            "type": "paragraph",
+            "text": "Midterms and finals for both courses, from the shared graded list."
+          },
+          {
+            "id": "pe-table",
+            "type": "database_view",
+            "databaseId": "db-graded",
+            "viewId": "v-exams-table"
+          }
+        ]
+      }
+    ],
+    "databases": [
+      {
+        "id": "db-graded",
+        "name": "Graded Work",
+        "icon": "📝",
+        "description": "Every graded item: problem sets, homework, quizzes, midterms, finals, projects.",
+        "properties": [
+          {
+            "id": "g-name",
+            "name": "Item",
+            "type": "text"
+          },
+          {
+            "id": "g-course",
+            "name": "Course",
+            "type": "select",
+            "options": [
+              {
+                "id": "co-econ",
+                "label": "ECON 201",
+                "color": "blue"
+              },
+              {
+                "id": "co-math",
+                "label": "MATH 221",
+                "color": "violet"
+              }
+            ]
+          },
+          {
+            "id": "g-type",
+            "name": "Type",
+            "type": "select",
+            "options": [
+              {
+                "id": "ty-ps",
+                "label": "Problem set",
+                "color": "sky"
+              },
+              {
+                "id": "ty-hw",
+                "label": "Homework",
+                "color": "sky"
+              },
+              {
+                "id": "ty-quiz",
+                "label": "Quiz",
+                "color": "violet"
+              },
+              {
+                "id": "ty-exam",
+                "label": "Exam",
+                "color": "rose"
+              },
+              {
+                "id": "ty-project",
+                "label": "Project",
+                "color": "emerald"
+              },
+              {
+                "id": "ty-other",
+                "label": "Other",
+                "color": "zinc"
+              }
+            ]
+          },
+          {
+            "id": "g-status",
+            "name": "Status",
+            "type": "status",
+            "options": [
+              {
+                "id": "st-todo",
+                "label": "Not started",
+                "color": "zinc"
+              },
+              {
+                "id": "st-doing",
+                "label": "In progress",
+                "color": "amber"
+              },
+              {
+                "id": "st-done",
+                "label": "Done",
+                "color": "green"
+              }
+            ]
+          },
+          {
+            "id": "g-due",
+            "name": "Due",
+            "type": "date"
+          },
+          {
+            "id": "g-weight",
+            "name": "Weight %",
+            "type": "number"
+          },
+          {
+            "id": "g-score",
+            "name": "Score",
+            "type": "number"
+          }
+        ],
+        "rows": [
+          {
+            "id": "gr-econ-ps",
+            "cells": {
+              "g-name": "Problem sets (overall)",
+              "g-course": "co-econ",
+              "g-type": "ty-ps",
+              "g-status": "st-doing",
+              "g-due": null,
+              "g-weight": 20
+            }
+          },
+          {
+            "id": "gr-econ-mid",
+            "cells": {
+              "g-name": "Midterm exam",
+              "g-course": "co-econ",
+              "g-type": "ty-exam",
+              "g-status": "st-done",
+              "g-due": "2026-10-15",
+              "g-weight": 25,
+              "g-score": null
+            }
+          },
+          {
+            "id": "gr-econ-final",
+            "cells": {
+              "g-name": "Final exam",
+              "g-course": "co-econ",
+              "g-type": "ty-exam",
+              "g-status": "st-todo",
+              "g-due": "2026-12-16",
+              "g-weight": 35
+            }
+          },
+          {
+            "id": "gr-econ-part",
+            "cells": {
+              "g-name": "Participation",
+              "g-course": "co-econ",
+              "g-type": "ty-other",
+              "g-status": "st-doing",
+              "g-due": null,
+              "g-weight": 10
+            }
+          },
+          {
+            "id": "gr-econ-group",
+            "cells": {
+              "g-name": "Group project",
+              "g-course": "co-econ",
+              "g-type": "ty-project",
+              "g-status": "st-doing",
+              "g-due": "2026-11-24",
+              "g-weight": 10
+            }
+          },
+          {
+            "id": "gr-econ-ps4",
+            "cells": {
+              "g-name": "Problem Set 4",
+              "g-course": "co-econ",
+              "g-type": "ty-ps",
+              "g-status": "st-done",
+              "g-due": "2026-11-03"
+            }
+          }
+        ],
+        "views": [
+          {
+            "id": "v-graded-table",
+            "name": "All",
+            "type": "table"
+          },
+          {
+            "id": "v-graded-board",
+            "name": "By status",
+            "type": "board",
+            "groupByPropertyId": "g-status"
+          },
+          {
+            "id": "v-graded-calendar",
+            "name": "Calendar",
+            "type": "calendar",
+            "datePropertyId": "g-due"
+          },
+          {
+            "id": "v-ps-table",
+            "name": "Problem sets & homework",
+            "type": "table",
+            "filters": [
+              {
+                "propertyId": "g-type",
+                "operator": "is",
+                "value": "ty-ps"
+              }
+            ],
+            "filterMatch": "any"
+          },
+          {
+            "id": "v-exams-table",
+            "name": "Exams",
+            "type": "table",
+            "filters": [
+              {
+                "propertyId": "g-type",
+                "operator": "is",
+                "value": "ty-exam"
+              }
+            ],
+            "filterMatch": "any"
+          }
+        ]
+      },
+      {
+        "id": "db-weekly",
+        "name": "Weekly Plan",
+        "icon": "🗓️",
+        "description": "A simple weekly list of what to work on.",
+        "properties": [
+          {
+            "id": "w-name",
+            "name": "Task",
+            "type": "text"
+          },
+          {
+            "id": "w-course",
+            "name": "Course",
+            "type": "select",
+            "options": [
+              {
+                "id": "wc-econ",
+                "label": "ECON 201",
+                "color": "blue"
+              },
+              {
+                "id": "wc-math",
+                "label": "MATH 221",
+                "color": "violet"
+              }
+            ]
+          },
+          {
+            "id": "w-day",
+            "name": "Day",
+            "type": "date"
+          },
+          {
+            "id": "w-done",
+            "name": "Done",
+            "type": "checkbox"
+          }
+        ],
+        "rows": [
+          {
+            "id": "wk-1",
+            "cells": {
+              "w-name": "Start Problem Set 5 (utility & demand)",
+              "w-course": "wc-econ",
+              "w-day": "2026-11-12",
+              "w-done": false
+            }
+          },
+          {
+            "id": "wk-2",
+            "cells": {
+              "w-name": "Review Midterm 2 topics: sequences and series",
+              "w-course": "wc-math",
+              "w-day": "2026-11-14",
+              "w-done": false
+            }
+          },
+          {
+            "id": "wk-3",
+            "cells": {
+              "w-name": "Finish Problem Set 5 and check answers",
+              "w-course": "wc-econ",
+              "w-day": "2026-11-16",
+              "w-done": false
+            }
+          }
+        ],
+        "views": [
+          {
+            "id": "v-weekly-table",
+            "name": "This week",
+            "type": "table",
+            "sorts": [
+              {
+                "propertyId": "w-day",
+                "direction": "asc"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "homePageId": "page-home"
+  }
+}

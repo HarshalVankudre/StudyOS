@@ -2,6 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 import { useTheme } from "next-themes";
+import { useI18n } from "@/lib/i18n/client";
 import { cn } from "@/lib/utils";
 
 const subscribeToClient = () => () => {};
@@ -13,6 +14,7 @@ const subscribeToClient = () => () => {};
  */
 export function ThemeToggle({ className }: { className?: string }) {
   const { resolvedTheme, setTheme } = useTheme();
+  const { dict } = useI18n();
   const mounted = useSyncExternalStore(
     subscribeToClient,
     () => true,
@@ -20,19 +22,24 @@ export function ThemeToggle({ className }: { className?: string }) {
   );
 
   const isDark = resolvedTheme === "dark";
+  // Says what pressing it does, in the visitor's language. Before hydration
+  // the theme is unknown; the app's default theme is dark.
+  const darkNow = mounted ? isDark : true;
+  const label = darkNow ? dict.command.actions.themeLight : dict.command.actions.themeDark;
 
   return (
     <button
       type="button"
-      aria-label="Toggle theme"
+      aria-label={label}
+      title={label}
       onClick={() => setTheme(isDark ? "light" : "dark")}
       className={cn(
-        "grid h-8 w-8 shrink-0 place-items-center rounded-md border border-line-strong text-[15px] text-ink-soft transition hover:bg-hover hover:text-ink",
+        "grid h-10 w-10 shrink-0 place-items-center sm:h-8 sm:w-8 rounded-md border border-line-strong text-[15px] text-ink-soft transition hover:bg-hover hover:text-ink",
         className,
       )}
     >
       <span aria-hidden suppressHydrationWarning>
-        {mounted && isDark ? "☀" : "☾"}
+        {darkNow ? "☀" : "☾"}
       </span>
     </button>
   );

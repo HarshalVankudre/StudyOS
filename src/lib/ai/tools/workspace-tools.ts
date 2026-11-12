@@ -2,6 +2,7 @@ import "server-only";
 import { z } from "zod";
 import { safeParseWorkspace } from "@/lib/workspace/schema";
 import { applyAgentOps, agentOpsSchema } from "@/lib/ai/agent-ops";
+import { duplicateRowMessage, findDuplicateRowAdds } from "@/lib/ai/agent-duplicates";
 import { toolRegistry, type ToolRegistry } from "./registry";
 import { parseSnapshot } from "./snapshot";
 
@@ -64,17 +65,33 @@ export function registerWorkspaceTools(registry: ToolRegistry = toolRegistry): v
   registry.register({
     id: "read_area",
     description:
-      "Return the full JSON of one page or database by id, so you can see its exact current contents before changing it.",
-    input: z.object({ id: z.string().min(1).max(100) }),
-    output: z.object({ kind: z.enum(["page", "database", "none"]), json: z.string() }),
+      "Return the JSON of one page or database by id (its current, staged contents). Large ones are paged: pass offset/limit to read further rows (database) or blocks (page); `total` says how many there are.",
+    input: z.object({
+      id: z.string().min(1).max(100),
+      offset: z.number().int().min(0).optional(),
+      limit: z.number().int().min(1).max(200).optional(),
+    }),
+    output: z.object({
+      kind: z.enum(["page", "database", "none"]),
+      json: z.string(),
+      total: z.number().int().optional(),
+    }),
     limits: { timeoutMs: 5_000 },
     networkPermission: "none",
     handler: (input, ctx) => {
       const ws = parseSnapshot(ctx.workspaceJson);
+      const from = input.offset ?? 0;
+      const to = from + (input.limit ?? 60);
       const page = ws.pages.find((p) => p.id === input.id);
-      if (page) return { kind: "page" as const, json: JSON.stringify(page) };
+      if (page) {
+        const blocks = page.blocks.slice(from, to);
+        return { kind: "page" as const, json: JSON.stringify({ ...page, blocks }), total: page.blocks.length };
+      }
       const db = ws.databases.find((d) => d.id === input.id);
-      if (db) return { kind: "database" as const, json: JSON.stringify(db) };
+      if (db) {
+        const rows = db.rows.slice(from, to);
+        return { kind: "database" as const, json: JSON.stringify({ ...db, rows }), total: db.rows.length };
+      }
       return { kind: "none" as const, json: "{}" };
     },
   });
@@ -82,7 +99,7 @@ export function registerWorkspaceTools(registry: ToolRegistry = toolRegistry): v
   registry.register({
     id: "apply_ops",
     description:
-      "Validate a list of patch operations against the current workspace. Returns ok:true if they yield a valid workspace (the change is then staged), or ok:false with an error so you can fix and retry. Emit the SMALLEST set of operations; never resend unchanged data.",
+      "Validate a list of patch operations against the current workspace. Returns ok:true if they yield a valid workspace (the change is then staged), or ok:false with an error so you can fix and retry. Emit the SMALLEST set of operations; never resend unchanged data. An add_row that looks like an item the graded-work list already has (an undated \"Midterm\" when you add a dated one) is refused with the existing row's id: update that row instead.",
     input: z.object({ ops: agentOpsSchema }),
     output: z.object({ ok: z.boolean(), opCount: z.number().int(), error: z.string().optional() }),
     limits: { timeoutMs: 10_000 },
@@ -94,6 +111,11 @@ export function registerWorkspaceTools(registry: ToolRegistry = toolRegistry): v
         if (!parsed.success) {
           const issue = parsed.error.issues[0];
           return { ok: false, opCount: input.ops.length, error: issue ? `${issue.path.join(".") || "(root)"}: ${issue.message}` : "schema" };
+        }
+        // A second row for an item the list already has: refused with the row to update instead.
+        const duplicates = findDuplicateRowAdds(ws, input.ops);
+        if (duplicates.length > 0) {
+          return { ok: false, opCount: input.ops.length, error: duplicateRowMessage(duplicates) };
         }
         return { ok: true, opCount: input.ops.length };
       } catch (error) {

@@ -4,9 +4,11 @@
  * The country is resolved SERVER-SIDE from the geo headers our hosting platform
  * injects based on the request IP (Vercel's `x-vercel-ip-country`, Cloudflare's
  * `cf-ipcountry`, etc.). That means there is NO browser geolocation prompt — the
- * lookup is invisible and instant. If we can't determine a supported language
- * from the country, resolution falls through to the `Accept-Language` header and
- * finally English (see ./server.ts).
+ * lookup is invisible and instant. The country is only a fallback: the
+ * student's own choice (the language cookie) comes first, then the languages
+ * their browser asks for (`Accept-Language`), and only when neither names a
+ * supported language is the country used, then English (see ./server.ts). A
+ * browser set to English in Germany therefore gets English.
  *
  * Pure module (no server-only imports): `countryFromHeaders` takes a plain
  * `Headers` object so it can be unit-tested and reused anywhere.
@@ -29,9 +31,9 @@ const GEO_COUNTRY_HEADERS = [
  * ISO 3166-1 alpha-2 country code → default locale.
  *
  * Only countries with a clear dominant language among our supported set are
- * listed. Multilingual countries (CH, BE, CA, …) and everything unlisted fall
- * through to the browser's `Accept-Language`, then English — so we never guess
- * wrong for, say, a French speaker in bilingual Belgium.
+ * listed. Multilingual countries (CH, BE, CA, …) and everything unlisted
+ * resolve to no language here, which leaves English — so we never guess wrong
+ * for, say, a French speaker in bilingual Belgium whose browser did not say.
  */
 const COUNTRY_TO_LOCALE: Record<string, Locale> = {
   // ---- German ----

@@ -9,22 +9,16 @@
  * all ten. Client components never import `dictionaries/index`; they read the
  * dictionary through `useI18n()`.
  */
-import { createContext, useContext, useMemo } from "react";
+import { useContext, useMemo } from "react";
 import type { Locale } from "./config";
 import { dirFor } from "./config";
+import { I18nContext, type I18n } from "./context";
 import type { Dictionary } from "./dictionaries/en";
 import { fmt } from "./interpolate";
+import { pluralizer } from "./plural";
 
-export interface I18n {
-  locale: Locale;
-  dir: "ltr" | "rtl";
-  /** The active language's full dictionary (typed). */
-  dict: Dictionary;
-  /** Interpolate `{placeholders}` in a dictionary string. */
-  t: (template: string, vars?: Record<string, string | number>) => string;
-}
-
-const I18nContext = createContext<I18n | null>(null);
+export type { I18n } from "./context";
+export { useOptionalI18n } from "./context";
 
 export function I18nProvider({
   locale,
@@ -36,7 +30,13 @@ export function I18nProvider({
   children: React.ReactNode;
 }) {
   const value = useMemo<I18n>(
-    () => ({ locale, dir: dirFor(locale), dict: dictionary, t: fmt }),
+    () => ({
+      locale,
+      dir: dirFor(locale),
+      dict: dictionary,
+      t: fmt,
+      plural: pluralizer(locale),
+    }),
     [locale, dictionary],
   );
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;

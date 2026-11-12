@@ -13,9 +13,36 @@ substitutions:
   _NPM_CLERK_SIGNIN_FB: ""
   _NPM_CLERK_SIGNUP_FB: ""
   _NPM_STRIPE_PK: ""
+  # GCS bucket for rendered images. Set on the service (runtime) and passed to
+  # the image build, where next.config.ts scopes the CSP img-src to it.
+  _ASSETS_BUCKET: studyos-assets-pacific-song-485904-g1
 
 steps:
+  # Gate: type check, lint and unit tests must pass before an image is built.
+  # A failure here aborts the build and leaves the current revision serving.
+  # DATABASE_URL is a placeholder so `prisma generate` (postinstall) works; the
+  # tests never touch a database. node_modules / generated client are removed
+  # afterwards so they do not leak into the docker build context.
+  - id: test
+    name: node:22
+    entrypoint: bash
+    env:
+      - DATABASE_URL=postgresql://ci:ci@localhost:5432/ci
+      - DATABASE_URL_UNPOOLED=postgresql://ci:ci@localhost:5432/ci
+      - NEXT_TELEMETRY_DISABLED=1
+    args:
+      - -ceu
+      - |
+        # Exact pnpm version (same pin as the Dockerfile and .github/workflows/ci.yml).
+        npm install -g pnpm@10.34.9
+        pnpm install --frozen-lockfile
+        pnpm exec tsc --noEmit
+        pnpm lint
+        pnpm test
+        rm -rf node_modules src/generated
+
   - id: build
+    waitFor: ['test']
     name: gcr.io/cloud-builders/docker
     entrypoint: bash
     args:
@@ -28,6 +55,7 @@ steps:
           --build-arg NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL="${_NPM_CLERK_SIGNIN_FB}" \
           --build-arg NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL="${_NPM_CLERK_SIGNUP_FB}" \
           --build-arg NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY="${_NPM_STRIPE_PK}" \
+          --build-arg ASSETS_BUCKET="${_ASSETS_BUCKET}"           --build-arg DEPLOYMENT_VERSION="${BUILD_ID}" \
           -t "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:latest" \
           .
 
@@ -48,6 +76,15 @@ steps:
       - |
         npx --yes prisma@6.19.3 migrate deploy --schema prisma/schema.prisma
 
+  # Secrets: --update-secrets (NOT --set-secrets). --set-secrets replaces the
+  # service's whole secret set on every deploy, which silently stripped
+  # secrets the owner added in the console (CLERK_WEBHOOK_SIGNING_SECRET,
+  # MAINTENANCE_SECRET, ANTHROPIC_API_KEY, STRIPE_PRICE_PRO_ANNUAL, ...).
+  # --update-secrets updates only the listed ones and keeps the rest.
+  # Only list a secret here once it exists in Secret Manager: a listed secret
+  # that does not exist fails the deploy. Removing one from the service takes
+  # an explicit `gcloud run services update --remove-secrets=NAME`.
+  # (--update-env-vars likewise keeps env vars that are not listed.)
   - id: deploy
     name: gcr.io/google.com/cloudsdktool/cloud-sdk
     waitFor: ['migrate']
@@ -66,8 +103,8 @@ steps:
       - --timeout=600
       - --concurrency=80
       - --port=8080
-      - --set-secrets=DATABASE_URL=DATABASE_URL:latest,DATABASE_URL_UNPOOLED=DATABASE_URL_UNPOOLED:latest,CLERK_SECRET_KEY=CLERK_SECRET_KEY:latest,OPENROUTER_API_KEY=OPENROUTER_API_KEY:latest,STRIPE_SECRET_KEY=STRIPE_SECRET_KEY:latest,STRIPE_PRICE_PRO=STRIPE_PRICE_PRO:latest,STRIPE_WEBHOOK_SECRET=STRIPE_WEBHOOK_SECRET:latest,DAYTONA_API_KEY=DAYTONA_API_KEY:latest
-      - --update-env-vars=^@^NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${_NPM_CLERK_PK}@NEXT_PUBLIC_CLERK_SIGN_IN_URL=${_NPM_CLERK_SIGNIN}@NEXT_PUBLIC_CLERK_SIGN_UP_URL=${_NPM_CLERK_SIGNUP}@NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL=${_NPM_CLERK_SIGNIN_FB}@NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL=${_NPM_CLERK_SIGNUP_FB}@NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=${_NPM_STRIPE_PK}@AGENT_SANDBOX=1@AUTHENTIC_AGENT=1@ASSETS_BUCKET=studyos-assets-pacific-song-485904-g1@STUDYOS_SANDBOX_SNAPSHOT=studyos-render
+      - --update-secrets=DATABASE_URL=DATABASE_URL:latest,DATABASE_URL_UNPOOLED=DATABASE_URL_UNPOOLED:latest,CLERK_SECRET_KEY=CLERK_SECRET_KEY:latest,OPENROUTER_API_KEY=OPENROUTER_API_KEY:latest,STRIPE_SECRET_KEY=STRIPE_SECRET_KEY:latest,STRIPE_PRICE_PRO=STRIPE_PRICE_PRO:latest,STRIPE_WEBHOOK_SECRET=STRIPE_WEBHOOK_SECRET:latest,DAYTONA_API_KEY=DAYTONA_API_KEY:latest
+      - --update-env-vars=^@^NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${_NPM_CLERK_PK}@NEXT_PUBLIC_CLERK_SIGN_IN_URL=${_NPM_CLERK_SIGNIN}@NEXT_PUBLIC_CLERK_SIGN_UP_URL=${_NPM_CLERK_SIGNUP}@NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL=${_NPM_CLERK_SIGNIN_FB}@NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL=${_NPM_CLERK_SIGNUP_FB}@NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=${_NPM_STRIPE_PK}@AGENT_SANDBOX=1@ASSETS_BUCKET=${_ASSETS_BUCKET}@STUDYOS_SANDBOX_SNAPSHOT=studyos-render
 
 images:
   - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:latest'

@@ -6,464 +6,498 @@
  *   - the "golden example" of target quality for the AI generator,
  *   - a sanity check that the data model can hold a real student's life.
  *
- * Dates are set around mid-June 2026 so "due soon" looks realistic in demos.
+ * Dates are relative to a reference day (`buildSampleWorkspace(today)`), so
+ * a demo opened on any day has work due this week and next, a little already
+ * done, and nothing months overdue. `sampleWorkspace` is the same workspace
+ * built for a fixed day, for tests that need a deterministic fixture.
  */
+import { shiftDay } from "@/lib/study/days";
 import type { Workspace } from "./types";
 
-export const sampleWorkspace: Workspace = {
-  id: "ws-sample",
-  name: "Study HQ",
-  icon: "🎓",
-  homePageId: "page-home",
+/** The day the deterministic `sampleWorkspace` fixture is built for. */
+export const SAMPLE_REFERENCE_DAY = "2026-06-18";
 
-  databases: [
-    // ---- Courses ---------------------------------------------------------
-    {
-      id: "db-courses",
-      name: "Courses",
-      icon: "📚",
-      description: "Every class you're taking this semester.",
-      properties: [
-        { id: "c-name", name: "Course", type: "text" },
-        { id: "c-code", name: "Code", type: "text" },
-        { id: "c-instructor", name: "Instructor", type: "text" },
-        { id: "c-credits", name: "Credits", type: "number" },
-        { id: "c-schedule", name: "Schedule", type: "text" },
-      ],
-      views: [{ id: "v-courses-table", name: "All courses", type: "table" }],
-      rows: [
-        {
-          id: "row-cs101",
-          cells: {
-            "c-name": "Intro to Computer Science",
-            "c-code": "CS 101",
-            "c-instructor": "Dr. Alan Park",
-            "c-credits": 4,
-            "c-schedule": "Mon / Wed · 10:00",
-          },
-        },
-        {
-          id: "row-math201",
-          cells: {
-            "c-name": "Discrete Mathematics",
-            "c-code": "MATH 201",
-            "c-instructor": "Prof. Lena Ortiz",
-            "c-credits": 3,
-            "c-schedule": "Tue / Thu · 13:00",
-          },
-        },
-        {
-          id: "row-cs210",
-          cells: {
-            "c-name": "Data Structures",
-            "c-code": "CS 210",
-            "c-instructor": "Dr. Priya Nair",
-            "c-credits": 4,
-            "c-schedule": "Mon / Wed · 14:00",
-          },
-        },
-        {
-          id: "row-eng102",
-          cells: {
-            "c-name": "Academic Writing",
-            "c-code": "ENG 102",
-            "c-instructor": "Ms. Grace Kim",
-            "c-credits": 3,
-            "c-schedule": "Fri · 11:00",
-          },
-        },
-        {
-          id: "row-phys150",
-          cells: {
-            "c-name": "Physics I",
-            "c-code": "PHYS 150",
-            "c-instructor": "Dr. Omar Haddad",
-            "c-credits": 4,
-            "c-schedule": "Tue / Thu · 09:00",
-          },
-        },
-      ],
-    },
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-    // ---- Assignments -----------------------------------------------------
-    {
-      id: "db-assignments",
-      name: "Assignments",
-      icon: "📝",
-      description: "Homework, quizzes, projects and exams.",
-      properties: [
-        { id: "a-name", name: "Assignment", type: "text" },
-        {
-          id: "a-course",
-          name: "Course",
-          type: "select",
-          options: [
-            { id: "co-cs101", label: "CS 101", color: "blue" },
-            { id: "co-math201", label: "MATH 201", color: "violet" },
-            { id: "co-cs210", label: "CS 210", color: "indigo" },
-            { id: "co-eng102", label: "ENG 102", color: "amber" },
-            { id: "co-phys150", label: "PHYS 150", color: "rose" },
-          ],
-        },
-        {
-          id: "a-type",
-          name: "Type",
-          type: "select",
-          options: [
-            { id: "ty-hw", label: "Homework", color: "sky" },
-            { id: "ty-quiz", label: "Quiz", color: "violet" },
-            { id: "ty-exam", label: "Exam", color: "rose" },
-            { id: "ty-project", label: "Project", color: "emerald" },
-          ],
-        },
-        {
-          id: "a-status",
-          name: "Status",
-          type: "status",
-          options: [
-            { id: "st-todo", label: "Not started", color: "zinc" },
-            { id: "st-doing", label: "In progress", color: "amber" },
-            { id: "st-done", label: "Done", color: "green" },
-          ],
-        },
-        { id: "a-due", name: "Due", type: "date" },
-        { id: "a-weight", name: "Weight %", type: "number" },
-      ],
-      views: [
-        { id: "v-assign-table", name: "All", type: "table" },
-        {
-          id: "v-assign-board",
-          name: "By status",
-          type: "board",
-          groupByPropertyId: "a-status",
-        },
-        {
-          id: "v-assign-calendar",
-          name: "Calendar",
-          type: "calendar",
-          datePropertyId: "a-due",
-        },
-      ],
-      rows: [
-        {
-          id: "as-1",
-          cells: {
-            "a-name": "Problem Set 3",
-            "a-course": "co-cs101",
-            "a-type": "ty-hw",
-            "a-status": "st-doing",
-            "a-due": "2026-06-22",
-            "a-weight": 10,
-          },
-        },
-        {
-          id: "as-2",
-          cells: {
-            "a-name": "Proofs Quiz",
-            "a-course": "co-math201",
-            "a-type": "ty-quiz",
-            "a-status": "st-todo",
-            "a-due": "2026-06-20",
-            "a-weight": 5,
-          },
-        },
-        {
-          id: "as-3",
-          cells: {
-            "a-name": "Linked List Lab",
-            "a-course": "co-cs210",
-            "a-type": "ty-project",
-            "a-status": "st-doing",
-            "a-due": "2026-06-24",
-            "a-weight": 15,
-          },
-        },
-        {
-          id: "as-4",
-          cells: {
-            "a-name": "Essay First Draft",
-            "a-course": "co-eng102",
-            "a-type": "ty-hw",
-            "a-status": "st-todo",
-            "a-due": "2026-06-25",
-            "a-weight": 20,
-          },
-        },
-        {
-          id: "as-5",
-          cells: {
-            "a-name": "Lab Report 2",
-            "a-course": "co-phys150",
-            "a-type": "ty-hw",
-            "a-status": "st-done",
-            "a-due": "2026-06-16",
-            "a-weight": 8,
-          },
-        },
-        {
-          id: "as-6",
-          cells: {
-            "a-name": "Midterm Exam",
-            "a-course": "co-cs101",
-            "a-type": "ty-exam",
-            "a-status": "st-todo",
-            "a-due": "2026-07-01",
-            "a-weight": 30,
-          },
-        },
-        {
-          id: "as-7",
-          cells: {
-            "a-name": "Graph Algorithms HW",
-            "a-course": "co-cs210",
-            "a-type": "ty-hw",
-            "a-status": "st-todo",
-            "a-due": "2026-06-28",
-            "a-weight": 10,
-          },
-        },
-        {
-          id: "as-8",
-          cells: {
-            "a-name": "Reading Response",
-            "a-course": "co-eng102",
-            "a-type": "ty-hw",
-            "a-status": "st-done",
-            "a-due": "2026-06-15",
-            "a-weight": 5,
-          },
-        },
-      ],
-    },
+/** `today` as a YYYY-MM-DD day: a day string as given, a Date by its UTC calendar. */
+function dayOf(today: string | Date): string {
+  if (typeof today === "string" && DAY_RE.test(today)) return today;
+  const date = typeof today === "string" ? new Date(today) : today;
+  if (Number.isNaN(date.getTime())) return SAMPLE_REFERENCE_DAY;
+  return date.toISOString().slice(0, 10);
+}
 
-    // ---- Reading list ----------------------------------------------------
-    {
-      id: "db-readings",
-      name: "Reading List",
-      icon: "📖",
-      description: "Chapters and resources to get through.",
-      properties: [
-        { id: "r-title", name: "Title", type: "text" },
-        {
-          id: "r-course",
-          name: "Course",
-          type: "select",
-          options: [
-            { id: "rc-cs101", label: "CS 101", color: "blue" },
-            { id: "rc-math201", label: "MATH 201", color: "violet" },
-            { id: "rc-cs210", label: "CS 210", color: "indigo" },
-            { id: "rc-eng102", label: "ENG 102", color: "amber" },
-            { id: "rc-phys150", label: "PHYS 150", color: "rose" },
-          ],
-        },
-        { id: "r-done", name: "Read", type: "checkbox" },
-        { id: "r-link", name: "Link", type: "url" },
-      ],
-      views: [{ id: "v-readings-table", name: "Reading list", type: "table" }],
-      rows: [
-        {
-          id: "rd-1",
-          cells: {
-            "r-title": "Ch. 4 — Recursion",
-            "r-course": "rc-cs101",
-            "r-done": false,
-            "r-link": "https://example.com/cs101-ch4",
-          },
-        },
-        {
-          id: "rd-2",
-          cells: {
-            "r-title": "Set Theory Notes",
-            "r-course": "rc-math201",
-            "r-done": true,
-            "r-link": null,
-          },
-        },
-        {
-          id: "rd-3",
-          cells: {
-            "r-title": "Big-O Cheatsheet",
-            "r-course": "rc-cs210",
-            "r-done": false,
-            "r-link": "https://example.com/big-o",
-          },
-        },
-        {
-          id: "rd-4",
-          cells: {
-            "r-title": "Citation Style Guide",
-            "r-course": "rc-eng102",
-            "r-done": false,
-            "r-link": null,
-          },
-        },
-        {
-          id: "rd-5",
-          cells: {
-            "r-title": "Kinematics — Ch. 2",
-            "r-course": "rc-phys150",
-            "r-done": true,
-            "r-link": null,
-          },
-        },
-      ],
-    },
-  ],
+/**
+ * The sample workspace with its dates placed around `today` (a YYYY-MM-DD
+ * day, ideally the student's local day, or a Date). Pure: the same day always
+ * gives the same workspace.
+ */
+export function buildSampleWorkspace(today: string | Date = new Date()): Workspace {
+  const day = dayOf(today);
+  const due = (offset: number) => shiftDay(day, offset);
+  return {
+    id: "ws-sample",
+    name: "Study HQ",
+    icon: "🎓",
+    homePageId: "page-home",
 
-  pages: [
-    // ---- Home / Dashboard ------------------------------------------------
-    {
-      id: "page-home",
-      title: "Dashboard",
-      icon: "🏠",
-      blocks: [
-        {
-          id: "b-welcome",
-          type: "callout",
-          emoji: "👋",
-          text: "Welcome to your Study HQ — your whole semester in one place. Generated for: a 1st-year CS student taking 5 courses.",
-        },
-        {
-          id: "b-h-due",
-          type: "heading",
-          level: 2,
-          text: "📌 Assignments by status",
-        },
-        {
-          id: "b-board",
-          type: "database_view",
-          databaseId: "db-assignments",
-          viewId: "v-assign-board",
-        },
-        { id: "b-h-courses", type: "heading", level: 2, text: "📚 My courses" },
-        {
-          id: "b-courses",
-          type: "database_view",
-          databaseId: "db-courses",
-          viewId: "v-courses-table",
-        },
-      ],
-    },
-
-    // ---- Assignments page ------------------------------------------------
-    {
-      id: "page-assignments",
-      title: "Assignments",
-      icon: "📝",
-      blocks: [
-        { id: "pa-h", type: "heading", level: 1, text: "Assignments" },
-        {
-          id: "pa-p",
-          type: "paragraph",
-          text: "Everything you owe, with due dates and weights.",
-        },
-        {
-          id: "pa-table",
-          type: "database_view",
-          databaseId: "db-assignments",
-          viewId: "v-assign-table",
-        },
-      ],
-    },
-
-    // ---- Courses page ----------------------------------------------------
-    {
-      id: "page-courses",
-      title: "Courses",
-      icon: "📚",
-      blocks: [
-        { id: "pc-h", type: "heading", level: 1, text: "Courses" },
-        {
-          id: "pc-table",
-          type: "database_view",
-          databaseId: "db-courses",
-          viewId: "v-courses-table",
-        },
-      ],
-    },
-
-    // ---- Planner page ----------------------------------------------------
-    {
-      id: "page-planner",
-      title: "Planner",
-      icon: "🗓",
-      blocks: [
-        { id: "pp-h", type: "heading", level: 1, text: "Planner" },
-        {
-          id: "pp-p",
-          type: "paragraph",
-          text: "Your deadlines laid out on a calendar.",
-        },
-        {
-          id: "pp-cal",
-          type: "database_view",
-          databaseId: "db-assignments",
-          viewId: "v-assign-calendar",
-        },
-      ],
-    },
-
-    // ---- Reading list page ----------------------------------------------
-    {
-      id: "page-readings",
-      title: "Reading List",
-      icon: "📖",
-      blocks: [
-        { id: "pr-h", type: "heading", level: 1, text: "Reading List" },
-        {
-          id: "pr-table",
-          type: "database_view",
-          databaseId: "db-readings",
-          viewId: "v-readings-table",
-        },
-      ],
-    },
-
-    // ---- Flashcards page -------------------------------------------------
-    {
-      id: "page-flashcards",
-      title: "Flashcards",
-      icon: "🗂",
-      blocks: [
-        { id: "pf-h", type: "heading", level: 1, text: "Flashcards" },
-        {
-          id: "pf-p",
-          type: "paragraph",
-          text: "Review with spaced repetition — the app schedules each card so you see it right before you'd forget. Ask the AI to make a deck from any topic.",
-        },
-        {
-          id: "pf-deck",
-          type: "flashcards",
-          title: "Data Structures — CS 210",
-          cards: [
-            {
-              id: "fc-1",
-              front: "What is the average-case time complexity of a hash table lookup?",
-              back: "O(1) — constant time, assuming a good hash function and low load factor.",
+    databases: [
+      // ---- Courses ---------------------------------------------------------
+      {
+        id: "db-courses",
+        name: "Courses",
+        icon: "📚",
+        description: "Every class you're taking this semester.",
+        properties: [
+          { id: "c-name", name: "Course", type: "text" },
+          { id: "c-code", name: "Code", type: "text" },
+          { id: "c-instructor", name: "Instructor", type: "text" },
+          { id: "c-credits", name: "Credits", type: "number" },
+          { id: "c-schedule", name: "Schedule", type: "text" },
+        ],
+        views: [{ id: "v-courses-table", name: "All courses", type: "table" }],
+        rows: [
+          {
+            id: "row-cs101",
+            cells: {
+              "c-name": "Intro to Computer Science",
+              "c-code": "CS 101",
+              "c-instructor": "Dr. Alan Park",
+              "c-credits": 4,
+              "c-schedule": "Mon / Wed · 10:00",
             },
-            {
-              id: "fc-2",
-              front: "How does a stack differ from a queue?",
-              back: "A stack is LIFO (last in, first out); a queue is FIFO (first in, first out).",
+          },
+          {
+            id: "row-math201",
+            cells: {
+              "c-name": "Discrete Mathematics",
+              "c-code": "MATH 201",
+              "c-instructor": "Prof. Lena Ortiz",
+              "c-credits": 3,
+              "c-schedule": "Tue / Thu · 13:00",
             },
-            {
-              id: "fc-3",
-              front: "What is the worst-case time to search a balanced binary search tree?",
-              back: "O(log n) — the tree's height stays logarithmic in the number of nodes.",
+          },
+          {
+            id: "row-cs210",
+            cells: {
+              "c-name": "Data Structures",
+              "c-code": "CS 210",
+              "c-instructor": "Dr. Priya Nair",
+              "c-credits": 4,
+              "c-schedule": "Mon / Wed · 14:00",
             },
-            {
-              id: "fc-4",
-              front: "When is a linked list preferable to an array?",
-              back: "When you need frequent insertions/deletions at arbitrary positions and don't need O(1) random access.",
+          },
+          {
+            id: "row-eng102",
+            cells: {
+              "c-name": "Academic Writing",
+              "c-code": "ENG 102",
+              "c-instructor": "Ms. Grace Kim",
+              "c-credits": 3,
+              "c-schedule": "Fri · 11:00",
             },
-            {
-              id: "fc-5",
-              front: "What does Big-O notation describe?",
-              back: "An upper bound on how an algorithm's running time or space grows as the input size grows.",
+          },
+          {
+            id: "row-phys150",
+            cells: {
+              "c-name": "Physics I",
+              "c-code": "PHYS 150",
+              "c-instructor": "Dr. Omar Haddad",
+              "c-credits": 4,
+              "c-schedule": "Tue / Thu · 09:00",
             },
-          ],
-        },
-      ],
-    },
-  ],
-};
+          },
+        ],
+      },
+
+      // ---- Assignments -----------------------------------------------------
+      {
+        id: "db-assignments",
+        name: "Assignments",
+        icon: "📝",
+        description: "Homework, quizzes, projects and exams.",
+        properties: [
+          { id: "a-name", name: "Assignment", type: "text" },
+          { id: "a-due", name: "Due", type: "date" },
+          {
+            id: "a-status",
+            name: "Status",
+            type: "status",
+            options: [
+              { id: "st-todo", label: "Not started", color: "zinc" },
+              { id: "st-doing", label: "In progress", color: "amber" },
+              { id: "st-done", label: "Done", color: "green" },
+            ],
+          },
+          {
+            id: "a-course",
+            name: "Course",
+            type: "select",
+            options: [
+              { id: "co-cs101", label: "CS 101", color: "blue" },
+              { id: "co-math201", label: "MATH 201", color: "violet" },
+              { id: "co-cs210", label: "CS 210", color: "indigo" },
+              { id: "co-eng102", label: "ENG 102", color: "amber" },
+              { id: "co-phys150", label: "PHYS 150", color: "rose" },
+            ],
+          },
+          {
+            id: "a-type",
+            name: "Type",
+            type: "select",
+            options: [
+              { id: "ty-hw", label: "Homework", color: "sky" },
+              { id: "ty-quiz", label: "Quiz", color: "violet" },
+              { id: "ty-exam", label: "Exam", color: "rose" },
+              { id: "ty-project", label: "Project", color: "emerald" },
+            ],
+          },
+          { id: "a-weight", name: "Weight %", type: "number" },
+          // The score received: empty until the work comes back graded.
+          { id: "a-score", name: "Score", type: "number" },
+        ],
+        views: [
+          { id: "v-assign-table", name: "All", type: "table" },
+          {
+            id: "v-assign-board",
+            name: "By status",
+            type: "board",
+            groupByPropertyId: "a-status",
+          },
+          {
+            id: "v-assign-calendar",
+            name: "Calendar",
+            type: "calendar",
+            datePropertyId: "a-due",
+          },
+        ],
+        rows: [
+          {
+            id: "as-1",
+            cells: {
+              "a-name": "Problem Set 3",
+              "a-course": "co-cs101",
+              "a-type": "ty-hw",
+              "a-status": "st-doing",
+              "a-due": due(4),
+              "a-weight": 10,
+            },
+          },
+          {
+            id: "as-2",
+            cells: {
+              "a-name": "Proofs Quiz",
+              "a-course": "co-math201",
+              "a-type": "ty-quiz",
+              "a-status": "st-todo",
+              "a-due": due(2),
+              "a-weight": 5,
+            },
+          },
+          {
+            id: "as-3",
+            cells: {
+              "a-name": "Linked List Lab",
+              "a-course": "co-cs210",
+              "a-type": "ty-project",
+              "a-status": "st-doing",
+              "a-due": due(6),
+              "a-weight": 15,
+            },
+          },
+          {
+            id: "as-4",
+            cells: {
+              "a-name": "Essay First Draft",
+              "a-course": "co-eng102",
+              "a-type": "ty-hw",
+              "a-status": "st-todo",
+              "a-due": due(7),
+              "a-weight": 20,
+            },
+          },
+          {
+            id: "as-5",
+            cells: {
+              "a-name": "Lab Report 2",
+              "a-course": "co-phys150",
+              "a-type": "ty-hw",
+              "a-status": "st-done",
+              "a-due": due(-2),
+              "a-weight": 8,
+            },
+          },
+          {
+            id: "as-6",
+            cells: {
+              "a-name": "Midterm Exam",
+              "a-course": "co-cs101",
+              "a-type": "ty-exam",
+              "a-status": "st-todo",
+              "a-due": due(13),
+              "a-weight": 30,
+            },
+          },
+          {
+            id: "as-7",
+            cells: {
+              "a-name": "Graph Algorithms HW",
+              "a-course": "co-cs210",
+              "a-type": "ty-hw",
+              "a-status": "st-todo",
+              "a-due": due(10),
+              "a-weight": 10,
+            },
+          },
+          {
+            id: "as-8",
+            cells: {
+              "a-name": "Reading Response",
+              "a-course": "co-eng102",
+              "a-type": "ty-hw",
+              "a-status": "st-done",
+              "a-due": due(-3),
+              "a-weight": 5,
+            },
+          },
+        ],
+      },
+
+      // ---- Reading list ----------------------------------------------------
+      {
+        id: "db-readings",
+        name: "Reading List",
+        icon: "📖",
+        description: "Chapters and resources to get through.",
+        properties: [
+          { id: "r-title", name: "Title", type: "text" },
+          {
+            id: "r-course",
+            name: "Course",
+            type: "select",
+            options: [
+              { id: "rc-cs101", label: "CS 101", color: "blue" },
+              { id: "rc-math201", label: "MATH 201", color: "violet" },
+              { id: "rc-cs210", label: "CS 210", color: "indigo" },
+              { id: "rc-eng102", label: "ENG 102", color: "amber" },
+              { id: "rc-phys150", label: "PHYS 150", color: "rose" },
+            ],
+          },
+          { id: "r-done", name: "Read", type: "checkbox" },
+          { id: "r-link", name: "Link", type: "url" },
+        ],
+        views: [{ id: "v-readings-table", name: "Reading list", type: "table" }],
+        rows: [
+          {
+            id: "rd-1",
+            cells: {
+              "r-title": "Ch. 4 — Recursion",
+              "r-course": "rc-cs101",
+              "r-done": false,
+              "r-link": "https://example.com/cs101-ch4",
+            },
+          },
+          {
+            id: "rd-2",
+            cells: {
+              "r-title": "Set Theory Notes",
+              "r-course": "rc-math201",
+              "r-done": true,
+              "r-link": null,
+            },
+          },
+          {
+            id: "rd-3",
+            cells: {
+              "r-title": "Big-O Cheatsheet",
+              "r-course": "rc-cs210",
+              "r-done": false,
+              "r-link": "https://example.com/big-o",
+            },
+          },
+          {
+            id: "rd-4",
+            cells: {
+              "r-title": "Citation Style Guide",
+              "r-course": "rc-eng102",
+              "r-done": false,
+              "r-link": null,
+            },
+          },
+          {
+            id: "rd-5",
+            cells: {
+              "r-title": "Kinematics — Ch. 2",
+              "r-course": "rc-phys150",
+              "r-done": true,
+              "r-link": null,
+            },
+          },
+        ],
+      },
+    ],
+
+    pages: [
+      // ---- Home / Dashboard ------------------------------------------------
+      {
+        id: "page-home",
+        title: "Dashboard",
+        icon: "🏠",
+        blocks: [
+          {
+            id: "b-welcome",
+            type: "callout",
+            emoji: "👋",
+            text: "Welcome to your Study HQ — your whole semester in one place. Generated for: a 1st-year CS student taking 5 courses.",
+          },
+          {
+            id: "b-h-due",
+            type: "heading",
+            level: 2,
+            text: "📌 Assignments by status",
+          },
+          {
+            id: "b-board",
+            type: "database_view",
+            databaseId: "db-assignments",
+            viewId: "v-assign-board",
+          },
+          { id: "b-h-grades", type: "heading", level: 2, text: "🎯 Grades" },
+          {
+            id: "b-grades",
+            type: "grades",
+            title: "Grades",
+            databaseId: "db-assignments",
+            columns: { course: "a-course", score: "a-score", weight: "a-weight", due: "a-due" },
+          },
+          { id: "b-h-courses", type: "heading", level: 2, text: "📚 My courses" },
+          {
+            id: "b-courses",
+            type: "database_view",
+            databaseId: "db-courses",
+            viewId: "v-courses-table",
+          },
+        ],
+      },
+
+      // ---- Assignments page ------------------------------------------------
+      {
+        id: "page-assignments",
+        title: "Assignments",
+        icon: "📝",
+        blocks: [
+          {
+            id: "pa-p",
+            type: "paragraph",
+            text: "Everything you owe, with due dates and weights.",
+          },
+          {
+            id: "pa-table",
+            type: "database_view",
+            databaseId: "db-assignments",
+            viewId: "v-assign-table",
+          },
+        ],
+      },
+
+      // ---- Courses page ----------------------------------------------------
+      {
+        id: "page-courses",
+        title: "Courses",
+        icon: "📚",
+        blocks: [
+          {
+            id: "pc-table",
+            type: "database_view",
+            databaseId: "db-courses",
+            viewId: "v-courses-table",
+          },
+        ],
+      },
+
+      // ---- Planner page ----------------------------------------------------
+      {
+        id: "page-planner",
+        title: "Planner",
+        icon: "🗓",
+        blocks: [
+          {
+            id: "pp-p",
+            type: "paragraph",
+            text: "Your deadlines laid out on a calendar.",
+          },
+          {
+            id: "pp-cal",
+            type: "database_view",
+            databaseId: "db-assignments",
+            viewId: "v-assign-calendar",
+          },
+        ],
+      },
+
+      // ---- Reading list page ----------------------------------------------
+      {
+        id: "page-readings",
+        title: "Reading List",
+        icon: "📖",
+        blocks: [
+          {
+            id: "pr-table",
+            type: "database_view",
+            databaseId: "db-readings",
+            viewId: "v-readings-table",
+          },
+        ],
+      },
+
+      // ---- Flashcards page -------------------------------------------------
+      {
+        id: "page-flashcards",
+        title: "Flashcards",
+        icon: "🗂",
+        blocks: [
+          {
+            id: "pf-p",
+            type: "paragraph",
+            text: "Review with spaced repetition — the app schedules each card so you see it right before you'd forget. Ask the AI to make a deck from any topic.",
+          },
+          {
+            id: "pf-deck",
+            type: "flashcards",
+            title: "Data Structures — CS 210",
+            cards: [
+              {
+                id: "fc-1",
+                front: "What is the average-case time complexity of a hash table lookup?",
+                back: "O(1) — constant time, assuming a good hash function and low load factor.",
+              },
+              {
+                id: "fc-2",
+                front: "How does a stack differ from a queue?",
+                back: "A stack is LIFO (last in, first out); a queue is FIFO (first in, first out).",
+              },
+              {
+                id: "fc-3",
+                front: "What is the worst-case time to search a balanced binary search tree?",
+                back: "O(log n) — the tree's height stays logarithmic in the number of nodes.",
+              },
+              {
+                id: "fc-4",
+                front: "When is a linked list preferable to an array?",
+                back: "When you need frequent insertions/deletions at arbitrary positions and don't need O(1) random access.",
+              },
+              {
+                id: "fc-5",
+                front: "What does Big-O notation describe?",
+                back: "An upper bound on how an algorithm's running time or space grows as the input size grows.",
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+}
+
+/** The sample built for `SAMPLE_REFERENCE_DAY`: a deterministic fixture for tests. */
+export const sampleWorkspace: Workspace = buildSampleWorkspace(SAMPLE_REFERENCE_DAY);

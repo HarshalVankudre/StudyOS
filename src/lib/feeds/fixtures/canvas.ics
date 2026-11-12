@@ -1,0 +1,68 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:icalendar-ruby
+CALSCALE:GREGORIAN
+METHOD:PUBLISH
+X-WR-CALNAME:Alex Rivera Calendar (Canvas)
+X-WR-CALDESC:Calendar events for the user\, Alex Rivera
+BEGIN:VEVENT
+DTEND:20261114T045900Z
+DTSTAMP:20261112T081500Z
+DTSTART:20261114T045900Z
+CLASS:PUBLIC
+DESCRIPTION:Write a 1500-word argument analysis of the assigned op-ed. Use 
+ at least three scholarly sources\, cite in MLA\; submit as PDF.\nRubric is on the assignment page.
+LOCATION:
+SEQUENCE:0
+SUMMARY:Essay 2: Argument Analysis [ENG 102-01 FA26]
+URL;VALUE=URI:https://canvas.university.edu/calendar?include_contexts=cours
+ e_4521&month=11&year=2026#assignment_99881
+UID:event-assignment-99881
+X-ALT-DESC;FMTTYPE=text/html:<p>Write a 1500-word argument analysis.</p>
+END:VEVENT
+BEGIN:VEVENT
+DTEND:20261117T155900Z
+DTSTAMP:20261112T081500Z
+DTSTART:20261117T155900Z
+CLASS:PUBLIC
+DESCRIPTION:
+SEQUENCE:0
+SUMMARY:Problem Set 7 [CS101-001-FA26]
+URL;VALUE=URI:https://canvas.university.edu/calendar?include_contexts=cours
+ e_4602&month=11&year=2026#assignment_99902
+UID:event-assignment-99902
+END:VEVENT
+BEGIN:VEVENT
+DTEND;VALUE=DATE:20261124
+DTSTAMP:20261112T081500Z
+DTSTART;VALUE=DATE:20261123
+CLASS:PUBLIC
+DESCRIPTION:Covers chapters 1-6. Bring a calculator.
+LOCATION:Science Hall 120
+SEQUENCE:0
+SUMMARY:Midterm Exam [MATH 201]
+URL;VALUE=URI:https://canvas.university.edu/calendar?include_contexts=cours
+ e_4610&month=11&year=2026#calendar_event_5512
+UID:event-calendar-event-5512
+END:VEVENT
+BEGIN:VEVENT
+DTEND:20261008T035900Z
+DTSTAMP:20261112T081500Z
+DTSTART:20261008T035900Z
+CLASS:PUBLIC
+SUMMARY:Reading Response 1 [ENG 102-01 FA26]
+URL;VALUE=URI:https://canvas.university.edu/calendar?include_contexts=cours
+ e_4521&month=10&year=2026#assignment_99001
+UID:event-assignment-99001
+END:VEVENT
+BEGIN:VEVENT
+DTEND:20261202T045900Z
+DTSTAMP:20261112T081500Z
+DTSTART:20261202T045900Z
+CLASS:PUBLIC
+SUMMARY:Lab 9: Recursion\, Part 2 [CS101-001-FA26]
+URL;VALUE=URI:https://canvas.university.edu/calendar?include_contexts=cours
+ e_4602&month=12&year=2026#assignment_99950
+UID:event-assignment-99950
+END:VEVENT
+END:VCALENDAR

@@ -2,23 +2,31 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth, currentUser } from "@clerk/nextjs/server";
-import { SignOutButton } from "@clerk/nextjs";
 import { isPro } from "@/lib/billing";
+import { getCreditBalance } from "@/lib/credits";
 import {
   CREDIT_PACK_PRICE_USD,
   CREDIT_PACK_SIZE,
-  getCreditBalance,
-} from "@/lib/credits";
+  PRO_MONTHLY_CREDITS,
+  TRIAL_CREDITS,
+} from "@/lib/price-list";
 import { getI18n } from "@/lib/i18n/server";
 import { DeleteAccountButton } from "@/components/account/DeleteAccountButton";
+import { formatUsd } from "@/lib/plan-pricing";
+import { SignOutButton } from "@/components/account/SignOutButton";
+import { DownloadDataButton } from "@/components/account/DownloadDataButton";
 import { CalendarSubscribe } from "@/components/account/CalendarSubscribe";
 import { ManageAccountButton } from "@/components/account/ManageAccountButton";
+import { NotificationSettings } from "@/components/notifications/NotificationSettings";
+import { getNotificationSettings } from "@/lib/notifications/service";
 import { getCalendarFeedUrlAction } from "../calendar-actions";
 import {
   buyCreditsAction,
   manageBillingAction,
   startCheckoutAction,
 } from "../billing-actions";
+import { isBillingConfigured } from "@/lib/stripe";
+import { ComingSoon } from "@/components/account/ComingSoon";
 
 export async function generateMetadata(): Promise<Metadata> {
   const { dict } = await getI18n();
@@ -29,15 +37,19 @@ export default async function SettingsPage() {
   const { userId } = await auth();
   if (!userId) redirect("/sign-in");
 
-  const [user, pro, credits, calendarUrl, { dict, t, locale }] =
+  const [user, pro, credits, calendarUrl, { dict, t, locale, plural }, notifications] =
     await Promise.all([
       currentUser(),
       isPro(),
       getCreditBalance(userId),
       getCalendarFeedUrlAction(),
       getI18n(),
+      // Hidden entirely when push is not configured; never blocks the page.
+      getNotificationSettings(userId).catch(() => null),
     ]);
   const S = dict.settings;
+  // Without payments switched on, upgrading and packs are shown as coming soon.
+  const billing = isBillingConfigured();
 
   const email = user?.emailAddresses?.[0]?.emailAddress;
   const name =
@@ -108,7 +120,10 @@ export default async function SettingsPage() {
           </div>
 
           <p className="mt-3 text-sm text-ink-soft">
-            {pro ? S.proDesc : S.freeDesc}
+            {t(pro ? S.proDesc : S.freeDesc, {
+              monthly: PRO_MONTHLY_CREDITS.toLocaleString(locale),
+              trial: TRIAL_CREDITS.toLocaleString(locale),
+            })}
           </p>
 
           <div className="mt-5 flex flex-wrap gap-3">
@@ -123,14 +138,18 @@ export default async function SettingsPage() {
               </form>
             ) : (
               <>
-                <form action={startCheckoutAction}>
-                  <button
-                    type="submit"
-                    className="rounded-lg bg-ink px-5 py-2.5 text-sm font-semibold text-paper transition hover:bg-ink/90"
-                  >
-                    {S.upgrade}
-                  </button>
-                </form>
+                {billing ? (
+                  <form action={startCheckoutAction}>
+                    <button
+                      type="submit"
+                      className="rounded-lg bg-ink px-5 py-2.5 text-sm font-semibold text-paper transition hover:bg-ink/90"
+                    >
+                      {S.upgrade}
+                    </button>
+                  </form>
+                ) : (
+                  <ComingSoon messages={dict.spend} note className="w-full sm:max-w-sm" />
+                )}
                 <Link
                   href="/pricing"
                   className="rounded-lg border border-ink/15 bg-card px-5 py-2.5 text-sm font-semibold text-ink transition hover:border-ink/40"
@@ -152,22 +171,30 @@ export default async function SettingsPage() {
               <span className="text-lime-deep" aria-hidden>
                 ●
               </span>
-              {t(dict.credits.amount, { count: credits.toLocaleString(locale) })}
+              {plural(dict.counts.credits, credits)}
             </span>
           </div>
-          <p className="mt-3 text-sm text-ink-soft">{S.creditsDesc}</p>
+          <p className="mt-3 text-sm text-ink-soft">
+            {pro
+              ? t(S.creditsDescPro, { monthly: PRO_MONTHLY_CREDITS.toLocaleString(locale) })
+              : S.creditsDescFree}
+          </p>
           <div className="mt-5 flex flex-wrap gap-3">
-            <form action={buyCreditsAction}>
-              <button
-                type="submit"
-                className="rounded-lg bg-ink px-5 py-2.5 text-sm font-semibold text-paper transition hover:bg-ink/90"
-              >
-                {t(S.buyPack, {
-                  count: CREDIT_PACK_SIZE.toLocaleString(locale),
-                  price: CREDIT_PACK_PRICE_USD,
-                })}
-              </button>
-            </form>
+            {billing ? (
+              <form action={buyCreditsAction}>
+                <button
+                  type="submit"
+                  className="rounded-lg bg-ink px-5 py-2.5 text-sm font-semibold text-paper transition hover:bg-ink/90"
+                >
+                  {t(S.buyPack, {
+                    count: CREDIT_PACK_SIZE.toLocaleString(locale),
+                    price: formatUsd(CREDIT_PACK_PRICE_USD, locale),
+                  })}
+                </button>
+              </form>
+            ) : (
+              <ComingSoon messages={dict.spend} className="w-full sm:max-w-sm" />
+            )}
             <Link
               href="/pricing#credits"
               className="rounded-lg border border-ink/15 bg-card px-5 py-2.5 text-sm font-semibold text-ink transition hover:border-ink/40"
@@ -177,6 +204,20 @@ export default async function SettingsPage() {
           </div>
         </section>
 
+        {/* Notifications (Web Push) */}
+        {notifications?.configured && (
+          <section
+            id="notifications"
+            className="mt-6 scroll-mt-20 rounded-2xl border border-ink/10 bg-card/60 p-6"
+          >
+            <h2 className="font-display text-lg font-bold">{dict.notifications.title}</h2>
+            <p className="mt-3 text-sm text-ink-soft">{dict.notifications.description}</p>
+            <div className="mt-5">
+              <NotificationSettings initial={notifications} />
+            </div>
+          </section>
+        )}
+
         {/* Calendar sync */}
         <section className="mt-6 rounded-2xl border border-ink/10 bg-card/60 p-6">
           <h2 className="font-display text-lg font-bold">{dict.calendar.title}</h2>
@@ -185,6 +226,15 @@ export default async function SettingsPage() {
           </p>
           <div className="mt-5">
             <CalendarSubscribe initialUrl={calendarUrl} />
+          </div>
+        </section>
+
+        {/* Your data (GDPR access / portability) */}
+        <section className="mt-6 rounded-2xl border border-ink/10 bg-card/60 p-6">
+          <h2 className="font-display text-lg font-bold">{S.yourData}</h2>
+          <p className="mt-3 text-sm text-ink-soft">{S.yourDataDesc}</p>
+          <div className="mt-5">
+            <DownloadDataButton />
           </div>
         </section>
 
@@ -201,11 +251,10 @@ export default async function SettingsPage() {
 
         {/* Sign out */}
         <div className="mt-8 text-center">
-          <SignOutButton redirectUrl="/">
-            <button className="text-sm font-medium text-ink-soft transition hover:text-rose-600">
-              {S.signOut}
-            </button>
-          </SignOutButton>
+          <SignOutButton
+            label={S.signOut}
+            className="text-sm font-medium text-ink-soft transition hover:text-rose-600"
+          />
         </div>
       </main>
     </div>

@@ -87,8 +87,12 @@ export function registerBuiltinTools(registry: ToolRegistry = toolRegistry): voi
       const result = await controlledFetch(input.url, {
         allowlist: fetchAllowlist(),
         signal: ctx.signal,
+        // One structured INFO line per web read (host, status, size; never
+        // the path, query or body) for Cloud Logging.
         audit: (record) =>
-          console.log("[StudyOS] controlled_fetch", record),
+          console.log(
+            JSON.stringify({ severity: "INFO", message: "[StudyOS] controlled_fetch", ...record }),
+          ),
       });
       return {
         status: result.status,

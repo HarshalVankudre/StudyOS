@@ -8,7 +8,7 @@
  * before it is ever persisted — so a malformed op can never corrupt data.
  */
 import { z } from "zod";
-import type { Workspace } from "@/lib/workspace/types";
+import type { Database, DatabaseView, Workspace } from "@/lib/workspace/types";
 import {
   blockSchema,
   cellValueSchema,
@@ -16,9 +16,22 @@ import {
   databaseRowSchema,
   databaseSchema,
   databaseViewSchema,
+  gradeCategorySchema,
+  gradesBlockSchema,
   pageSchema,
 } from "@/lib/workspace/schema";
+import { findGradeDatabase, resolveGradeColumns } from "@/lib/grades/workspace";
+import { cellText } from "@/lib/grades/categories";
+import { matchAssessments } from "@/lib/import/assessment-match";
+import { reconcileAgentQuiz } from "@/lib/study/quiz";
+import type { Block, QuizBlock } from "@/lib/workspace/types";
 import { AGENT_LIMITS } from "./limits";
+import {
+  mergeView,
+  viewPatchSchema,
+  viewPresetSchema,
+  viewWithPreset,
+} from "./agent-view-ops";
 
 // Untrusted op fields are length-bounded so a malicious/runaway result cannot
 // smuggle a huge string or array through to the trusted apply path. Ids stay
@@ -33,7 +46,8 @@ export const agentOpSchema = z.discriminatedUnion("op", [
     rowId: limitedString,
     cells: z.record(limitedString, cellValueSchema),
   }),
-  z.object({ op: z.literal("add_row"), databaseId: limitedString, row: databaseRowSchema }),
+  // `distinct`: the agent checked that a similar existing row is another item (see agent-duplicates).
+  z.object({ op: z.literal("add_row"), databaseId: limitedString, row: databaseRowSchema, distinct: z.boolean().optional() }),
   z.object({ op: z.literal("delete_row"), databaseId: limitedString, rowId: limitedString }),
 
   // ---- database meta ----
@@ -56,8 +70,20 @@ export const agentOpSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("delete_property"), databaseId: limitedString, propertyId: limitedString }),
 
   // ---- views ----
-  z.object({ op: z.literal("add_view"), databaseId: limitedString, view: databaseViewSchema }),
-  z.object({ op: z.literal("update_view"), databaseId: limitedString, view: databaseViewSchema }),
+  z.object({
+    op: z.literal("add_view"),
+    databaseId: limitedString,
+    view: databaseViewSchema,
+    preset: viewPresetSchema.optional(),
+  }),
+  // A patch, not a replacement: omitted fields keep their saved value (see
+  // ./agent-view-ops), so saved filters and sorts are never wiped by accident.
+  z.object({
+    op: z.literal("update_view"),
+    databaseId: limitedString,
+    view: viewPatchSchema,
+    preset: viewPresetSchema.optional(),
+  }),
   z.object({ op: z.literal("delete_view"), databaseId: limitedString, viewId: limitedString }),
 
   // ---- pages ----
@@ -75,6 +101,18 @@ export const agentOpSchema = z.discriminatedUnion("op", [
     blocks: z.array(blockSchema).max(AGENT_LIMITS.maxArray),
   }),
   z.object({ op: z.literal("replace_page"), page: pageSchema }),
+  // Add a grades block (after `afterBlockId`, else at the end) or reconfigure
+  // the one with the same id in place, without resending the page.
+  // `categories` sets the grading categories of the courses it names (weights
+  // many items share, "Homework 30%"); `assign` places rows by hand.
+  z.object({
+    op: z.literal("set_grades_block"),
+    pageId: limitedString,
+    block: gradesBlockSchema,
+    afterBlockId: limitedString.optional(),
+    categories: z.array(gradeCategorySchema.extend({ id: limitedString.optional() })).max(50).optional(),
+    assign: z.record(limitedString, limitedString).optional(),
+  }),
 
   // ---- workspace root ----
   z.object({
@@ -112,6 +150,19 @@ export function applyAgentOps(workspace: Workspace, ops: AgentOp[]): Workspace {
     if (!page) throw new Error(`operation referenced unknown page "${id}"`);
     return page;
   };
+  // Quiz blocks the agent writes keep the student's stats/attempts when it
+  // leaves them out, and any question it adds or changes must be complete.
+  const quizzesBefore = new Map<string, QuizBlock>();
+  for (const p of workspace.pages) {
+    for (const b of p.blocks) if (b.type === "quiz") quizzesBefore.set(b.id, b);
+  }
+  const checkQuizzes = (blocks: Block[]) => {
+    for (const b of blocks) {
+      if (b.type !== "quiz") continue;
+      const problem = reconcileAgentQuiz(b, quizzesBefore.get(b.id));
+      if (problem) throw new Error(problem);
+    }
+  };
 
   for (const op of ops) {
     switch (op.op) {
@@ -147,7 +198,11 @@ export function applyAgentOps(workspace: Workspace, ops: AgentOp[]): Workspace {
       case "replace_database": {
         const index = next.databases.findIndex((d) => d.id === op.database.id);
         if (index === -1) next.databases.push(op.database);
-        else next.databases[index] = op.database;
+        else {
+          // A rewrite that leaves the grading scheme out keeps it (it is easy to forget).
+          const kept = next.databases[index].grading;
+          next.databases[index] = op.database.grading || !kept ? op.database : { ...op.database, grading: kept };
+        }
         break;
       }
       case "add_property":
@@ -165,14 +220,18 @@ export function applyAgentOps(workspace: Workspace, ops: AgentOp[]): Workspace {
         db.properties = db.properties.filter((p) => p.id !== op.propertyId);
         break;
       }
-      case "add_view":
-        findDb(op.databaseId).views.push(op.view);
+      case "add_view": {
+        const db = findDb(op.databaseId);
+        db.views.push(viewWithPreset(db, op.view, op.preset));
         break;
+      }
       case "update_view": {
         const db = findDb(op.databaseId);
         const index = db.views.findIndex((v) => v.id === op.view.id);
-        if (index === -1) db.views.push(op.view);
-        else db.views[index] = op.view;
+        // An unknown id adds the view (the whole-workspace validation then
+        // rejects it unless the patch was a complete view).
+        if (index === -1) db.views.push(viewWithPreset(db, op.view as DatabaseView, op.preset));
+        else db.views[index] = mergeView(db, db.views[index], op.view, op.preset);
         break;
       }
       case "delete_view": {
@@ -181,6 +240,7 @@ export function applyAgentOps(workspace: Workspace, ops: AgentOp[]): Workspace {
         break;
       }
       case "add_page":
+        checkQuizzes(op.page.blocks);
         next.pages.push(op.page);
         break;
       case "update_page": {
@@ -193,12 +253,34 @@ export function applyAgentOps(workspace: Workspace, ops: AgentOp[]): Workspace {
         next.pages = next.pages.filter((p) => p.id !== op.pageId);
         break;
       case "set_page_blocks":
+        checkQuizzes(op.blocks);
         findPage(op.pageId).blocks = op.blocks;
         break;
       case "replace_page": {
+        checkQuizzes(op.page.blocks);
         const index = next.pages.findIndex((p) => p.id === op.page.id);
         if (index === -1) next.pages.push(op.page);
         else next.pages[index] = op.page;
+        break;
+      }
+      case "set_grades_block": {
+        const page = findPage(op.pageId);
+        if (op.block.databaseId) findDb(op.block.databaseId);
+        const at = page.blocks.findIndex((b) => b.id === op.block.id);
+        if (at >= 0) {
+          if (page.blocks[at].type !== "grades") {
+            throw new Error(`set_grades_block: block "${op.block.id}" is not a grades block`);
+          }
+          page.blocks[at] = op.block;
+        } else {
+          const after = op.afterBlockId ? page.blocks.findIndex((b) => b.id === op.afterBlockId) : -1;
+          page.blocks.splice(after >= 0 ? after + 1 : page.blocks.length, 0, op.block);
+        }
+        if (op.categories || op.assign) {
+          const dbId = op.block.databaseId ?? findGradeDatabase(next)?.id;
+          if (!dbId) throw new Error("set_grades_block: categories need the block's databaseId");
+          setGrading(findDb(dbId), op.categories ?? [], op.assign);
+        }
         break;
       }
       case "update_workspace":
@@ -209,5 +291,79 @@ export function applyAgentOps(workspace: Workspace, ops: AgentOp[]): Workspace {
     }
   }
 
+  assertUniqueIds(next);
   return next;
+}
+
+type AgentCategory = NonNullable<Extract<AgentOp, { op: "set_grades_block" }>["categories"]>[number];
+
+/**
+ * The grading categories of every course `categories` names are replaced by
+ * those given (other courses keep theirs); a category keeps its id when one
+ * of the same course and name exists. A row the list kept for one of them
+ * (same name, no date, no score) is removed: a category is never a row.
+ */
+function setGrading(db: Database, categories: AgentCategory[], assign: Record<string, string> | undefined) {
+  db.grading ??= { categories: [] };
+  const scheme = db.grading;
+  const courses = new Set(categories.map((c) => c.course));
+  const old = scheme.categories;
+  const taken = new Set<string>();
+  const fresh = categories.map((c) => {
+    const same = old.find((o) => o.course === c.course && o.name.trim().toLowerCase() === c.name.trim().toLowerCase());
+    let id = c.id ?? same?.id ?? `cat-${c.name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-").slice(0, 24) || "group"}`;
+    while (taken.has(id) || old.some((o) => o.id === id && !courses.has(o.course))) id = `${id}-2`;
+    taken.add(id);
+    return { ...c, id };
+  });
+  scheme.categories = [...old.filter((o) => !courses.has(o.course)), ...fresh];
+  if (assign) {
+    const ids = new Set(scheme.categories.map((c) => c.id));
+    for (const [rowId, categoryId] of Object.entries(assign)) {
+      if (categoryId !== "" && !ids.has(categoryId)) throw new Error(`set_grades_block: assign names unknown category "${categoryId}"`);
+      if (!db.rows.some((r) => r.id === rowId)) throw new Error(`set_grades_block: assign names unknown row "${rowId}"`);
+    }
+    scheme.assign = { ...(scheme.assign ?? {}), ...assign };
+  }
+  const columns = resolveGradeColumns(db, undefined);
+  const title = db.properties.find((p) => p.type === "text");
+  if (!title) return;
+  db.rows = db.rows.filter((row) => {
+    const name = cellText(row.cells[title.id]);
+    const dated = columns.due ? cellText(row.cells[columns.due.id]) !== "" : false;
+    const scored = columns.score ? typeof row.cells[columns.score.id] === "number" : false;
+    if (!name || dated || scored) return true;
+    return !fresh.some((c) => matchAssessments(c.name, name).strength === "same" && name.trim().toLowerCase() === c.name.trim().toLowerCase());
+  });
+}
+
+/**
+ * Ids must be unique within each list (pages, blocks of a page, cards of a
+ * deck, questions, databases, columns, rows, views, options): every edit is
+ * addressed by id, so a reused id (an agent picking one that exists) would
+ * make edits to either item ambiguous.
+ */
+function assertUniqueIds(ws: Workspace): void {
+  const check = (items: { id: string }[], where: string) => {
+    const seen = new Set<string>();
+    for (const item of items) {
+      if (seen.has(item.id)) throw new Error(`duplicate id "${item.id}" in ${where}; use a new id`);
+      seen.add(item.id);
+    }
+  };
+  check(ws.pages, "pages");
+  check(ws.databases, "databases");
+  for (const page of ws.pages) {
+    check(page.blocks, `the blocks of page "${page.id}"`);
+    for (const block of page.blocks) {
+      if (block.type === "flashcards") check(block.cards, `the cards of "${block.id}"`);
+      else if (block.type === "quiz") check(block.questions, `the questions of "${block.id}"`);
+    }
+  }
+  for (const db of ws.databases) {
+    check(db.properties, `the columns of "${db.id}"`);
+    check(db.rows, `the rows of "${db.id}"`);
+    check(db.views, `the views of "${db.id}"`);
+    for (const prop of db.properties) if (prop.options) check(prop.options, `the options of "${prop.id}"`);
+  }
 }

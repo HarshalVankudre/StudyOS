@@ -71,9 +71,31 @@ export type GenerationEvent =
       balance?: number;
     }
   | {
+      /**
+       * The student stopped the build: nothing was saved, and `credits` were
+       * charged for the AI work already done (0 when none had started).
+       */
+      type: "cancelled";
+      credits: number;
+    }
+  | {
       type: "error";
       message: string;
+      /**
+       * Lets the client offer the right way forward: buy credits, wait, or
+       * retry. A "generation_failed" error was never charged.
+       */
+      code?: GenerationErrorCode;
     };
+
+export type GenerationErrorCode =
+  | "out_of_credits"
+  | "rate_limited"
+  /** Several builds failed recently; new ones wait (failed builds are free). */
+  | "too_many_failures"
+  /** The account stores the most workspaces it may. */
+  | "workspace_limit"
+  | "generation_failed";
 
 export interface ComponentProgress {
   status: "queued" | "generating" | "complete";

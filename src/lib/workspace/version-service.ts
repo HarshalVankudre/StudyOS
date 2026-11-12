@@ -7,17 +7,57 @@
  * before/after snapshot in `WorkspaceChange`. `undoAgentWorkspaceChange`
  * restores that exact "before" snapshot (referenced by a server-generated id,
  * never client JSON) as a new version, so history stays auditable.
+ *
+ * Both go through the same save gate as every other write
+ * (`prepareWorkspaceForSave`: repaired, size-capped) before anything is
+ * written, so the agent can never store a workspace the student then cannot
+ * save, and an oversized result fails before the turn is charged.
+ *
+ * When the workspace moved on meanwhile (another tab saved during a long
+ * task, or edits after the agent's change), the change is applied on top of
+ * the newer version only if a strict three-way merge finds no overlap
+ * (changes.ts, "strict" mode); otherwise it is refused as before.
+ *
+ * Every write here keeps the workspace's save log in step with its version
+ * (`logAfterWrite`), so an editor tab can still tell for certain whether a
+ * save of its own landed before or after the agent's change (save-ids.ts).
  */
 import "server-only";
 
 import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/db";
+import { applyPatch, diff } from "./changes";
+import { keepUnknownFields, prepareWorkspaceForSave } from "./repair";
+import { readSaveLog, recordSave, serializeSaveLog } from "./save-ids";
 import { safeParseWorkspace } from "./schema";
+import { NOT_TRASHED, columnText, parseStoredWorkspace } from "./store";
 import type { Workspace } from "./types";
+
+/** The save log after a write by this service (no editor save to record). */
+function logAfterWrite(raw: string | null | undefined, version: number): string {
+  return serializeSaveLog(recordSave(readSaveLog(raw, version), version + 1));
+}
 
 export class WorkspaceNotFoundError extends Error {}
 export class WorkspaceVersionConflictError extends Error {}
-export class WorkspaceChangeUnavailableError extends Error {}
+
+/**
+ * Why an agent change cannot be undone:
+ *  - "newer_edits": edits saved after the change touch what it changed (or
+ *    landed while the Undo ran), so only the editor's own undo can step back;
+ *  - "unavailable": no such change for this owner, or it was already undone.
+ */
+export type UndoUnavailableReason = "newer_edits" | "unavailable";
+
+export class WorkspaceChangeUnavailableError extends Error {
+  constructor(
+    message: string,
+    readonly reason: UndoUnavailableReason = "unavailable",
+  ) {
+    super(message);
+    this.name = "WorkspaceChangeUnavailableError";
+  }
+}
 
 export interface WorkspaceSnapshot {
   workspace: Workspace;
@@ -34,10 +74,12 @@ async function requireOwnerId(): Promise<string> {
   return userId;
 }
 
+// Stored snapshots are read tolerantly (one imperfect piece is repaired or
+// dropped, never the whole workspace), matching the editor's loader.
 function parseWorkspace(data: string, id: string): Workspace {
-  const parsed = safeParseWorkspace(JSON.parse(data));
-  if (!parsed.success) throw new Error("Stored workspace is invalid");
-  return { ...parsed.data, id };
+  const workspace = parseStoredWorkspace({ id, data });
+  if (!workspace) throw new Error("Stored workspace is invalid");
+  return workspace;
 }
 
 export async function getWorkspaceSnapshot(
@@ -45,43 +87,76 @@ export async function getWorkspaceSnapshot(
 ): Promise<WorkspaceSnapshot | null> {
   const ownerId = await requireOwnerId();
   const row = await prisma.workspace.findFirst({
-    where: { id, ownerId },
+    where: { id, ownerId, ...NOT_TRASHED },
     select: { data: true, version: true },
   });
   if (!row) return null;
   return { workspace: parseWorkspace(row.data, id), version: row.version };
 }
 
+/**
+ * Write the agent's result as a new version.
+ *
+ * `base` is the workspace the agent started from (the snapshot read at
+ * `baseVersion`). When given and the workspace has moved on since, the
+ * agent's changes (base -> result) are applied on top of the newer version if
+ * they do not overlap with what changed meanwhile; any overlap refuses with
+ * WorkspaceVersionConflictError, as without `base`.
+ *
+ * Throws WorkspaceTooLargeError / InvalidWorkspaceError (repair.ts) before
+ * writing anything when the result cannot be stored.
+ */
 export async function applyAgentWorkspaceChange(
   id: string,
   baseVersion: number,
   nextWorkspace: Workspace,
+  base?: Workspace,
 ): Promise<WorkspaceChangeResult> {
   const ownerId = await requireOwnerId();
   const normalized = { ...nextWorkspace, id };
+  // Untrusted model output: all-or-nothing validation, then the save gate.
   const parsed = safeParseWorkspace(normalized);
   if (!parsed.success) throw new Error("Agent workspace is invalid");
-  // Persist the validated workspace exactly as given (matching store.ts, which
-  // stores the raw object and only normalizes on read), so the recorded
-  // after-snapshot is byte-identical to the workspace column it sets.
-  const afterData = JSON.stringify(normalized);
+  // The agent's result went through schema parsing, which drops fields this
+  // version does not know: take them back from what the agent started from.
+  const prepared = prepareWorkspaceForSave(
+    base ? keepUnknownFields(base, structuredClone(normalized)) : normalized,
+    id,
+  );
 
   return prisma.$transaction(async (tx) => {
     const current = await tx.workspace.findFirst({
-      where: { id, ownerId },
-      select: { data: true, version: true },
+      where: { id, ownerId, ...NOT_TRASHED },
+      select: { data: true, version: true, saveIds: true },
     });
     if (!current) throw new WorkspaceNotFoundError("Workspace not found");
+
+    let toWrite = prepared;
+    if (!base && current.version === baseVersion) {
+      // No base given: the current row is what the agent started from.
+      toWrite = prepareWorkspaceForSave(
+        keepUnknownFields(parseWorkspace(current.data, id), structuredClone(prepared.workspace)),
+        id,
+      );
+    }
     if (current.version !== baseVersion) {
-      throw new WorkspaceVersionConflictError("Workspace changed during the task");
+      if (!base) throw new WorkspaceVersionConflictError("Workspace changed during the task");
+      const merged = applyPatch(parseWorkspace(current.data, id), diff(base, prepared.workspace), {
+        mode: "strict",
+      });
+      if (merged.report.conflicts > 0) {
+        throw new WorkspaceVersionConflictError("Workspace changed during the task");
+      }
+      toWrite = prepareWorkspaceForSave(merged.doc, id);
     }
 
     const updated = await tx.workspace.updateMany({
-      where: { id, ownerId, version: baseVersion },
+      where: { id, ownerId, version: current.version, ...NOT_TRASHED },
       data: {
-        name: parsed.data.name,
-        icon: parsed.data.icon ?? null,
-        data: afterData,
+        name: columnText(toWrite.workspace.name),
+        icon: toWrite.workspace.icon == null ? null : columnText(toWrite.workspace.icon),
+        data: toWrite.data,
+        saveIds: logAfterWrite(current.saveIds, current.version),
         version: { increment: 1 },
       },
     });
@@ -95,21 +170,27 @@ export async function applyAgentWorkspaceChange(
         ownerId,
         kind: "agent",
         beforeData: current.data,
-        afterData,
-        beforeVersion: baseVersion,
-        afterVersion: baseVersion + 1,
+        afterData: toWrite.data,
+        beforeVersion: current.version,
+        afterVersion: current.version + 1,
       },
       select: { id: true },
     });
 
     return {
-      workspace: parsed.data,
-      version: baseVersion + 1,
+      workspace: toWrite.workspace,
+      version: current.version + 1,
       changeId: change.id,
     };
   });
 }
 
+/**
+ * Undo an agent change. Restores the exact "before" snapshot when nothing was
+ * saved since; when the student kept working after the agent (ordinary saves
+ * moved the version on), the agent's change alone is reverted on top of the
+ * current version, provided nothing changed since overlaps with it.
+ */
 export async function undoAgentWorkspaceChange(
   changeId: string,
 ): Promise<WorkspaceChangeResult> {
@@ -124,21 +205,30 @@ export async function undoAgentWorkspaceChange(
     }
 
     const current = await tx.workspace.findFirst({
-      where: { id: original.workspaceId, ownerId },
-      select: { data: true, version: true },
+      where: { id: original.workspaceId, ownerId, ...NOT_TRASHED },
+      select: { data: true, version: true, saveIds: true },
     });
     if (!current) throw new WorkspaceNotFoundError("Workspace not found");
-    if (current.version !== original.afterVersion) {
-      throw new WorkspaceChangeUnavailableError(
-        "Workspace has newer changes",
-      );
-    }
 
-    const restored = parseWorkspace(
-      original.beforeData,
+    const before = parseWorkspace(original.beforeData, original.workspaceId);
+    let restoredDoc: Workspace = before;
+    if (current.version !== original.afterVersion) {
+      const after = parseWorkspace(original.afterData, original.workspaceId);
+      const reverted = applyPatch(
+        parseWorkspace(current.data, original.workspaceId),
+        diff(after, before),
+        { mode: "strict" },
+      );
+      if (reverted.report.conflicts > 0) {
+        throw new WorkspaceChangeUnavailableError("Workspace has newer changes", "newer_edits");
+      }
+      restoredDoc = reverted.doc;
+    }
+    // The same gate as every write (repaired, size-capped).
+    const { workspace: restored, data: restoredData } = prepareWorkspaceForSave(
+      restoredDoc,
       original.workspaceId,
     );
-    const restoredData = JSON.stringify(restored);
     const nextVersion = current.version + 1;
 
     const updated = await tx.workspace.updateMany({
@@ -146,17 +236,20 @@ export async function undoAgentWorkspaceChange(
         id: original.workspaceId,
         ownerId,
         version: current.version,
+        ...NOT_TRASHED,
       },
       data: {
-        name: restored.name,
-        icon: restored.icon ?? null,
+        name: columnText(restored.name),
+        icon: restored.icon == null ? null : columnText(restored.icon),
         data: restoredData,
+        saveIds: logAfterWrite(current.saveIds, current.version),
         version: { increment: 1 },
       },
     });
     if (updated.count !== 1) {
       throw new WorkspaceChangeUnavailableError(
         "Workspace changed before Undo completed",
+        "newer_edits",
       );
     }
 

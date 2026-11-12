@@ -42,6 +42,95 @@ async function mountArtifact(page: Page, source: string) {
   return { frame };
 }
 
+// Like mountArtifact, but the parent starts listening only after the frame
+// has loaded and announced itself (a slow hydration, a deep link on the dev
+// server): it then says "hello", as ReactArtifact.tsx does.
+async function mountArtifactLate(page: Page, source: string) {
+  await page.goto("/privacy");
+  await page.evaluate(async (src) => {
+    const w = window as unknown as { __msgs: unknown[] };
+    w.__msgs = [];
+    const iframe = document.createElement("iframe");
+    iframe.id = "artifact";
+    iframe.src = "/embed/react";
+    iframe.setAttribute("sandbox", "allow-scripts");
+    iframe.style.width = "600px";
+    iframe.style.height = "400px";
+    const loaded = new Promise((resolve) => iframe.addEventListener("load", resolve, { once: true }));
+    document.body.appendChild(iframe);
+    await loaded;
+    // The frame's first "ready" went out with nobody listening.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    window.addEventListener("message", (ev) => {
+      if (ev.source !== iframe.contentWindow) return;
+      const data = ev.data as { type?: string };
+      w.__msgs.push(data);
+      if (data?.type === "ready") iframe.contentWindow?.postMessage({ type: "render", source: src }, "*");
+    });
+    iframe.contentWindow?.postMessage({ type: "hello" }, "*");
+  }, source);
+  return { frame: page.frameLocator("#artifact") };
+}
+
+const COUNTER = `
+  function App() {
+    const [n, setN] = React.useState(2);
+    return (
+      <div id="ok">
+        <p>sum is {n + 2}</p>
+        <button onClick={() => setN(n + 1)}>bump</button>
+      </div>
+    );
+  }
+`;
+
+test("renders when the parent starts listening after the frame said ready", async ({ page }) => {
+  const { frame } = await mountArtifactLate(page, COUNTER);
+  await expect(frame.locator("#ok")).toContainText("sum is 4", { timeout: 30_000 });
+});
+
+test("a repeated handshake does not remount the component or lose its state", async ({ page }) => {
+  const { frame } = await mountArtifact(page, COUNTER);
+  await expect(frame.locator("#ok")).toContainText("sum is 4", { timeout: 30_000 });
+  await frame.locator("button").click();
+  await expect(frame.locator("#ok")).toContainText("sum is 5");
+  // The parent says hello again (it remounted): the frame answers ready, the
+  // parent sends the same source, and the frame keeps what it shows.
+  await page.evaluate(() => {
+    const iframe = document.getElementById("artifact") as HTMLIFrameElement;
+    iframe.contentWindow?.postMessage({ type: "hello" }, "*");
+  });
+  await page.waitForTimeout(500);
+  await expect(frame.locator("#ok")).toContainText("sum is 5");
+});
+
+test("a frame stops re-announcing once rendered, and ignores messages from other windows", async ({ page }) => {
+  const { frame } = await mountArtifact(page, COUNTER);
+  await expect(frame.locator("#ok")).toContainText("sum is 4", { timeout: 30_000 });
+  const readies = async () =>
+    page.evaluate(() => (window as unknown as { __msgs: { type?: string }[] }).__msgs.filter((m) => m.type === "ready").length);
+  const before = await readies();
+  await page.waitForTimeout(1500);
+  expect(await readies()).toBe(before);
+  // A render from a window other than the parent (a nested frame of the
+  // page) is ignored by the runtime's source check.
+  await page.evaluate(() => {
+    const other = document.createElement("iframe");
+    other.name = "other";
+    document.body.appendChild(other);
+  });
+  const other = page.frame({ name: "other" });
+  expect(other).toBeTruthy();
+  // Runs in the nested frame's own realm, so that frame is the message's source.
+  await other!.evaluate(() => {
+    const target = (window.parent.document.getElementById("artifact") as HTMLIFrameElement).contentWindow;
+    target?.postMessage({ type: "render", source: "function App(){ return <p id='evil'>evil</p> }" }, "*");
+  });
+  await page.waitForTimeout(500);
+  await expect(frame.locator("#evil")).toHaveCount(0);
+  await expect(frame.locator("#ok")).toContainText("sum is 4");
+});
+
 test("embed route ships the lockdown CSP", async ({ page }) => {
   const res = await page.request.get("/embed/react");
   expect(res.status()).toBe(200);

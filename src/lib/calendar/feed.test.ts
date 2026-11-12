@@ -88,8 +88,8 @@ describe("calendar tokens", () => {
 describe("buildUserFeed", () => {
   it("aggregates dated rows across workspaces, sorted by date", async () => {
     mocks.workspaceFindMany.mockResolvedValue([
-      { data: JSON.stringify(ws("A", "2026-10-05")) },
-      { data: JSON.stringify(ws("B", "2026-09-01")) },
+      { id: "A", name: "A", data: JSON.stringify(ws("A", "2026-10-05")) },
+      { id: "B", name: "B", data: JSON.stringify(ws("B", "2026-09-01")) },
     ]);
     const ics = await buildUserFeed("u1", new Date("2026-07-03T00:00:00Z"));
     expect(ics).toContain("BEGIN:VCALENDAR");
@@ -97,16 +97,53 @@ describe("buildUserFeed", () => {
     expect(ics).toContain("DTSTART;VALUE=DATE:20261005");
     // Sorted: September event appears before October.
     expect(ics.indexOf("20260901")).toBeLessThan(ics.indexOf("20261005"));
-    expect(ics).toContain("SUMMARY:Task B");
+    // Two workspaces: each title says which one it belongs to.
+    expect(ics).toContain("SUMMARY:Task B · B");
+  });
+
+  it("reads oldest first and leaves completed items out unless asked", async () => {
+    const done = ws("E", "2026-12-24");
+    done.databases[0].properties.push({ id: "ok", name: "Done", type: "checkbox" });
+    done.databases[0].rows.push({ id: "r2", cells: { t: "Finished task", due: "2026-12-20", ok: true } });
+    mocks.workspaceFindMany.mockResolvedValue([{ id: "E", name: "E", data: JSON.stringify(done) }]);
+    const ics = await buildUserFeed("u1", new Date("2026-07-03T00:00:00Z"));
+    // Oldest first, so an untouched copy's events give way to its original's.
+    expect(mocks.workspaceFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ orderBy: { createdAt: "asc" } }),
+    );
+    expect(ics).toContain("SUMMARY:Task E");
+    expect(ics).not.toContain("Finished task");
+    const all = await buildUserFeed("u1", new Date("2026-07-03T00:00:00Z"), { includeCompleted: true });
+    expect(all).toContain("SUMMARY:✓ Finished task");
   });
 
   it("skips workspaces whose data is corrupt JSON", async () => {
     mocks.workspaceFindMany.mockResolvedValue([
-      { data: "{not json" },
-      { data: JSON.stringify(ws("C", "2026-11-11")) },
+      { id: "X", name: "X", data: "{not json" },
+      { id: "C", name: "C", data: JSON.stringify(ws("C", "2026-11-11")) },
     ]);
     const ics = await buildUserFeed("u1", new Date("2026-07-03T00:00:00Z"));
     expect(ics).toContain("20261111");
+  });
+
+  it("never reads trashed workspaces", async () => {
+    mocks.workspaceFindMany.mockResolvedValue([]);
+    await buildUserFeed("u1", new Date("2026-07-03T00:00:00Z"));
+    expect(mocks.workspaceFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { ownerId: "u1", deletedAt: null } }),
+    );
+  });
+
+  it("keeps deadlines from a workspace with one imperfect block", async () => {
+    const imperfect = ws("D", "2026-12-01") as unknown as {
+      pages: { id: string; title: string; blocks: unknown[] }[];
+    };
+    imperfect.pages = [
+      { id: "p", title: "P", blocks: [{ id: "x", type: "react_artifact", source: "" }] },
+    ];
+    mocks.workspaceFindMany.mockResolvedValue([{ id: "D", name: "D", data: JSON.stringify(imperfect) }]);
+    const ics = await buildUserFeed("u1", new Date("2026-07-03T00:00:00Z"));
+    expect(ics).toContain("20261201");
   });
 
   it("produces an empty but valid calendar when there are no workspaces", async () => {

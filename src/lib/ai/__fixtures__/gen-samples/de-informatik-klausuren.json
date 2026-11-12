@@ -1,0 +1,446 @@
+{
+  "source": "scratchpad gen-samples/after3-de-informatik.json (after3, de-informatik, claude-haiku-5-5), trimmed; polish-added blocks removed",
+  "locale": "de",
+  "today": "2026-11-12",
+  "workspace": {
+    "id": "ws-informatik-semester",
+    "name": "Informatik Semester HQ",
+    "icon": "🎓",
+    "pages": [
+      {
+        "id": "page-home",
+        "title": "Dashboard",
+        "icon": "🏠",
+        "blocks": [
+          {
+            "id": "b-welcome",
+            "type": "callout",
+            "text": "Willkommen in deinem Semester-HQ. Die Klausuren finden im Februar 2027 statt.",
+            "emoji": "👋"
+          },
+          {
+            "id": "b-h-ub",
+            "type": "heading",
+            "level": 2,
+            "text": "✏️ Übungsblätter nach Status"
+          },
+          {
+            "id": "b-ub-board",
+            "type": "database_view",
+            "databaseId": "db-uebungsblaetter",
+            "viewId": "v-ub-board"
+          }
+        ]
+      },
+      {
+        "id": "page-uebungsblaetter",
+        "title": "Übungsblätter",
+        "icon": "✏️",
+        "blocks": [
+          {
+            "id": "pu-p",
+            "type": "paragraph",
+            "text": "Alle Übungsblätter mit Abgabefristen. Ziehe Karten im Board zwischen den Spalten, um den Status zu ändern."
+          },
+          {
+            "id": "pu-table",
+            "type": "database_view",
+            "databaseId": "db-uebungsblaetter",
+            "viewId": "v-ub-table"
+          },
+          {
+            "id": "pu-cal",
+            "type": "database_view",
+            "databaseId": "db-uebungsblaetter",
+            "viewId": "v-ub-calendar"
+          }
+        ]
+      },
+      {
+        "id": "page-lernplan",
+        "title": "Lernplan",
+        "icon": "🗓️",
+        "blocks": [
+          {
+            "id": "pl-p",
+            "type": "paragraph",
+            "text": "Wochenplan mit Lernblöcken bis zu den Klausuren im Februar."
+          },
+          {
+            "id": "pl-cal",
+            "type": "database_view",
+            "databaseId": "db-lernplan",
+            "viewId": "v-lp-calendar"
+          },
+          {
+            "id": "pl-table",
+            "type": "database_view",
+            "databaseId": "db-lernplan",
+            "viewId": "v-lp-table"
+          }
+        ]
+      },
+      {
+        "id": "page-klausuren",
+        "title": "Klausuren",
+        "icon": "🎯",
+        "blocks": [
+          {
+            "id": "pk-p",
+            "type": "paragraph",
+            "text": "Klausurtermine im Februar 2027 und dein Vorbereitungsstatus pro Fach."
+          },
+          {
+            "id": "pk-board",
+            "type": "database_view",
+            "databaseId": "db-klausuren",
+            "viewId": "v-kl-board"
+          },
+          {
+            "id": "pk-table",
+            "type": "database_view",
+            "databaseId": "db-klausuren",
+            "viewId": "v-kl-table"
+          }
+        ]
+      }
+    ],
+    "databases": [
+      {
+        "id": "db-uebungsblaetter",
+        "name": "Übungsblätter",
+        "icon": "✏️",
+        "description": "Alle Übungsblätter mit Abgabefristen und Status.",
+        "properties": [
+          {
+            "id": "u-name",
+            "name": "Übungsblatt",
+            "type": "text"
+          },
+          {
+            "id": "u-modul",
+            "name": "Modul",
+            "type": "select",
+            "options": [
+              {
+                "id": "mo-ana",
+                "label": "Analysis II",
+                "color": "blue"
+              },
+              {
+                "id": "mo-algo",
+                "label": "AuD",
+                "color": "violet"
+              },
+              {
+                "id": "mo-rn",
+                "label": "Rechnernetze",
+                "color": "emerald"
+              },
+              {
+                "id": "mo-theo",
+                "label": "Theo",
+                "color": "amber"
+              }
+            ]
+          },
+          {
+            "id": "u-status",
+            "name": "Status",
+            "type": "status",
+            "options": [
+              {
+                "id": "us-todo",
+                "label": "Nicht begonnen",
+                "color": "zinc"
+              },
+              {
+                "id": "us-doing",
+                "label": "In Bearbeitung",
+                "color": "amber"
+              },
+              {
+                "id": "us-done",
+                "label": "Abgegeben",
+                "color": "green"
+              }
+            ]
+          },
+          {
+            "id": "u-faellig",
+            "name": "Abgabe",
+            "type": "date"
+          },
+          {
+            "id": "u-punkte",
+            "name": "Punkte",
+            "type": "number"
+          }
+        ],
+        "rows": [
+          {
+            "id": "ub-ana-1",
+            "cells": {
+              "u-name": "Übungsblatt 1",
+              "u-modul": "mo-ana",
+              "u-status": "us-done",
+              "u-faellig": "2026-10-23",
+              "u-punkte": null
+            }
+          },
+          {
+            "id": "ub-ana-2",
+            "cells": {
+              "u-name": "Übungsblatt 2",
+              "u-modul": "mo-ana",
+              "u-status": "us-doing",
+              "u-faellig": "2026-11-20",
+              "u-punkte": null
+            }
+          },
+          {
+            "id": "ub-algo-1",
+            "cells": {
+              "u-name": "Übungsblatt 1",
+              "u-modul": "mo-algo",
+              "u-status": "us-done",
+              "u-faellig": "2026-10-26",
+              "u-punkte": null
+            }
+          },
+          {
+            "id": "ub-algo-2",
+            "cells": {
+              "u-name": "Übungsblatt 2",
+              "u-modul": "mo-algo",
+              "u-status": "us-todo",
+              "u-faellig": "2026-11-23",
+              "u-punkte": null
+            }
+          }
+        ],
+        "views": [
+          {
+            "id": "v-ub-table",
+            "name": "Alle",
+            "type": "table"
+          },
+          {
+            "id": "v-ub-board",
+            "name": "Nach Status",
+            "type": "board",
+            "groupByPropertyId": "u-status"
+          },
+          {
+            "id": "v-ub-calendar",
+            "name": "Kalender",
+            "type": "calendar",
+            "datePropertyId": "u-faellig"
+          }
+        ]
+      },
+      {
+        "id": "db-klausuren",
+        "name": "Klausuren",
+        "icon": "🎯",
+        "description": "Klausurtermine im Februar und Vorbereitungsstatus.",
+        "properties": [
+          {
+            "id": "k-name",
+            "name": "Klausur",
+            "type": "text"
+          },
+          {
+            "id": "k-modul",
+            "name": "Modul",
+            "type": "select",
+            "options": [
+              {
+                "id": "km-ana",
+                "label": "Analysis II",
+                "color": "blue"
+              },
+              {
+                "id": "km-algo",
+                "label": "AuD",
+                "color": "violet"
+              },
+              {
+                "id": "km-rn",
+                "label": "Rechnernetze",
+                "color": "emerald"
+              },
+              {
+                "id": "km-theo",
+                "label": "Theo",
+                "color": "amber"
+              }
+            ]
+          },
+          {
+            "id": "k-datum",
+            "name": "Datum",
+            "type": "date"
+          },
+          {
+            "id": "k-status",
+            "name": "Vorbereitung",
+            "type": "status",
+            "options": [
+              {
+                "id": "ks-todo",
+                "label": "Nicht begonnen",
+                "color": "zinc"
+              },
+              {
+                "id": "ks-doing",
+                "label": "In Vorbereitung",
+                "color": "amber"
+              },
+              {
+                "id": "ks-done",
+                "label": "Bereit",
+                "color": "green"
+              }
+            ]
+          }
+        ],
+        "rows": [
+          {
+            "id": "kl-ana",
+            "cells": {
+              "k-name": "Klausur Analysis II",
+              "k-modul": "km-ana",
+              "k-datum": "2027-02-15",
+              "k-status": "ks-todo"
+            }
+          },
+          {
+            "id": "kl-algo",
+            "cells": {
+              "k-name": "Klausur AuD",
+              "k-modul": "km-algo",
+              "k-datum": "2027-02-10",
+              "k-status": "ks-todo"
+            }
+          },
+          {
+            "id": "kl-rn",
+            "cells": {
+              "k-name": "Klausur Rechnernetze",
+              "k-modul": "km-rn",
+              "k-datum": "2027-02-18",
+              "k-status": "ks-todo"
+            }
+          },
+          {
+            "id": "kl-theo",
+            "cells": {
+              "k-name": "Klausur Theo",
+              "k-modul": "km-theo",
+              "k-datum": "2027-02-12",
+              "k-status": "ks-todo"
+            }
+          }
+        ],
+        "views": [
+          {
+            "id": "v-kl-table",
+            "name": "Alle Klausuren",
+            "type": "table"
+          },
+          {
+            "id": "v-kl-board",
+            "name": "Nach Vorbereitung",
+            "type": "board",
+            "groupByPropertyId": "k-status"
+          }
+        ]
+      },
+      {
+        "id": "db-lernplan",
+        "name": "Lernplan",
+        "icon": "🗓️",
+        "description": "Wochenweise Lernblöcke bis zu den Klausuren.",
+        "properties": [
+          {
+            "id": "l-name",
+            "name": "Lernblock",
+            "type": "text"
+          },
+          {
+            "id": "l-modul",
+            "name": "Modul",
+            "type": "select",
+            "options": [
+              {
+                "id": "lm-ana",
+                "label": "Analysis II",
+                "color": "blue"
+              },
+              {
+                "id": "lm-algo",
+                "label": "AuD",
+                "color": "violet"
+              },
+              {
+                "id": "lm-rn",
+                "label": "Rechnernetze",
+                "color": "emerald"
+              },
+              {
+                "id": "lm-theo",
+                "label": "Theo",
+                "color": "amber"
+              }
+            ]
+          },
+          {
+            "id": "l-datum",
+            "name": "Datum",
+            "type": "date"
+          },
+          {
+            "id": "l-erledigt",
+            "name": "Erledigt",
+            "type": "checkbox"
+          }
+        ],
+        "rows": [
+          {
+            "id": "lp-1",
+            "cells": {
+              "l-name": "Analysis II: Übungsblatt 2 bearbeiten",
+              "l-modul": "lm-ana",
+              "l-datum": "2026-11-16",
+              "l-erledigt": false
+            }
+          },
+          {
+            "id": "lp-2",
+            "cells": {
+              "l-name": "AuD: Übungsblatt 2 vorarbeiten",
+              "l-modul": "lm-algo",
+              "l-datum": "2026-11-18",
+              "l-erledigt": false
+            }
+          }
+        ],
+        "views": [
+          {
+            "id": "v-lp-table",
+            "name": "Alle Blöcke",
+            "type": "table"
+          },
+          {
+            "id": "v-lp-calendar",
+            "name": "Kalender",
+            "type": "calendar",
+            "datePropertyId": "l-datum"
+          }
+        ]
+      }
+    ],
+    "homePageId": "page-home"
+  }
+}

@@ -1,5 +1,8 @@
 "use client";
 
+import { useEffect } from "react";
+import { sendClientErrorReport } from "@/lib/ops/client-report";
+
 /**
  * Last-resort boundary: replaces the ENTIRE root layout, so no providers
  * (theme, i18n) exist here. Self-contained styles, English only.
@@ -11,7 +14,10 @@ export default function GlobalError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
-  console.error("[StudyOS] global error:", error);
+  useEffect(() => {
+    console.error("[StudyOS] global error:", error);
+    sendClientErrorReport(error, "global");
+  }, [error]);
   return (
     <html lang="en">
       <body
