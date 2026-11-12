@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import { auth } from "@clerk/nextjs/server";
+import { hasCredits } from "@/lib/credits";
 import { getI18n } from "@/lib/i18n/server";
 import { GeneratorClient } from "./GeneratorClient";
 
@@ -15,5 +17,12 @@ export default async function GeneratePage({
   const value = (await searchParams).prompt;
   const initialPrompt = typeof value === "string" ? value.slice(0, 2000) : "";
 
-  return <GeneratorClient initialPrompt={initialPrompt} />;
+  // Tell the student they are out of credits BEFORE they describe their
+  // studies and answer questions, not after. A failed lookup never blocks.
+  const { userId } = await auth();
+  const outOfCredits = userId
+    ? !(await hasCredits(userId).catch(() => true))
+    : false;
+
+  return <GeneratorClient initialPrompt={initialPrompt} outOfCredits={outOfCredits} />;
 }

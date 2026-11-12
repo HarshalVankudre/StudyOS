@@ -23,7 +23,8 @@ describe("media block", () => {
 
   it("rejects a non-image mediaKind and a missing assetId", () => {
     expect(blockSchema.safeParse({ ...valid, mediaKind: "pdf" }).success).toBe(false);
-    const { assetId: _drop, ...noAsset } = valid;
+    const noAsset: Partial<typeof valid> = { ...valid };
+    delete noAsset.assetId;
     expect(blockSchema.safeParse(noAsset).success).toBe(false);
   });
 });

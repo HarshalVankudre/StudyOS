@@ -109,6 +109,26 @@ describe("buildUserFeed", () => {
     expect(ics).toContain("20261111");
   });
 
+  it("never reads trashed workspaces", async () => {
+    mocks.workspaceFindMany.mockResolvedValue([]);
+    await buildUserFeed("u1", new Date("2026-07-03T00:00:00Z"));
+    expect(mocks.workspaceFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { ownerId: "u1", deletedAt: null } }),
+    );
+  });
+
+  it("keeps deadlines from a workspace with one imperfect block", async () => {
+    const imperfect = ws("D", "2026-12-01") as unknown as {
+      pages: { id: string; title: string; blocks: unknown[] }[];
+    };
+    imperfect.pages = [
+      { id: "p", title: "P", blocks: [{ id: "x", type: "react_artifact", source: "" }] },
+    ];
+    mocks.workspaceFindMany.mockResolvedValue([{ data: JSON.stringify(imperfect) }]);
+    const ics = await buildUserFeed("u1", new Date("2026-07-03T00:00:00Z"));
+    expect(ics).toContain("20261201");
+  });
+
   it("produces an empty but valid calendar when there are no workspaces", async () => {
     mocks.workspaceFindMany.mockResolvedValue([]);
     const ics = await buildUserFeed("u1", new Date("2026-07-03T00:00:00Z"));

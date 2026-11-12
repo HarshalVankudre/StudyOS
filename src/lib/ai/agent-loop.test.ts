@@ -7,7 +7,7 @@ vi.mock("./openrouter", () => ({
   chatCompletion: mocks.chat,
 }));
 
-import { runAgentLoop, selectAllowedTools } from "./agent-loop";
+import { runAgentLoop } from "./agent-loop";
 import { TaskCancelledError } from "./tasks/cancellation";
 import type { AgentStreamEvent } from "./agent-shared";
 import { toolRegistry } from "./tools/registry";

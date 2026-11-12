@@ -128,7 +128,8 @@ describe("Daily Study Agent store", () => {
     });
 
     expect(mocks.workspaceFindMany).toHaveBeenCalledWith({
-      where: { ownerId: "user-1" },
+      // Trashed workspaces never feed the planner.
+      where: { ownerId: "user-1", deletedAt: null },
       orderBy: { updatedAt: "desc" },
       select: { id: true, data: true },
     });

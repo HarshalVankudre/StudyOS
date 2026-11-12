@@ -5,8 +5,19 @@
  * dependency-free so it's testable and usable on client and server.
  */
 
-/** Hard cap on grounding text sent to the model (keeps prompts bounded). */
-export const MAX_SOURCE_TEXT = 20_000;
+/**
+ * Hard cap on grounding text sent to the model (keeps prompts bounded).
+ * 40k characters is roughly 10k tokens: enough for several full syllabi, and
+ * still comfortably inside the OpenRouter fallback model's context next to the
+ * generation prompt and its example workspace.
+ */
+export const MAX_SOURCE_TEXT = 40_000;
+
+/** Most text the client may hold/submit; anything past MAX_SOURCE_TEXT is not used. */
+export const MAX_SOURCE_INPUT = MAX_SOURCE_TEXT * 3;
+
+/** Largest syllabus file the upload accepts, in bytes (checked client- and server-side). */
+export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
 // Control chars except tab (\x09) and newline (\x0A).
 const CONTROL_CHARS = /[\x00-\x08\x0B\x0C\x0E-\x1F]/g;

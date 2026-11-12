@@ -60,9 +60,23 @@ describe("workspace version service", () => {
       version: 3,
     });
     expect(mocks.workspaceFindFirst).toHaveBeenCalledWith({
-      where: { id: "workspace-1", ownerId: "user-1" },
+      where: { id: "workspace-1", ownerId: "user-1", deletedAt: null },
       select: { data: true, version: true },
     });
+  });
+
+  it("loads a snapshot with one imperfect block instead of failing the agent", async () => {
+    const stored = structuredClone(sampleWorkspace) as unknown as {
+      pages: { blocks: unknown[] }[];
+    };
+    stored.pages[0].blocks.push({ id: "broken", type: "media" });
+    mocks.workspaceFindFirst.mockResolvedValue({
+      data: JSON.stringify(stored),
+      version: 7,
+    });
+    const snapshot = await getWorkspaceSnapshot("workspace-1");
+    expect(snapshot?.version).toBe(7);
+    expect(snapshot?.workspace.pages[0].blocks).toEqual(sampleWorkspace.pages[0].blocks);
   });
 
   it("atomically applies an agent change and records both snapshots", async () => {

@@ -10,13 +10,22 @@ import {
 import { estimatedEdits, estimatedGenerations } from "@/lib/credits-info";
 import { getI18n } from "@/lib/i18n/server";
 import { buyCreditsAction } from "../billing-actions";
+import {
+  BillingNotice,
+  parseBillingNotice,
+} from "@/components/account/BillingNotice";
 
 export async function generateMetadata(): Promise<Metadata> {
   const { dict } = await getI18n();
   return { title: dict.credits.metaTitle };
 }
 
-export default async function BuyCreditsPage() {
+export default async function BuyCreditsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ billing?: string | string[] }>;
+}) {
+  const billingNotice = parseBillingNotice((await searchParams).billing);
   const { userId } = await auth();
   if (!userId) redirect("/sign-in");
 
@@ -60,6 +69,12 @@ export default async function BuyCreditsPage() {
             {t(P.balance, { count: credits.toLocaleString(locale) })}
           </p>
         </div>
+
+        <BillingNotice
+          code={billingNotice}
+          messages={dict.billingNotice}
+          className="mx-auto mt-8 max-w-sm"
+        />
 
         {/* Credit pack */}
         <div className="mx-auto mt-10 max-w-sm rounded-2xl border-2 border-lime bg-card p-8 text-center shadow-pop">

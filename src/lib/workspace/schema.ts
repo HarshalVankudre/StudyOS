@@ -52,6 +52,37 @@ const databaseRow = z.object({
   cells: z.record(z.string(), cellValue),
 });
 
+const viewSort = z.object({
+  propertyId: z.string(),
+  direction: z.enum(["asc", "desc"]),
+});
+
+const viewFilter = z.object({
+  propertyId: z.string(),
+  operator: z.enum([
+    "contains",
+    "not_contains",
+    "is",
+    "is_not",
+    "is_empty",
+    "is_not_empty",
+    "eq",
+    "neq",
+    "gt",
+    "gte",
+    "lt",
+    "lte",
+    "before",
+    "after",
+    "on_or_before",
+    "on_or_after",
+    "next_days",
+    "past_days",
+    "overdue",
+  ]),
+  value: cellValue.optional(),
+});
+
 const databaseView = z.object({
   id: z.string(),
   name: z.string(),
@@ -59,6 +90,9 @@ const databaseView = z.object({
   groupByPropertyId: z.string().optional(),
   datePropertyId: z.string().optional(),
   visiblePropertyIds: z.array(z.string()).optional(),
+  sorts: z.array(viewSort).optional(),
+  filters: z.array(viewFilter).optional(),
+  filterMatch: z.enum(["all", "any"]).optional(),
 });
 
 const database = z.object({
@@ -69,6 +103,27 @@ const database = z.object({
   properties: z.array(databaseProperty),
   rows: z.array(databaseRow),
   views: z.array(databaseView),
+});
+
+// Blank sides are allowed: a student adds a card and then types into it, and
+// autosave runs in between. Study sessions skip cards with an empty side.
+const flashcard = z.object({
+  id: z.string(),
+  front: z.string().max(MAX_FLASHCARD_TEXT),
+  back: z.string().max(MAX_FLASHCARD_TEXT),
+  ease: z.number().optional(),
+  intervalDays: z.number().optional(),
+  reps: z.number().int().optional(),
+  dueAt: z.string().optional(),
+  lastReviewedAt: z.string().optional(),
+  // FSRS scheduling state (lib/study/srs.ts); optional so older decks and
+  // AI-authored cards stay valid.
+  stability: z.number().nonnegative().optional(),
+  difficulty: z.number().optional(),
+  state: z.enum(["new", "learning", "review", "relearning"]).optional(),
+  lapses: z.number().int().nonnegative().optional(),
+  learningStep: z.number().int().nonnegative().optional(),
+  dueTime: z.string().optional(),
 });
 
 const block = z.discriminatedUnion("type", [
@@ -130,20 +185,7 @@ const block = z.discriminatedUnion("type", [
     id: z.string(),
     type: z.literal("flashcards"),
     title: z.string().optional(),
-    cards: z
-      .array(
-        z.object({
-          id: z.string(),
-          front: z.string().min(1).max(MAX_FLASHCARD_TEXT),
-          back: z.string().min(1).max(MAX_FLASHCARD_TEXT),
-          ease: z.number().optional(),
-          intervalDays: z.number().optional(),
-          reps: z.number().int().optional(),
-          dueAt: z.string().optional(),
-          lastReviewedAt: z.string().optional(),
-        }),
-      )
-      .max(MAX_FLASHCARDS),
+    cards: z.array(flashcard).max(MAX_FLASHCARDS),
   }),
 ]);
 
@@ -177,7 +219,11 @@ export {
   databaseProperty as databasePropertySchema,
   databaseRow as databaseRowSchema,
   databaseView as databaseViewSchema,
+  viewSort as viewSortSchema,
+  viewFilter as viewFilterSchema,
   database as databaseSchema,
   block as blockSchema,
   page as pageSchema,
+  selectOption as selectOptionSchema,
+  flashcard as flashcardSchema,
 };

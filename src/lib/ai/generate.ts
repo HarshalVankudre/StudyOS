@@ -4,9 +4,9 @@
  * This is THE BOUNDARY between the app and the AI. Everything upstream just
  * calls `generateWorkspace(prompt)` and gets back a Workspace to render/save.
  *
- * Right now it uses a local, rule-based MOCK so the whole experience works with
- * no API key. When you add an OpenRouter API key, we replace `mockGenerate`
- * with a real model call here — and nothing else in the app has to change.
+ * With an AI key configured it calls the model; without one (local
+ * development only) it builds a rule-based MOCK. In production a missing key
+ * or a failed model call is an honest error — never a silent template.
  */
 import { z } from "zod";
 import type {
@@ -19,9 +19,15 @@ import type {
 } from "@/lib/workspace/types";
 import { safeParseWorkspace } from "@/lib/workspace/schema";
 import { sampleWorkspace } from "@/lib/workspace/sample";
-import { sourceTextBlock } from "@/lib/import/syllabus";
+import { normalizeSourceText, sourceTextBlock } from "@/lib/import/syllabus";
+import { extractSyllabusFacts, syllabusFactsBlock, type SyllabusFacts } from "@/lib/import/syllabus-facts";
+import { applySyllabusFacts, type AssessmentLabels } from "@/lib/import/syllabus-merge";
 import { modelForPlan } from "./plans";
-import { recordUsage } from "./usage-meter";
+import { streamChatCompletion } from "./openrouter";
+import { AiRefusalError } from "./anthropic";
+import { isAiConfigured, missingAiKeyMessage, providerForModel } from "./provider";
+import { recordUsage, withUsageMeter, type TokenUsage } from "./usage-meter";
+import { addDaysIso, clockPromptBlock, studentClock, type StudentClock } from "./student-clock";
 import { defaultQuestions, type GenQuestion } from "./onboarding";
 import {
   GENERATION_COMPONENT_KINDS,
@@ -57,6 +63,72 @@ export function languageDirective(locale: Locale): string {
   ].join("\n");
 }
 
+/** Why a generation delivered nothing usable. */
+export type GenerationFailureReason =
+  | "not_configured"
+  | "model_error"
+  | "invalid_output"
+  | "refused"
+  | "timeout";
+
+/** Generation produced no usable workspace (after any retry). Nothing to save or charge. */
+export class GenerationFailedError extends Error {
+  readonly reason: GenerationFailureReason;
+  constructor(reason: GenerationFailureReason, message?: string, options?: { cause?: unknown }) {
+    super(message ?? `Workspace generation failed (${reason})`, options);
+    this.name = "GenerationFailedError";
+    this.reason = reason;
+  }
+}
+
+/** The student cancelled: stop, save nothing. */
+export class GenerationCancelledError extends Error {
+  constructor() {
+    super("Workspace generation cancelled");
+    this.name = "GenerationCancelledError";
+  }
+}
+
+/**
+ * Key under which a running generation's AbortController is registered, so
+ * the cancel endpoint can stop it. Scoped by user: nobody can cancel (or
+ * probe) someone else's generation.
+ */
+export function generationTaskKey(userId: string, generationId: string): string {
+  return `generate:${userId}:${generationId}`;
+}
+
+/** The model replied, but not with a valid workspace. */
+class InvalidOutputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidOutputError";
+  }
+}
+
+export interface GenerateWorkspaceOptions {
+  /** The student's local clock; defaults to now in UTC. */
+  clock?: StudentClock;
+  /** Aborts in-flight model calls and prevents further attempts. */
+  signal?: AbortSignal;
+  /** Total model attempts, including the automatic retry. Default 2. */
+  maxAttempts?: number;
+  /** Epoch ms: no attempt starts that is unlikely to finish by then, and calls abort at it. */
+  deadline?: number;
+}
+
+/** Upper bound for one generation call; the route's deadline may cut it shorter. */
+const GENERATION_CALL_TIMEOUT_MS = 200_000;
+/** Upper bound for the small planning / questions calls. */
+const SMALL_CALL_TIMEOUT_MS = 90_000;
+
+/**
+ * Build a workspace for the student. With a configured model: up to
+ * `maxAttempts` model calls (one automatic retry for transient failures and
+ * malformed output), then a `GenerationFailedError`. Only the successful
+ * attempt's tokens are reported to an enclosing usage meter, so a failed
+ * attempt is never billed; a cancelled attempt reports what it consumed.
+ */
 export async function generateWorkspace(
   prompt: string,
   model: string = DEFAULT_MODEL,
@@ -64,19 +136,101 @@ export async function generateWorkspace(
   plan?: WorkspaceGenerationPlan,
   locale: Locale = DEFAULT_LOCALE,
   sourceText = "",
+  options: GenerateWorkspaceOptions = {},
 ): Promise<Workspace> {
-  // Use the real model when an API key is configured; otherwise the local mock.
-  // If the real call fails for any reason (bad key, rate limit, malformed
-  // output), fall back to the mock so the user always gets a usable workspace.
-  if (process.env.OPENROUTER_API_KEY) {
-    try {
-      return await openRouterGenerate(prompt, model, preferences, plan, locale, sourceText);
-    } catch (err) {
-      console.error("[StudyOS] OpenRouter generation failed; using mock:", err);
-      return mockGenerate(prompt, plan, preferences);
+  const clock = options.clock ?? studentClock();
+  const source = normalizeSourceText(sourceText);
+  const facts = extractSyllabusFacts(source, clock.date);
+  const finish = (workspace: Workspace) =>
+    applySyllabusFacts(workspace, facts, assessmentLabels(locale));
+
+  if (!isAiConfigured(model)) {
+    // The mock exists for local development without a key. In production a
+    // missing key is a misconfiguration, and a template is not what the
+    // student asked for.
+    if (process.env.NODE_ENV === "production") {
+      throw new GenerationFailedError(
+        "not_configured",
+        missingAiKeyMessage(model, "Workspace generation"),
+      );
     }
+    return finish(await mockGenerate(prompt, plan, preferences, clock));
   }
-  return mockGenerate(prompt, plan, preferences);
+
+  const maxAttempts = Math.max(1, options.maxAttempts ?? 2);
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    throwIfCancelled(options.signal);
+    const startedAt = Date.now();
+    const metered = await withUsageMeter(async () => {
+      try {
+        const workspace = await openRouterGenerate(
+          prompt, model, preferences, plan, locale, source, clock, facts, options,
+        );
+        return { ok: true as const, workspace };
+      } catch (error) {
+        return { ok: false as const, error };
+      }
+    });
+    if (metered.result.ok) {
+      forwardUsage(metered.usage);
+      return finish(metered.result.workspace);
+    }
+    if (options.signal?.aborted) {
+      // Cancelled mid-call: bill only what the cut-off call really consumed.
+      forwardUsage(metered.usage);
+      throw new GenerationCancelledError();
+    }
+    lastError = metered.result.error;
+    console.error(`[StudyOS] generation attempt ${attempt}/${maxAttempts} failed:`, lastError);
+    const tookMs = Date.now() - startedAt;
+    const outOfTime = options.deadline !== undefined && Date.now() + tookMs > options.deadline;
+    if (!isRetryable(lastError) || outOfTime) break;
+  }
+  throw toGenerationFailure(lastError);
+}
+
+/** Re-report a nested meter's usage to the enclosing meter (if any). */
+function forwardUsage(usage: TokenUsage) {
+  recordUsage({ prompt_tokens: usage.promptTokens, completion_tokens: usage.completionTokens });
+}
+
+function throwIfCancelled(signal?: AbortSignal) {
+  if (signal?.aborted) throw new GenerationCancelledError();
+}
+
+function httpStatusOf(error: unknown): number | undefined {
+  if (error && typeof error === "object" && "status" in error) {
+    const status = (error as { status?: unknown }).status;
+    if (typeof status === "number") return status;
+  }
+  const match = error instanceof Error ? error.message.match(/request failed \((\d{3})\)/) : null;
+  return match ? Number(match[1]) : undefined;
+}
+
+/** Worth one more try: malformed/truncated output, timeouts, rate limits, 5xx, network. */
+function isRetryable(error: unknown): boolean {
+  if (error instanceof AiRefusalError || error instanceof GenerationFailedError) return false;
+  const status = httpStatusOf(error);
+  if (status === undefined) return true;
+  return status === 408 || status === 409 || status === 429 || status >= 500;
+}
+
+function toGenerationFailure(error: unknown): GenerationFailedError {
+  if (error instanceof GenerationFailedError) return error;
+  const reason: GenerationFailureReason =
+    error instanceof AiRefusalError
+      ? "refused"
+      : error instanceof InvalidOutputError || /truncated/i.test(String(error))
+        ? "invalid_output"
+        : error instanceof Error && error.name === "TimeoutError"
+          ? "timeout"
+          : "model_error";
+  return new GenerationFailedError(reason, undefined, { cause: error });
+}
+
+function assessmentLabels(locale: Locale): AssessmentLabels {
+  return getDictionary(locale).ai.generate.assessments;
 }
 
 const generationPlanSchema = z.object({
@@ -107,8 +261,9 @@ export async function planWorkspace(
   preferences = "",
   locale: Locale = DEFAULT_LOCALE,
   sourceText = "",
+  options: { signal?: AbortSignal } = {},
 ): Promise<WorkspaceGenerationPlan> {
-  if (!process.env.OPENROUTER_API_KEY) {
+  if (!isAiConfigured(model)) {
     return mockWorkspacePlan(prompt, preferences);
   }
 
@@ -119,20 +274,29 @@ export async function planWorkspace(
       [
         `Student description:\n"""${prompt}"""`,
         preferences,
-        sourceTextBlock(sourceText),
+        // Choosing components needs the gist, not every page of the material.
+        sourceTextBlock(sourceText.slice(0, PLAN_SOURCE_CHARS)),
         "Return only the JSON workspace plan.",
       ]
         .filter(Boolean)
         .join("\n\n"),
+      { signal: options.signal, timeoutMs: SMALL_CALL_TIMEOUT_MS },
     );
     const parsed = generationPlanSchema.safeParse(extractJson(raw));
     if (!parsed.success) throw parsed.error;
     return normalizeWorkspacePlan(parsed.data);
   } catch (err) {
+    if (options.signal?.aborted) throw new GenerationCancelledError();
+    // The plan only picks components; the deterministic plan is a fair
+    // stand-in and the workspace itself is still built by the model.
     console.error("[StudyOS] workspace planning failed; using fallback:", err);
     return mockWorkspacePlan(prompt, preferences);
   }
 }
+
+/** Source characters the plan and question calls see (the build sees all of it). */
+const PLAN_SOURCE_CHARS = 12_000;
+const QUESTIONS_SOURCE_CHARS = 8_000;
 
 function buildWorkspacePlanSystemPrompt(locale: Locale): string {
   return [
@@ -350,29 +514,50 @@ export async function planQuestions(
   locale: Locale = DEFAULT_LOCALE,
   sourceText = "",
 ): Promise<GenQuestion[]> {
-  const fallback = () => defaultQuestions(getDictionary(locale).onboarding);
-  if (!process.env.OPENROUTER_API_KEY) return fallback();
+  return (await planQuestionsDetailed(prompt, model, locale, sourceText)).questions;
+}
+
+/**
+ * Like {@link planQuestions}, but also says whether the model wrote the
+ * questions (`fromModel`) or the static fallback was used — callers bill only
+ * for questions the student actually got from the model.
+ */
+export async function planQuestionsDetailed(
+  prompt: string,
+  model: string = DEFAULT_MODEL,
+  locale: Locale = DEFAULT_LOCALE,
+  sourceText = "",
+): Promise<{ questions: GenQuestion[]; fromModel: boolean }> {
+  const fallback = () => ({
+    questions: defaultQuestions(getDictionary(locale).onboarding),
+    fromModel: false,
+  });
+  if (!isAiConfigured(model)) return fallback();
   try {
     const raw = await callOpenRouter(
       model,
       buildQuestionsSystemPrompt(locale),
       [
         `Student description:\n\n"""${prompt}"""`,
-        sourceTextBlock(sourceText),
+        sourceTextBlock(sourceText.slice(0, QUESTIONS_SOURCE_CHARS)),
         "Return ONLY the JSON object of questions.",
       ]
         .filter(Boolean)
         .join("\n\n"),
+      { timeoutMs: SMALL_CALL_TIMEOUT_MS },
     );
     const parsed = genQuestionsSchema.safeParse(extractJson(raw));
     if (!parsed.success || parsed.data.questions.length === 0) {
       return fallback();
     }
     // Keep it digestible: at most 4 questions, 6 options each.
-    return parsed.data.questions.slice(0, 4).map((q) => ({
-      ...q,
-      options: q.options.slice(0, 6),
-    }));
+    return {
+      questions: parsed.data.questions.slice(0, 4).map((q) => ({
+        ...q,
+        options: q.options.slice(0, 6),
+      })),
+      fromModel: true,
+    };
   } catch (err) {
     console.error("[StudyOS] question planning failed; using defaults:", err);
     return fallback();
@@ -404,15 +589,45 @@ function buildQuestionsSystemPrompt(locale: Locale): string {
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 /**
- * Call OpenRouter's (OpenAI-compatible) chat completions endpoint and return
- * the assistant's raw text reply. Throws on transport or API errors.
+ * Anthropic budget for the generation calls. On Anthropic `max_tokens` covers
+ * adaptive thinking AND the visible answer (unlike the 10000 below, which GLM
+ * spends on the answer alone), so leave room for a full workspace after thinking.
+ */
+const ANTHROPIC_GENERATION_MAX_TOKENS = 16000;
+
+/**
+ * Call the model for one generation step and return the assistant's raw text
+ * reply. Throws on transport or API errors. Bare Claude ids go through the
+ * shared Anthropic path; everything else hits OpenRouter directly below.
  */
 async function callOpenRouter(
   model: string,
   systemPrompt: string,
   userContent: string,
+  options: { signal?: AbortSignal; timeoutMs?: number } = {},
 ): Promise<string> {
+  // Every call is cancellable and time-boxed: a hung upstream must end in an
+  // honest error, not a request that outlives the route.
+  const signals = [
+    AbortSignal.timeout(Math.max(1, options.timeoutMs ?? GENERATION_CALL_TIMEOUT_MS)),
+  ];
+  if (options.signal) signals.push(options.signal);
+  const signal = AbortSignal.any(signals);
+  if (providerForModel(model) === "anthropic") {
+    // Streaming (rather than chatCompletion) because it carries the abort
+    // signal; with no reasoning callback the request is otherwise identical.
+    return streamChatCompletion(
+      model,
+      [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userContent },
+      ],
+      ANTHROPIC_GENERATION_MAX_TOKENS,
+      { signal },
+    );
+  }
   const res = await fetch(OPENROUTER_URL, {
+    signal,
     method: "POST",
     headers: {
       Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
@@ -447,8 +662,14 @@ async function callOpenRouter(
 
   const data = await res.json();
   recordUsage(data?.usage);
-  const content: unknown = data?.choices?.[0]?.message?.content;
-  if (typeof content !== "string") {
+  const choice = data?.choices?.[0];
+  const content: unknown = choice?.message?.content;
+  // A reply cut off at max_tokens is incomplete JSON: say so (and let the
+  // caller retry or fail honestly) instead of parsing half a workspace.
+  if (choice?.finish_reason === "length") {
+    throw new Error("OpenRouter response was truncated (finish_reason: length)");
+  }
+  if (typeof content !== "string" || content.length === 0) {
     throw new Error("OpenRouter returned no text content");
   }
   return content;
@@ -457,13 +678,17 @@ async function callOpenRouter(
 async function openRouterGenerate(
   prompt: string,
   model: string,
-  preferences = "",
-  plan?: WorkspaceGenerationPlan,
-  locale: Locale = DEFAULT_LOCALE,
-  sourceText = "",
+  preferences: string,
+  plan: WorkspaceGenerationPlan | undefined,
+  locale: Locale,
+  sourceText: string,
+  clock: StudentClock,
+  facts: SyllabusFacts,
+  options: GenerateWorkspaceOptions,
 ): Promise<Workspace> {
   const prefBlock = preferences ? `${preferences}\n\n` : "";
   const sourceBlock = sourceTextBlock(sourceText);
+  const factsBlock = syllabusFactsBlock(facts);
   const planBlock = plan
     ? [
         "The workspace architect selected this exact component plan:",
@@ -472,15 +697,22 @@ async function openRouterGenerate(
         "",
       ].join("\n")
     : "";
+  const timeoutMs =
+    options.deadline !== undefined
+      ? Math.min(GENERATION_CALL_TIMEOUT_MS, options.deadline - Date.now())
+      : GENERATION_CALL_TIMEOUT_MS;
+  // The clock goes last: it changes every minute, and keeping it after the
+  // long stable system prompt keeps that prefix cacheable.
   const raw = await callOpenRouter(
     model,
     buildSystemPrompt(locale),
-    `Design a study workspace for this student:\n\n"""${prompt}"""\n\n${prefBlock}${sourceBlock}${planBlock}Honor the preferences, the provided course material, and the component plan above. Return ONLY the JSON workspace object — no prose, no markdown fences.`,
+    `Design a study workspace for this student:\n\n"""${prompt}"""\n\n${prefBlock}${sourceBlock}${factsBlock}${planBlock}${clockPromptBlock(clock, "generate")}\n\nHonor the preferences, the provided course material, and the component plan above. Return ONLY the JSON workspace object — no prose, no markdown fences.`,
+    { signal: options.signal, timeoutMs },
   );
 
   const parsed = safeParseWorkspace(extractJson(raw));
   if (!parsed.success) {
-    throw new Error(`invalid workspace JSON: ${parsed.error.message}`);
+    throw new InvalidOutputError(`invalid workspace JSON: ${parsed.error.message}`);
   }
   return parsed.data;
 }
@@ -503,12 +735,13 @@ function buildSystemPrompt(locale: Locale): string {
     "- Always include a home page (set `homePageId` to it) that acts as a dashboard: a welcome callout, then `database_view` blocks for the key trackers.",
     "- Tailor everything to the student's field, explicit courses, answers, and supplied component plan. Generate realistic starter data for every selected component: courses, schedules, assignments, exams, readings, grades, projects, habits, or notes as applicable.",
     "- Do not claim invented facts are confirmed. Use TBD for unknown instructors, rooms, links, or exact dates; use sensible near-future starter dates only where a useful editable example is needed.",
+    "- Graded work lives in one assignments/assessments database with a number property for the grade weight (percent of the final grade, e.g. \"Weight %\") and a date property for the due date. Every graded item from the student's material (homework, quizzes, labs, projects, midterms, finals) gets a row with its real weight and date; never drop or change a stated weight.",
     "- The component plan is authoritative. Build every selected component and avoid unrelated trackers. A component may be represented by a page, database, dashboard section, or a combination.",
     "- Give databases useful views: a table, plus a board grouped by a status property and/or a calendar on a date property where it makes sense.",
     "- Use emoji icons for the workspace, pages, and databases.",
     "- Valid `color` values: zinc, red, rose, orange, amber, yellow, lime, green, emerald, teal, cyan, sky, blue, indigo, violet, purple, fuchsia, pink.",
     "",
-    "Here is a complete, high-quality example for a CS student. Match this structure and quality, but adapt all content to the new student:",
+    "Here is a complete, high-quality example for a CS student. Match this structure and quality, but adapt all content to the new student. Its dates are placeholders from an old term — never copy them; derive every date from the current date given with the request:",
     "",
     JSON.stringify(sampleWorkspace),
     languageDirective(locale),
@@ -621,57 +854,6 @@ function firstBalancedJsonObject(text: string): string | null {
 }
 
 // ===========================================================================
-// AI editing of an existing workspace
-// ===========================================================================
-
-/** Apply a natural-language instruction to an existing workspace via OpenRouter. */
-export async function editWorkspace(
-  current: Workspace,
-  instruction: string,
-  model: string = DEFAULT_MODEL,
-  locale: Locale = DEFAULT_LOCALE,
-): Promise<Workspace> {
-  if (!process.env.OPENROUTER_API_KEY) {
-    throw new Error(
-      "AI editing needs an OpenRouter API key (add OPENROUTER_API_KEY to .env.local).",
-    );
-  }
-
-  const raw = await callOpenRouter(
-    model,
-    buildEditSystemPrompt(locale),
-    `Current workspace JSON:\n\n${JSON.stringify(current)}\n\nApply this change: "${instruction}"\n\nReturn the COMPLETE updated workspace as JSON only — no prose, no fences.`,
-  );
-
-  const parsed = safeParseWorkspace(extractJson(raw));
-  if (!parsed.success) {
-    throw new Error(`invalid workspace JSON: ${parsed.error.message}`);
-  }
-  return parsed.data;
-}
-
-function buildEditSystemPrompt(locale: Locale): string {
-  return [
-    "You edit an existing StudyOS study workspace. Given the current workspace as JSON and an instruction, you return the COMPLETE updated workspace as a single JSON object.",
-    "",
-    "OUTPUT RULES:",
-    "- Output ONLY the full updated JSON object. No explanation, no markdown fences.",
-    "- Keep this exact shape:",
-    "",
-    WORKSPACE_SHAPE,
-    "",
-    "EDITING RULES:",
-    "- Preserve everything the instruction does NOT touch — keep existing ids, pages, databases, rows, properties and values intact.",
-    "- Only add, change, or remove what the instruction asks for.",
-    "- Invent new unique string ids for anything new. Keep `cells` keyed by property id; select/status values are option ids; multi_select/relation are arrays of ids; dates are ISO strings; checkboxes are booleans; numbers are numbers.",
-    "- If you add a database, also add a `database_view` block on a relevant page so it's visible. If you add a page, give it an emoji icon and useful blocks.",
-    "- Valid `color` values: zinc, red, rose, orange, amber, yellow, lime, green, emerald, teal, cyan, sky, blue, indigo, violet, purple, fuchsia, pink.",
-    "- Keep `homePageId` pointing to an existing page.",
-    languageDirective(locale),
-  ].join("\n");
-}
-
-// ===========================================================================
 // Mock generator (no API key required)
 // ===========================================================================
 
@@ -766,9 +948,11 @@ const FIELDS: { keys: string[]; label: string; courses: string[] }[] = [
 
 async function mockGenerate(
   prompt: string,
-  plan?: WorkspaceGenerationPlan,
-  preferences = "",
+  plan: WorkspaceGenerationPlan | undefined,
+  preferences: string,
+  clock: StudentClock,
 ): Promise<Workspace> {
+  const isoPlusDays = (days: number) => addDaysIso(clock.date, days);
   // Mock-only: a brief pause so the "Generating…" state is visible.
   // The real Claude call has its own latency, so this line just goes away.
   await new Promise((resolve) => setTimeout(resolve, 700));
@@ -1336,12 +1520,4 @@ function courseCode(name: string, i: number): string {
 
 function dedupe(arr: string[]): string[] {
   return [...new Set(arr)];
-}
-
-function isoPlusDays(n: number): string {
-  const t = new Date();
-  const d = new Date(
-    Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate() + n),
-  );
-  return d.toISOString().slice(0, 10);
 }

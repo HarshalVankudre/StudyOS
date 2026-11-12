@@ -75,16 +75,78 @@ export interface DatabaseRow {
 /** How a database is displayed. */
 export type ViewType = "table" | "board" | "calendar" | "list" | "gallery";
 
+/** One key of a view's sort. Earlier keys win; empty values always sort last. */
+export interface ViewSort {
+  propertyId: string;
+  direction: "asc" | "desc";
+}
+
+/**
+ * A view filter condition. Which operators apply depends on the property type
+ * (an operator that does not fit the type is ignored, as is an incomplete one):
+ *   text | url       contains, not_contains, is, is_not, is_empty, is_not_empty
+ *   number           eq, neq, gt, gte, lt, lte, is_empty, is_not_empty
+ *   checkbox         is (value: boolean)
+ *   date             is, before, after, on_or_before, on_or_after
+ *                      (value: "YYYY-MM-DD", or "today" / "tomorrow" / "yesterday"),
+ *                    next_days, past_days (value: number of days; today included),
+ *                    overdue (before today and the row is not complete),
+ *                    is_empty, is_not_empty
+ *   select | status  is, is_not (value: option id, or an array = any of),
+ *                    is_empty, is_not_empty
+ *   multi_select     contains, not_contains (value: option id or ids, any of),
+ *                    is_empty, is_not_empty
+ *   relation         contains, not_contains (value: row id or ids),
+ *                    is_empty, is_not_empty
+ * Date values are local calendar days; "today" is the viewer's local day.
+ */
+export type FilterOperator =
+  | "contains"
+  | "not_contains"
+  | "is"
+  | "is_not"
+  | "is_empty"
+  | "is_not_empty"
+  | "eq"
+  | "neq"
+  | "gt"
+  | "gte"
+  | "lt"
+  | "lte"
+  | "before"
+  | "after"
+  | "on_or_before"
+  | "on_or_after"
+  | "next_days"
+  | "past_days"
+  | "overdue";
+
+export interface ViewFilter {
+  propertyId: string;
+  operator: FilterOperator;
+  value?: CellValue;
+}
+
 export interface DatabaseView {
   id: string;
   name: string;
   type: ViewType;
   /** For "board": the select/status property to group columns by. */
   groupByPropertyId?: string;
-  /** For "calendar": the date property to place rows on. */
+  /**
+   * For "calendar": the date property to place rows on. For "list" and
+   * "gallery": the date shown as each item's deadline (defaults to the first
+   * date property).
+   */
   datePropertyId?: string;
   /** Optional ordered subset of properties to show; omit to show all. */
   visiblePropertyIds?: string[];
+  /** Multi-key sort, applied in order. Omit for the stored row order. */
+  sorts?: ViewSort[];
+  /** Filter conditions; omit to show every row. */
+  filters?: ViewFilter[];
+  /** How `filters` combine: every condition (default) or any of them. */
+  filterMatch?: "all" | "any";
 }
 
 export interface Database {
@@ -193,25 +255,40 @@ export interface ReactArtifactBlock extends BaseBlock {
 }
 
 /**
- * One flashcard. `front`/`back` are the content; the remaining fields are the
- * SM-2 spaced-repetition scheduling state, all optional so an AI or a user can
- * author a card with just front+back (absent state = a brand-new card). The
- * review UI fills them in over time — see lib/study/srs.ts.
+ * One flashcard. `front`/`back` are the content (Markdown + $math$); the
+ * remaining fields are the spaced-repetition scheduling state, all optional so
+ * an AI or a user can author a card with just front+back (absent state = a
+ * brand-new card). The review UI fills them in over time — see
+ * lib/study/srs.ts (FSRS). Cards reviewed before FSRS carry only the SM-2
+ * fields (`ease`, `intervalDays`, `reps`, `dueAt`); they are converted to FSRS
+ * memory state on their next review, keeping their due day.
  */
 export interface Flashcard {
   id: string;
   front: string;
   back: string;
-  /** SM-2 ease factor (≥1.3); higher = easier = longer intervals. */
+  /** Legacy SM-2 ease factor (≥1.3). Read once when converting to FSRS. */
   ease?: number;
-  /** Current interval in days between reviews. */
+  /** Current interval in days between reviews (0 while in a learning step). */
   intervalDays?: number;
-  /** Count of consecutive successful reviews. */
+  /** Number of reviews (SM-2 era: consecutive successful reviews). */
   reps?: number;
-  /** ISO date (YYYY-MM-DD) this card is next due for review. */
+  /** Local day (YYYY-MM-DD) this card is next due for review. */
   dueAt?: string;
   /** ISO datetime of the last review. */
   lastReviewedAt?: string;
+  /** FSRS memory stability in days (the interval at which recall is ~90%). */
+  stability?: number;
+  /** FSRS difficulty, 1 (easy) to 10 (hard). */
+  difficulty?: number;
+  /** FSRS card state. Absent on cards never reviewed under FSRS. */
+  state?: "new" | "learning" | "review" | "relearning";
+  /** Times the card was forgotten after it had been learned. */
+  lapses?: number;
+  /** Position in the (re)learning steps while `state` is learning/relearning. */
+  learningStep?: number;
+  /** Exact ISO datetime the card is due (minutes-precise for learning steps). */
+  dueTime?: string;
 }
 
 /** A spaced-repetition flashcard deck embedded in a page. */

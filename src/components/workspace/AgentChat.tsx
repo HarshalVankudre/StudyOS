@@ -71,6 +71,16 @@ export function AgentChat({
     onBusyChange?.(busy);
   }, [busy, onBusyChange]);
 
+  // If the chat unmounts (e.g. navigating away) never leave the editor stuck
+  // with autosave paused: report "not busy" on the way out. The editor keeps
+  // this component mounted while a task runs, so this only fires when the
+  // whole editor goes away or no task is running.
+  const onBusyChangeRef = useRef(onBusyChange);
+  useEffect(() => {
+    onBusyChangeRef.current = onBusyChange;
+  }, [onBusyChange]);
+  useEffect(() => () => onBusyChangeRef.current?.(false), []);
+
   // Render a completed agent result: append the assistant turn and reflect the
   // applied workspace live. Used by both the live stream and a reconnect.
   const applyResult = (response: AgentResponse) => {

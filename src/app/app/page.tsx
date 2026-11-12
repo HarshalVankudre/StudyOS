@@ -5,15 +5,17 @@ import { ArrowRight, Bot, Check, Clock3 } from "lucide-react";
 import { getDailyStudyAgentOverview } from "@/lib/agents/daily-study/store";
 import { isPro, reconcileCheckoutSession } from "@/lib/billing";
 import { getCreditBalance } from "@/lib/credits";
-import { listWorkspaces } from "@/lib/workspace/store";
+import { listTrashedWorkspaces, listWorkspaces } from "@/lib/workspace/store";
 import { getI18n } from "@/lib/i18n/server";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { AccountMenu } from "@/components/account/AccountMenu";
 import { CreditChip } from "@/components/account/CreditChip";
+import { Toaster } from "@/components/ui/sonner";
 import { loadDemoAction } from "./actions";
 import { manageBillingAction } from "./billing-actions";
 import { DeleteWorkspaceButton } from "./DeleteWorkspaceButton";
+import { TrashList } from "./TrashList";
 import { DailyAgentBootstrap } from "./agents/DailyAgentBootstrap";
 import { PendingButton } from "./agents/PendingButton";
 import { TimezoneInput } from "./agents/TimezoneInput";
@@ -37,9 +39,10 @@ export default async function AppHome({
   if (sp.session_id) await reconcileCheckoutSession(sp.session_id);
 
   const { userId } = await auth();
-  const [pro, workspaces, credits, agent, { dict, t, locale }] = await Promise.all([
+  const [pro, workspaces, trash, credits, agent, { dict, t, locale, dir }] = await Promise.all([
     isPro(),
     listWorkspaces(),
+    listTrashedWorkspaces(),
     userId ? getCreditBalance(userId) : Promise.resolve(0),
     getDailyStudyAgentOverview(),
     getI18n(),
@@ -57,6 +60,7 @@ export default async function AppHome({
 
   return (
     <main className="min-h-screen bg-paper text-ink antialiased">
+      <Toaster dir={dir} position="bottom-center" />
       <DailyAgentBootstrap
         enabled={agent.config.enabled}
         planLocalDate={agent.plan?.localDate ?? null}
@@ -311,7 +315,7 @@ export default async function AppHome({
                   <span className="flex h-[42px] w-[42px] items-center justify-center rounded-md border border-line bg-surface-2 text-xl">
                     {w.icon ?? A.fallbackIcon}
                   </span>
-                  <div className="mt-4 pr-8 font-display text-[1.05rem] font-bold text-ink">
+                  <div className="mt-4 pe-10 font-display text-[1.05rem] font-bold text-ink">
                     {w.name}
                   </div>
                   <div className="mt-auto border-t border-line pt-3.5 font-mono text-[11px] text-ink-faint">
@@ -334,6 +338,15 @@ export default async function AppHome({
             </Link>
           </div>
         )}
+
+        <TrashList
+          items={trash.map((item) => ({
+            id: item.id,
+            name: item.name,
+            icon: item.icon,
+            purgeAt: item.purgeAt.toISOString(),
+          }))}
+        />
       </div>
     </main>
   );

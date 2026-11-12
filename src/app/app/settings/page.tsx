@@ -11,6 +11,7 @@ import {
 } from "@/lib/credits";
 import { getI18n } from "@/lib/i18n/server";
 import { DeleteAccountButton } from "@/components/account/DeleteAccountButton";
+import { DownloadDataButton } from "@/components/account/DownloadDataButton";
 import { CalendarSubscribe } from "@/components/account/CalendarSubscribe";
 import { ManageAccountButton } from "@/components/account/ManageAccountButton";
 import { getCalendarFeedUrlAction } from "../calendar-actions";
@@ -185,6 +186,15 @@ export default async function SettingsPage() {
           </p>
           <div className="mt-5">
             <CalendarSubscribe initialUrl={calendarUrl} />
+          </div>
+        </section>
+
+        {/* Your data (GDPR access / portability) */}
+        <section className="mt-6 rounded-2xl border border-ink/10 bg-card/60 p-6">
+          <h2 className="font-display text-lg font-bold">{S.yourData}</h2>
+          <p className="mt-3 text-sm text-ink-soft">{S.yourDataDesc}</p>
+          <div className="mt-5">
+            <DownloadDataButton />
           </div>
         </section>
 

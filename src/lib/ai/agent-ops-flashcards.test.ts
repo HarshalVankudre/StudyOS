@@ -47,7 +47,27 @@ describe("agent flashcards generation via set_page_blocks", () => {
     }
   });
 
-  it("rejects a deck whose card is missing an answer", () => {
+  it("rejects a deck whose card is missing its answer field", () => {
+    expect(() =>
+      agentOpsSchema.parse([
+        {
+          op: "set_page_blocks",
+          pageId: "p1",
+          blocks: [
+            {
+              id: "deck1",
+              type: "flashcards",
+              cards: [{ id: "c1", front: "Q" }],
+            },
+          ],
+        },
+      ]),
+    ).toThrow();
+  });
+
+  it("round-trips a student's half-written (blank) card when rewriting a page", () => {
+    // Blank sides are valid workspace content (students add a card, then type),
+    // so the agent must be able to re-send a page that contains one.
     expect(() =>
       agentOpsSchema.parse([
         {
@@ -62,6 +82,6 @@ describe("agent flashcards generation via set_page_blocks", () => {
           ],
         },
       ]),
-    ).toThrow();
+    ).not.toThrow();
   });
 });

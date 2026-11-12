@@ -32,13 +32,28 @@ export async function withUsageMeter<T>(
   };
 }
 
-/** Called by the OpenRouter callers after each response to add its usage. */
+/**
+ * Called by the model callers after each response to add its usage. Accepts
+ * OpenRouter's shape (`prompt_tokens` / `completion_tokens`) or Anthropic's
+ * (`input_tokens` / `output_tokens` plus cache fields).
+ */
 export function recordUsage(usage: unknown): void {
   const acc = store.getStore();
   if (!acc || !usage || typeof usage !== "object") return;
   const u = usage as Record<string, unknown>;
-  if (typeof u.prompt_tokens === "number") acc.prompt += u.prompt_tokens;
-  if (typeof u.completion_tokens === "number") acc.completion += u.completion_tokens;
+  const num = (v: unknown) => (typeof v === "number" ? v : 0);
+  if (typeof u.prompt_tokens === "number" || typeof u.completion_tokens === "number") {
+    acc.prompt += num(u.prompt_tokens);
+    acc.completion += num(u.completion_tokens);
+    return;
+  }
+  // Anthropic: `input_tokens` excludes cached input, which is reported
+  // separately (cache writes and cache reads). All of it was sent to the model,
+  // so prompt = uncached + cache writes + cache reads. `output_tokens` already
+  // includes thinking tokens.
+  acc.prompt +=
+    num(u.input_tokens) + num(u.cache_creation_input_tokens) + num(u.cache_read_input_tokens);
+  acc.completion += num(u.output_tokens);
 }
 
 /** Sum several usage totals (e.g. a multi-call agent turn). */

@@ -13,6 +13,7 @@ import "server-only";
 import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/db";
 import { safeParseWorkspace } from "./schema";
+import { NOT_TRASHED, parseStoredWorkspace } from "./store";
 import type { Workspace } from "./types";
 
 export class WorkspaceNotFoundError extends Error {}
@@ -34,10 +35,12 @@ async function requireOwnerId(): Promise<string> {
   return userId;
 }
 
+// Stored snapshots are read tolerantly (one imperfect piece is repaired or
+// dropped, never the whole workspace), matching the editor's loader.
 function parseWorkspace(data: string, id: string): Workspace {
-  const parsed = safeParseWorkspace(JSON.parse(data));
-  if (!parsed.success) throw new Error("Stored workspace is invalid");
-  return { ...parsed.data, id };
+  const workspace = parseStoredWorkspace({ id, data });
+  if (!workspace) throw new Error("Stored workspace is invalid");
+  return workspace;
 }
 
 export async function getWorkspaceSnapshot(
@@ -45,7 +48,7 @@ export async function getWorkspaceSnapshot(
 ): Promise<WorkspaceSnapshot | null> {
   const ownerId = await requireOwnerId();
   const row = await prisma.workspace.findFirst({
-    where: { id, ownerId },
+    where: { id, ownerId, ...NOT_TRASHED },
     select: { data: true, version: true },
   });
   if (!row) return null;
@@ -68,7 +71,7 @@ export async function applyAgentWorkspaceChange(
 
   return prisma.$transaction(async (tx) => {
     const current = await tx.workspace.findFirst({
-      where: { id, ownerId },
+      where: { id, ownerId, ...NOT_TRASHED },
       select: { data: true, version: true },
     });
     if (!current) throw new WorkspaceNotFoundError("Workspace not found");
@@ -77,7 +80,7 @@ export async function applyAgentWorkspaceChange(
     }
 
     const updated = await tx.workspace.updateMany({
-      where: { id, ownerId, version: baseVersion },
+      where: { id, ownerId, version: baseVersion, ...NOT_TRASHED },
       data: {
         name: parsed.data.name,
         icon: parsed.data.icon ?? null,
@@ -124,7 +127,7 @@ export async function undoAgentWorkspaceChange(
     }
 
     const current = await tx.workspace.findFirst({
-      where: { id: original.workspaceId, ownerId },
+      where: { id: original.workspaceId, ownerId, ...NOT_TRASHED },
       select: { data: true, version: true },
     });
     if (!current) throw new WorkspaceNotFoundError("Workspace not found");
@@ -146,6 +149,7 @@ export async function undoAgentWorkspaceChange(
         id: original.workspaceId,
         ownerId,
         version: current.version,
+        ...NOT_TRASHED,
       },
       data: {
         name: restored.name,

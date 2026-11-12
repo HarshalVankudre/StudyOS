@@ -1,11 +1,14 @@
 "use client";
 
 import Link from "next/link";
+import { Redo2, RotateCw, Undo2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { updateWorkspaceAction } from "@/app/app/actions";
+import { toast } from "sonner";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { Toaster } from "@/components/ui/sonner";
 import { useI18n } from "@/lib/i18n/client";
+import type { Removal } from "@/lib/workspace/history";
 import type { Workspace } from "@/lib/workspace/types";
 import { AccountMenu } from "@/components/account/AccountMenu";
 import { CreditMeter } from "@/components/account/CreditMeter";
@@ -13,37 +16,136 @@ import { AgentChat } from "./AgentChat";
 import { PageView } from "./PageView";
 import { StudyLauncher } from "./StudyLauncher";
 import { WorkspaceProvider, type SaveStatus } from "./WorkspaceContext";
+import { focusedFieldKey, isTextEntry, useWorkspaceSync } from "./useWorkspaceSync";
+import type { Conflict, Notice } from "./workspace-sync";
+
+const TOAST_MS = 8000;
 
 export function WorkspaceEditor({
   id,
   initialWorkspace,
+  initialVersion = 1,
   initialCredits = 0,
 }: {
   id: string;
   initialWorkspace: Workspace;
+  /** The saved version `initialWorkspace` was read at (for conflict checks). */
+  initialVersion?: number;
   initialCredits?: number;
 }) {
-  const { dict } = useI18n();
-  const [workspace, setWorkspace] = useState(initialWorkspace);
+  const { dict, t, dir } = useI18n();
+  const S = dict.safety;
   const [activePageId, setActivePageId] = useState(
     initialWorkspace.homePageId ?? initialWorkspace.pages[0]?.id,
   );
-  const [status, setStatus] = useState<SaveStatus>("saved");
-  // Bumped only when the AI swaps in a whole new workspace, so uncontrolled
-  // inputs remount with its values (see WorkspaceCtx.rev).
-  const [rev, setRev] = useState(0);
 
-  // AI agent chat panel
+  // AI agent chat panel. Once opened it stays mounted (hidden when closed) so
+  // a running task keeps streaming and its result still lands in the editor.
   const [aiOpen, setAiOpen] = useState(false);
+  const [aiMounted, setAiMounted] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [agentBusy, setAgentBusy] = useState(false);
-
-  const latest = useRef(workspace);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const agentBusyRef = useRef(false);
-  const pendingSaveRef = useRef(false);
+  const aiOpenRef = useRef(false);
   const sidebarTriggerRef = useRef<HTMLButtonElement>(null);
   const sidebarCloseRef = useRef<HTMLButtonElement>(null);
+
+  const removalMessage = useCallback(
+    (removal: Removal): string => {
+      const many = removal.count > 1;
+      switch (removal.kind) {
+        case "page":
+          return many
+            ? t(S.removedPages, { count: removal.count })
+            : t(S.removedPage, { name: removal.name || dict.editor.untitled });
+        case "database":
+          return S.removedDatabase;
+        case "block":
+          return many ? t(S.removedBlocks, { count: removal.count }) : S.removedBlock;
+        case "column":
+          return S.removedColumn;
+        case "row":
+          return many ? t(S.removedRows, { count: removal.count }) : S.removedRow;
+        case "columnData":
+          return S.removedColumnData;
+        case "card":
+          return many ? t(S.removedCards, { count: removal.count }) : S.removedCard;
+      }
+    },
+    [S, dict.editor.untitled, t],
+  );
+
+  // Declared before use by the toast callbacks via a ref (the engine is
+  // created on first render).
+  const undoToRef = useRef<(entryId: number) => void>(() => {});
+
+  const { sync, snapshot } = useWorkspaceSync(id, initialWorkspace, initialVersion, {
+    onRemoval: (removal, entryId) => {
+      toast(removalMessage(removal), {
+        duration: TOAST_MS,
+        action: { label: S.undo, onClick: () => undoToRef.current(entryId) },
+      });
+    },
+    onNotice: (notice: Notice) => {
+      toast(notice === "draftRestored" ? S.draftRestored : S.updatedElsewhere, {
+        duration: TOAST_MS,
+      });
+    },
+  });
+  const { workspace, rev, status, canUndo, canRedo, conflict } = snapshot;
+
+  const update = useCallback(
+    (mutator: (draft: Workspace) => void) => sync.update(mutator, focusedFieldKey()),
+    [sync],
+  );
+
+  // After undo/redo, follow a page that came back (e.g. undoing a delete).
+  const followRestoredPage = useCallback(
+    (before: Workspace) => {
+      const known = new Set(before.pages.map((p) => p.id));
+      const restored = sync.workspace.pages.find((p) => !known.has(p.id));
+      if (restored) setActivePageId(restored.id);
+    },
+    [sync],
+  );
+
+  const undo = useCallback(() => {
+    const before = sync.workspace;
+    if (sync.undo()) followRestoredPage(before);
+  }, [followRestoredPage, sync]);
+
+  const redo = useCallback(() => {
+    const before = sync.workspace;
+    if (sync.redo()) followRestoredPage(before);
+  }, [followRestoredPage, sync]);
+
+  useEffect(() => {
+    undoToRef.current = (entryId: number) => {
+      const before = sync.workspace;
+      if (sync.undoTo(entryId)) followRestoredPage(before);
+    };
+  }, [followRestoredPage, sync]);
+
+  // Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z (and Ctrl+Y). Inside a text field the
+  // browser's own text undo runs instead; dialogs (study sessions) are left
+  // alone.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+      const key = event.key.toLowerCase();
+      const isUndo = key === "z" && !event.shiftKey;
+      const isRedo = (key === "z" && event.shiftKey) || (key === "y" && event.ctrlKey);
+      if (!isUndo && !isRedo) return;
+      if (isTextEntry(event.target)) return;
+      if (event.target instanceof Element && event.target.closest('[role="dialog"]')) {
+        return;
+      }
+      event.preventDefault();
+      if (isUndo) undo();
+      else redo();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [redo, undo]);
 
   const closeSidebar = useCallback(() => {
     setSidebarOpen(false);
@@ -64,73 +166,49 @@ export function WorkspaceEditor({
     return () => window.removeEventListener("keydown", handleEscape);
   }, [closeSidebar, sidebarOpen]);
 
-  const update = useCallback(
-    (mutator: (draft: Workspace) => void) => {
-      setWorkspace((prev) => {
-        const next = structuredClone(prev);
-        mutator(next);
-        latest.current = next;
-        return next;
-      });
-      setStatus("saving");
-      if (timer.current) clearTimeout(timer.current);
-      // Suppress autosave while the agent is processing to avoid a version
-      // conflict when it tries to commit its result.
-      if (agentBusyRef.current) {
-        pendingSaveRef.current = true;
-        return;
-      }
-      timer.current = setTimeout(async () => {
-        try {
-          await updateWorkspaceAction(id, latest.current);
-          setStatus("saved");
-        } catch {
-          setStatus("error");
-        }
-      }, 800);
-    },
-    [id],
-  );
+  const openAi = useCallback(() => {
+    // Save pending edits first so the agent reads the latest workspace.
+    void sync.flush();
+    aiOpenRef.current = true;
+    setAiMounted(true);
+    setAiOpen(true);
+  }, [sync]);
 
-  // When the agent finishes, flush any save that was deferred while it was busy.
-  const handleAgentBusyChange = useCallback((busy: boolean) => {
-    agentBusyRef.current = busy;
-    setAgentBusy(busy);
-    if (!busy && pendingSaveRef.current) {
-      pendingSaveRef.current = false;
-      if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(async () => {
-        try {
-          await updateWorkspaceAction(id, latest.current);
-          setStatus("saved");
-        } catch {
-          setStatus("error");
-        }
-      }, 300);
-    }
-  }, [id]);
-
-  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
-
-  // Agent apply and Undo are already persisted server-side; reflect them live.
-  const applyAgentWorkspace = useCallback((updated: Workspace) => {
-    if (timer.current) clearTimeout(timer.current);
-    latest.current = updated;
-    setWorkspace(updated);
-    setRev((r) => r + 1); // remount uncontrolled inputs onto the agent's values
-    setStatus("saved");
-    setActivePageId((prev) =>
-      updated.pages.some((p) => p.id === prev)
-        ? prev
-        : (updated.homePageId ?? updated.pages[0]?.id),
-    );
+  const closeAi = useCallback(() => {
+    aiOpenRef.current = false;
+    setAiOpen(false);
   }, []);
 
+  // Autosave pauses while the agent works; when it finishes, the editor
+  // re-reads the saved workspace and replays edits made meanwhile on top.
+  const agentBusyRef = useRef(false);
+  const handleAgentBusyChange = useCallback(
+    (busy: boolean) => {
+      const was = agentBusyRef.current;
+      agentBusyRef.current = busy;
+      setAgentBusy(busy);
+      sync.setAgentBusy(busy);
+      if (was && !busy && !aiOpenRef.current) {
+        toast(S.agentFinished, {
+          duration: TOAST_MS,
+          action: { label: S.view, onClick: openAi },
+        });
+      }
+    },
+    [S.agentFinished, S.view, openAi, sync],
+  );
+
+  // Agent apply and its Undo are persisted server-side; fetch the saved
+  // result (with its version) rather than trusting a possibly stale copy.
+  const applyAgentWorkspace = useCallback(() => {
+    void sync.resync();
+  }, [sync]);
+
   const addPage = () => {
-    const id = crypto.randomUUID();
+    const pageId = crypto.randomUUID();
     update((d) => {
       d.pages.push({
-        id,
+        id: pageId,
         title: dict.editor.untitled,
         icon: "📄",
         blocks: [
@@ -138,16 +216,18 @@ export function WorkspaceEditor({
         ],
       });
     });
-    setActivePageId(id);
+    setActivePageId(pageId);
     closeSidebar();
   };
 
+  // No confirm: the page can be brought back from the Undo toast or Ctrl+Z.
   const deletePage = (pageId: string) => {
     if (workspace.pages.length <= 1) return;
     const remaining = workspace.pages.filter((p) => p.id !== pageId);
     update((d) => {
+      if (d.pages.length <= 1) return;
       d.pages = d.pages.filter((p) => p.id !== pageId);
-      if (d.homePageId === pageId) d.homePageId = remaining[0]?.id;
+      if (d.homePageId === pageId) d.homePageId = d.pages[0]?.id;
     });
     if (activePageId === pageId) setActivePageId(remaining[0]?.id);
   };
@@ -156,7 +236,21 @@ export function WorkspaceEditor({
     workspace.pages.find((p) => p.id === activePageId) ?? workspace.pages[0];
 
   return (
-    <WorkspaceProvider value={{ workspace, update, status, rev, agentBusy, setAgentBusy: handleAgentBusyChange }}>
+    <WorkspaceProvider
+      value={{
+        workspace,
+        update,
+        status,
+        rev,
+        agentBusy,
+        setAgentBusy: handleAgentBusyChange,
+        undo,
+        redo,
+        canUndo,
+        canRedo,
+      }}
+    >
+      <Toaster dir={dir} position="bottom-center" />
       <div className="flex h-[100dvh] w-full overflow-hidden bg-paper text-ink">
         {sidebarOpen && (
           <button
@@ -241,7 +335,7 @@ export function WorkspaceEditor({
                       onClick={() => deletePage(page.id)}
                       title={dict.editor.deletePage}
                       aria-label={`${dict.editor.deletePage}: ${page.title}`}
-                      className="grid h-11 w-11 shrink-0 place-items-center rounded-md text-ink-soft/70 opacity-0 transition hover:bg-hover hover:text-rose-500 focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
+                      className="grid h-11 w-11 shrink-0 place-items-center rounded-md text-ink-soft/70 transition hover:bg-hover hover:text-rose-500 md:opacity-0 md:focus-visible:opacity-100 md:group-hover:opacity-100 md:group-focus-within:opacity-100"
                     >
                       <span aria-hidden>✕</span>
                     </button>
@@ -278,7 +372,7 @@ export function WorkspaceEditor({
 
         {/* Main */}
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <div className="flex min-h-14 items-center gap-2 border-b border-line px-2 sm:px-4 lg:px-6">
+          <div className="flex min-h-14 items-center gap-1 border-b border-line px-2 sm:gap-2 sm:px-4 lg:px-6">
             <button
               ref={sidebarTriggerRef}
               type="button"
@@ -298,84 +392,218 @@ export function WorkspaceEditor({
                 {activePage?.icon} {activePage?.title}
               </span>
             </div>
-            <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+            <div className="flex shrink-0 items-center gap-1 sm:gap-2">
+              <div role="group" aria-label={S.history} className="flex items-center">
+                <HistoryButton
+                  label={S.undo}
+                  shortcut="Ctrl+Z"
+                  disabled={!canUndo}
+                  onClick={undo}
+                  icon={<Undo2 className="h-4 w-4 rtl:-scale-x-100" aria-hidden />}
+                />
+                <HistoryButton
+                  label={S.redo}
+                  shortcut="Ctrl+Shift+Z"
+                  disabled={!canRedo}
+                  onClick={redo}
+                  icon={<Redo2 className="h-4 w-4 rtl:-scale-x-100" aria-hidden />}
+                />
+              </div>
               <StudyLauncher />
               <button
-                onClick={() => {
-                  setAiOpen((v) => {
-                    if (!v && timer.current) {
-                      // Opening the agent panel — flush any pending save
-                      // immediately so the DB version matches before the
-                      // agent reads it.
-                      clearTimeout(timer.current);
-                      timer.current = null;
-                      void updateWorkspaceAction(id, latest.current).then(
-                        () => setStatus("saved"),
-                        () => setStatus("error"),
-                      );
-                    }
-                    return !v;
-                  });
-                }}
+                onClick={() => (aiOpen ? closeAi() : openAi())}
                 aria-pressed={aiOpen}
-                aria-label={aiOpen ? dict.editor.closeAgent : dict.editor.askAi}
+                aria-label={
+                  aiOpen
+                    ? dict.editor.closeAgent
+                    : agentBusy
+                      ? S.agentWorking
+                      : dict.editor.askAi
+                }
                 className={`flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-md border px-2 text-xs font-semibold transition sm:min-h-0 sm:min-w-0 sm:px-3.5 sm:py-1.5 ${
                   aiOpen
                     ? "border-lime bg-lime-faint text-ink"
                     : "border-line-strong bg-card text-ink hover:bg-hover"
                 }`}
               >
-                <span className="h-1.5 w-1.5 rounded-full bg-lime" aria-hidden />
+                <span
+                  className={`h-1.5 w-1.5 rounded-full bg-lime ${agentBusy ? "animate-pulse" : ""}`}
+                  aria-hidden
+                />
                 <span className="hidden sm:inline">
                   {aiOpen ? dict.editor.closeAgent : dict.editor.askAi}
                 </span>
               </button>
-              <SaveIndicator status={status} />
+              <SaveIndicator status={status} onRetry={() => sync.retry()} />
             </div>
           </div>
+
+          {conflict && (
+            <ConflictBanner
+              conflict={conflict}
+              onKeepMine={() => sync.resolveConflict("mine")}
+              onUseLatest={() => sync.resolveConflict("theirs")}
+            />
+          )}
+          {(status === "tooLarge" || status === "gone") && (
+            <div
+              role="alert"
+              className="flex items-start gap-3 border-b border-line bg-amber-400/10 px-4 py-3 text-sm text-ink sm:px-6"
+            >
+              <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" aria-hidden />
+              <p className="min-w-0 flex-1">{status === "tooLarge" ? S.tooLarge : S.gone}</p>
+              {status === "tooLarge" && (
+                <button
+                  type="button"
+                  onClick={() => sync.retry()}
+                  className="min-h-11 shrink-0 rounded-md border border-line-strong bg-card px-3 text-xs font-semibold transition hover:bg-hover sm:min-h-0 sm:py-1.5"
+                >
+                  {S.retry}
+                </button>
+              )}
+            </div>
+          )}
 
           <div className="relative flex-1 overflow-y-auto">
             {activePage && <PageView page={activePage} />}
           </div>
         </main>
 
-        {aiOpen && (
-          <AgentChat
-            workspaceId={id}
-            onApplied={applyAgentWorkspace}
-            onClose={() => setAiOpen(false)}
-            onBusyChange={handleAgentBusyChange}
-          />
+        {aiMounted && (
+          <div className={aiOpen ? "contents" : "hidden"}>
+            <AgentChat
+              workspaceId={id}
+              onApplied={applyAgentWorkspace}
+              onClose={closeAi}
+              onBusyChange={handleAgentBusyChange}
+            />
+          </div>
         )}
       </div>
     </WorkspaceProvider>
   );
 }
 
-function SaveIndicator({ status }: { status: SaveStatus }) {
+function HistoryButton({
+  label,
+  shortcut,
+  disabled,
+  onClick,
+  icon,
+}: {
+  label: string;
+  shortcut: string;
+  disabled: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      aria-keyshortcuts={shortcut.replace("Ctrl", "Control")}
+      title={`${label} (${shortcut})`}
+      className="grid h-11 w-11 place-items-center rounded-md text-ink-soft transition hover:bg-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-transparent sm:h-9 sm:w-9"
+    >
+      {icon}
+    </button>
+  );
+}
+
+function ConflictBanner({
+  conflict,
+  onKeepMine,
+  onUseLatest,
+}: {
+  conflict: Conflict;
+  onKeepMine: () => void;
+  onUseLatest: () => void;
+}) {
   const { dict } = useI18n();
+  const S = dict.safety;
+  const isDraft = conflict.kind === "draft";
+  return (
+    <div
+      role="alert"
+      className="border-b border-line bg-lime-faint px-4 py-3 text-sm text-ink sm:px-6"
+    >
+      <p className="font-semibold">{isDraft ? S.draftTitle : S.conflictTitle}</p>
+      <p className="mt-0.5 text-ink-soft">{isDraft ? S.draftBody : S.conflictBody}</p>
+      <div className="mt-2.5 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={onKeepMine}
+          className="min-h-11 rounded-md bg-ink px-3.5 text-xs font-semibold text-paper transition hover:opacity-90 sm:min-h-0 sm:py-2"
+        >
+          {isDraft ? S.restoreDraft : S.keepMine}
+        </button>
+        <button
+          type="button"
+          onClick={onUseLatest}
+          className="min-h-11 rounded-md border border-line-strong bg-card px-3.5 text-xs font-semibold text-ink transition hover:bg-hover sm:min-h-0 sm:py-2"
+        >
+          {isDraft ? S.discardDraft : S.useLatest}
+        </button>
+        {!isDraft && <span className="text-xs text-ink-soft">{S.useLatestHint}</span>}
+      </div>
+    </div>
+  );
+}
+
+function SaveIndicator({
+  status,
+  onRetry,
+}: {
+  status: SaveStatus;
+  onRetry: () => void;
+}) {
+  const { dict } = useI18n();
+  const S = dict.safety;
   const label =
     status === "saving"
       ? dict.editor.saving
-      : status === "error"
-        ? dict.editor.saveFailed
-        : dict.editor.saved;
+      : status === "saved"
+        ? dict.editor.saved
+        : status === "offline"
+          ? S.offline
+          : status === "error"
+            ? dict.editor.saveFailed
+            : S.notSaved;
+  const tone =
+    status === "saved"
+      ? "bg-emerald-500"
+      : status === "saving"
+        ? "bg-amber-400"
+        : status === "error"
+          ? "bg-rose-500"
+          : "bg-amber-500";
+  const canRetry = status === "error" || status === "offline";
   return (
-    <span
-      role="status"
-      aria-label={label}
-      className={`flex min-h-11 items-center gap-1.5 px-1 text-xs sm:min-h-0 sm:px-0 ${status === "error" ? "text-rose-500" : "text-ink-soft"}`}
-    >
+    <span className="flex items-center gap-1.5">
       <span
-        className={`h-1.5 w-1.5 rounded-full ${
-          status === "saving"
-            ? "bg-amber-400"
-            : status === "error"
-              ? "bg-rose-500"
-              : "bg-emerald-500"
+        role="status"
+        aria-label={label}
+        title={label}
+        className={`flex min-h-11 items-center gap-1.5 px-1 text-xs sm:min-h-0 sm:px-0 ${
+          status === "error" ? "text-rose-500" : "text-ink-soft"
         }`}
-      />
-      <span className="hidden lg:inline">{label}</span>
+      >
+        <span className={`h-1.5 w-1.5 rounded-full ${tone}`} />
+        <span className="hidden lg:inline">{label}</span>
+      </span>
+      {canRetry && (
+        <button
+          type="button"
+          onClick={onRetry}
+          aria-label={dict.safety.retry}
+          className="flex min-h-11 min-w-11 items-center justify-center gap-1 rounded-md border border-line-strong bg-card px-2 text-xs font-semibold text-ink transition hover:bg-hover sm:min-h-0 sm:min-w-0 sm:py-1"
+        >
+          <RotateCw className="h-3.5 w-3.5" aria-hidden />
+          <span className="hidden sm:inline">{dict.safety.retry}</span>
+        </button>
+      )}
     </span>
   );
 }

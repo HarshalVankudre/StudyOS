@@ -2,7 +2,7 @@ import "server-only";
 
 import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/db";
-import { safeParseWorkspace } from "@/lib/workspace/schema";
+import { repairWorkspace } from "@/lib/workspace/repair";
 import type { Workspace } from "@/lib/workspace/types";
 import { buildDailyStudyPlan, normalizeDailyMinutes } from "./planner";
 import {
@@ -252,15 +252,16 @@ export function normalizeTimeZone(value: string | undefined): string {
 
 async function loadOwnedWorkspaces(userId: string): Promise<Workspace[]> {
   const rows = await prisma.workspace.findMany({
-    where: { ownerId: userId },
+    // The agent never plans from workspaces in the trash.
+    where: { ownerId: userId, deletedAt: null },
     orderBy: { updatedAt: "desc" },
     select: { id: true, data: true },
   });
 
   return rows.flatMap((row) => {
     try {
-      const parsed = safeParseWorkspace(JSON.parse(row.data));
-      return parsed.success ? [{ ...parsed.data, id: row.id }] : [];
+      const parsed = repairWorkspace(JSON.parse(row.data), { id: row.id });
+      return parsed ? [{ ...parsed.workspace, id: row.id }] : [];
     } catch {
       return [];
     }

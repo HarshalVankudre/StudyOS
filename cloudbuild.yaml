@@ -15,7 +15,30 @@ substitutions:
   _NPM_STRIPE_PK: ""
 
 steps:
+  # Gate: type check, lint and unit tests must pass before an image is built.
+  # A failure here aborts the build and leaves the current revision serving.
+  # DATABASE_URL is a placeholder so `prisma generate` (postinstall) works; the
+  # tests never touch a database. node_modules / generated client are removed
+  # afterwards so they do not leak into the docker build context.
+  - id: test
+    name: node:22
+    entrypoint: bash
+    env:
+      - DATABASE_URL=postgresql://ci:ci@localhost:5432/ci
+      - DATABASE_URL_UNPOOLED=postgresql://ci:ci@localhost:5432/ci
+      - NEXT_TELEMETRY_DISABLED=1
+    args:
+      - -ceu
+      - |
+        npm install -g pnpm@10
+        pnpm install --frozen-lockfile
+        pnpm exec tsc --noEmit
+        pnpm lint
+        pnpm test
+        rm -rf node_modules src/generated
+
   - id: build
+    waitFor: ['test']
     name: gcr.io/cloud-builders/docker
     entrypoint: bash
     args:

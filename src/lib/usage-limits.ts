@@ -11,7 +11,7 @@
  */
 import { prisma } from "@/lib/db";
 
-export type LimitedKind = "generate" | "agent" | "sandbox_run";
+export type LimitedKind = "generate" | "generate_questions" | "agent" | "sandbox_run";
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
@@ -23,6 +23,8 @@ export const USAGE_LIMITS: Record<
 > = {
   // Workspace generations are the most expensive request (~100s of model time).
   generate: { free: 10, pro: 30, windowMs: HOUR },
+  // Onboarding questions before a generation (one small model call each).
+  generate_questions: { free: 20, pro: 60, windowMs: HOUR },
   // Agent chat turns.
   agent: { free: 60, pro: 180, windowMs: HOUR },
   // Sandbox runs cost real Daytona compute per call — cap per day.

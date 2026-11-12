@@ -35,12 +35,22 @@ describe("flashcards block", () => {
     ).toBe(true);
   });
 
-  it("requires non-empty front and back", () => {
+  it("allows blank sides while a card is being written", () => {
     expect(
       blockSchema.safeParse({
         id: "b1",
         type: "flashcards",
-        cards: [{ id: "c1", front: "", back: "A" }],
+        cards: [{ id: "c1", front: "", back: "" }],
+      }).success,
+    ).toBe(true);
+  });
+
+  it("still requires both sides to be present", () => {
+    expect(
+      blockSchema.safeParse({
+        id: "b1",
+        type: "flashcards",
+        cards: [{ id: "c1", front: "Q" }],
       }).success,
     ).toBe(false);
   });

@@ -12,6 +12,7 @@ import { skillRegistry } from "./skills/registry";
 import "./skills/catalog"; // ensure Stage-1 skills + their tools are registered
 import { workspaceAreas } from "./agent";
 import type { AgentBudget } from "./budgets";
+import { clockPromptBlock, studentClock, type StudentClock } from "./student-clock";
 import {
   TaskCancelledError,
   isTaskCancelledError,
@@ -67,6 +68,11 @@ export interface RunAgentLoopParams {
    * Defaults to `now()` (loop entry) for tests.
    */
   startedAt?: number;
+  /**
+   * The student's local clock (date, weekday, time zone) so "next Friday"
+   * resolves to a real date. Defaults to now in UTC.
+   */
+  clock?: StudentClock;
 }
 
 /** Per-tool, plain-language hint about the input JSON, injected into the loop prompt. */
@@ -108,6 +114,7 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentRes
   const modelDeadline = deadline - TAIL_RESERVE_MS;
   const areas = workspaceAreas(workspace);
   const dict = getDictionary(locale);
+  const clockBlock = clockPromptBlock(params.clock ?? studentClock(), "agent");
 
   let modelTurns = 0;
   // Gate against the model deadline (not the full wall deadline) so no new turn
@@ -177,13 +184,13 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentRes
   let plan: AgentPlanDecision;
   try {
     modelTurns += 1;
-    const planRaw = await callModel(buildPlanMessages(history, message, areas, locale), 1400, "planning", { temperature: 0.2 });
+    const planRaw = await callModel(buildPlanMessages(history, message, areas, locale, false, clockBlock), 1400, "planning", { temperature: 0.2 });
     try {
       plan = parseAgentPlan(planRaw);
     } catch {
       // one bounded repair
       modelTurns += 1;
-      const retry = await callModel(buildPlanMessages(history, message, areas, locale, true), 1400, "planning", { temperature: 0 });
+      const retry = await callModel(buildPlanMessages(history, message, areas, locale, true, clockBlock), 1400, "planning", { temperature: 0 });
       plan = parseAgentPlan(retry);
     }
   } catch (error) {
@@ -220,7 +227,7 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentRes
     let stepRaw: string;
     try {
       stepRaw = await callModel(
-        buildStepMessages(candidate, message, skill.instructions, allowedTools, observations, locale),
+        buildStepMessages(candidate, message, skill.instructions, allowedTools, observations, locale, clockBlock),
         4000,
         "updating",
         { temperature: 0.1 },
@@ -307,7 +314,7 @@ function resolveAreas(ids: string[], areas: AgentArea[]): AgentArea[] {
   return found.length ? found : areas.slice(0, 6);
 }
 
-function buildPlanMessages(history: AgentMessage[], message: string, areas: AgentArea[], locale: Locale, corrective = false): ChatMessage[] {
+function buildPlanMessages(history: AgentMessage[], message: string, areas: AgentArea[], locale: Locale, corrective = false, clockBlock = ""): ChatMessage[] {
   // render-visual is only reachable when its skill is registered (AGENT_SANDBOX on);
   // otherwise the planner must not be told about it.
   const canRender = !!skillRegistry.get("render-visual");
@@ -344,11 +351,13 @@ function buildPlanMessages(history: AgentMessage[], message: string, areas: Agen
   return [
     { role: "system", content: system },
     ...history.slice(-MAX_HISTORY).map((h): ChatMessage => ({ role: h.role, content: h.content })),
-    { role: "user", content: `Workspace summary: ${areas.length} area(s).\nLatest user message: ${message}` },
+    // The clock goes in the final user turn, after the stable system prompt and
+    // history, so it never invalidates a cached prefix.
+    { role: "user", content: `Workspace summary: ${areas.length} area(s).\nLatest user message: ${message}${clockBlock ? `\n\n${clockBlock}` : ""}` },
   ];
 }
 
-function buildStepMessages(ws: Workspace, message: string, skillInstructions: string, allowedTools: string[], observations: ChatMessage[], locale: Locale): ChatMessage[] {
+function buildStepMessages(ws: Workspace, message: string, skillInstructions: string, allowedTools: string[], observations: ChatMessage[], locale: Locale, clockBlock = ""): ChatMessage[] {
   const catalog = allowedTools.map((id) => `- ${id}: input ${TOOL_INPUT_HINTS[id] ?? "{}"}`).join("\n");
   const system = [
     "You are executing a StudyOS workspace change as a step-by-step tool loop.",
@@ -362,7 +371,7 @@ function buildStepMessages(ws: Workspace, message: string, skillInstructions: st
   ].join("\n");
   return [
     { role: "system", content: system },
-    { role: "user", content: `Workspace JSON:\n${JSON.stringify(ws)}\n\nUser request: ${message}` },
+    { role: "user", content: `Workspace JSON:\n${JSON.stringify(ws)}\n\nUser request: ${message}${clockBlock ? `\n\n${clockBlock}` : ""}` },
     ...observations.slice(-12),
   ];
 }

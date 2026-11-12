@@ -73,7 +73,17 @@ export type GenerationEvent =
   | {
       type: "error";
       message: string;
+      /**
+       * Lets the client offer the right way forward: buy credits, wait, or
+       * retry. A "generation_failed" error was never charged.
+       */
+      code?: GenerationErrorCode;
     };
+
+export type GenerationErrorCode =
+  | "out_of_credits"
+  | "rate_limited"
+  | "generation_failed";
 
 export interface ComponentProgress {
   status: "queued" | "generating" | "complete";

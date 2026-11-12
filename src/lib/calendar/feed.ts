@@ -1,7 +1,7 @@
 import "server-only";
 import { randomBytes } from "node:crypto";
 import { prisma } from "@/lib/db";
-import { safeParseWorkspace } from "@/lib/workspace/schema";
+import { repairWorkspace } from "@/lib/workspace/repair";
 import { workspaceEvents, type CalendarEvent } from "./events";
 import { buildIcs } from "./ics";
 
@@ -46,7 +46,8 @@ export async function resolveUserByToken(token: string): Promise<string | null> 
 /** Build the ICS body aggregating every dated row across the user's workspaces. */
 export async function buildUserFeed(userId: string, now: Date): Promise<string> {
   const rows = await prisma.workspace.findMany({
-    where: { ownerId: userId },
+    // Trashed workspaces must not leak deadlines into the feed.
+    where: { ownerId: userId, deletedAt: null },
     select: { data: true },
   });
   const events: CalendarEvent[] = [];
@@ -57,8 +58,9 @@ export async function buildUserFeed(userId: string, now: Date): Promise<string> 
     } catch {
       continue;
     }
-    const result = safeParseWorkspace(parsed);
-    if (result.success) events.push(...workspaceEvents(result.data));
+    // Tolerant, like the editor: one imperfect block never hides every deadline.
+    const result = repairWorkspace(parsed);
+    if (result) events.push(...workspaceEvents(result.workspace));
   }
   events.sort((a, b) => a.date.localeCompare(b.date));
   return buildIcs(events, { name: "StudyOS deadlines", now });

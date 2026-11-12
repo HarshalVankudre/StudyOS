@@ -1,8 +1,13 @@
 /**
- * Low-level OpenRouter chat-completions call shared by the AI features.
+ * Low-level chat-completions call shared by the AI features.
  * Sends an OpenAI-style messages array and returns the assistant's text.
  * All StudyOS AI runs through here on the model chosen by `modelForPlan`.
+ *
+ * A bare Claude model id (`claude-…`) is served by the Anthropic Messages API
+ * (./anthropic); every other id goes to OpenRouter. See ./provider.
  */
+import { anthropicCompletion } from "./anthropic";
+import { providerForModel } from "./provider";
 import { recordUsage } from "./usage-meter";
 
 export const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
@@ -18,6 +23,10 @@ export async function chatCompletion(
   maxTokens = 7000,
   options?: { temperature?: number },
 ): Promise<string> {
+  // Anthropic path ignores `temperature`: Claude Haiku 5.5 rejects non-default values.
+  if (providerForModel(model) === "anthropic") {
+    return anthropicCompletion(model, messages, maxTokens);
+  }
   const body: Record<string, unknown> = { model, max_tokens: maxTokens, messages };
   if (typeof options?.temperature === "number") body.temperature = options.temperature;
   const res = await fetch(OPENROUTER_URL, {
@@ -95,6 +104,15 @@ export async function streamChatCompletion(
   maxTokens = 7000,
   options?: StreamChatOptions,
 ): Promise<string> {
+  if (providerForModel(model) === "anthropic") {
+    // `temperature` and the OpenRouter `reasoning` config don't apply there;
+    // `reasoning: false` only suppresses the thinking callback.
+    return anthropicCompletion(model, messages, maxTokens, {
+      signal: options?.signal,
+      onReasoning: options?.reasoning === false ? undefined : options?.onReasoning,
+      onContent: options?.onContent,
+    });
+  }
   const body: Record<string, unknown> = {
     model,
     max_tokens: maxTokens,

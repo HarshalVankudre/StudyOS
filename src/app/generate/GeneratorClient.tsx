@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { Coins, LoaderCircle, RotateCcw, TriangleAlert, Upload } from "lucide-react";
 import { AiActivity } from "@/components/AiActivity";
 import { GenerationActivity } from "@/components/GenerationActivity";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
@@ -13,22 +14,47 @@ import type {
   WorkspaceGenerationPlan,
 } from "@/lib/ai/generation-progress";
 import type { GenQuestion, QuestionAnswer } from "@/lib/ai/onboarding";
-import { MAX_SOURCE_TEXT } from "@/lib/import/syllabus";
+import { TIME_ZONE_COOKIE, validTimeZone } from "@/lib/ai/student-clock";
+import {
+  MAX_SOURCE_INPUT,
+  MAX_SOURCE_TEXT,
+  MAX_UPLOAD_BYTES,
+} from "@/lib/import/syllabus";
 import { useI18n } from "@/lib/i18n/client";
 import { planQuestionsAction } from "./actions";
 
 type Stage = "describe" | "questions";
 
+/** The browser's IANA time zone, or undefined when it can't tell. */
+function browserTimeZone(): string | undefined {
+  try {
+    return validTimeZone(Intl.DateTimeFormat().resolvedOptions().timeZone) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function newGenerationId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
+  return `gen-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export function GeneratorClient({
   initialPrompt = "",
+  outOfCredits: initiallyOutOfCredits = false,
 }: {
   initialPrompt?: string;
+  /** Known before the student types anything, so they never invest effort first. */
+  outOfCredits?: boolean;
 }) {
   const router = useRouter();
   const { dict } = useI18n();
   const [prompt, setPrompt] = useState(initialPrompt);
   const [sourceText, setSourceText] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // A generation that failed (never charged): offer a one-tap retry.
+  const [failure, setFailure] = useState<string | null>(null);
+  const [outOfCredits, setOutOfCredits] = useState(initiallyOutOfCredits);
 
   const [stage, setStage] = useState<Stage>("describe");
   const [planning, setPlanning] = useState(false);
@@ -49,24 +75,36 @@ export function GeneratorClient({
   );
   const [overallProgress, setOverallProgress] = useState(4);
   const generationController = useRef<AbortController | null>(null);
+  const generationIdRef = useRef<string | null>(null);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    // Remember the browser's time zone so every AI request (including the
+    // workspace agent's) knows the student's local date.
+    const zone = browserTimeZone();
+    if (zone) {
+      document.cookie = `${TIME_ZONE_COOKIE}=${encodeURIComponent(zone)}; path=/; max-age=31536000; samesite=lax`;
+    }
+    return () => {
       generationController.current?.abort();
-    },
-    [],
-  );
+    };
+  }, []);
 
   // Step 1 → 2: turn the description into tailored questions.
   const askQuestions = async (text: string) => {
     const value = text.trim();
-    if (!value || planning || building) return;
+    if (!value || planning || building || outOfCredits) return;
     setPrompt(value);
     setError(null);
+    setFailure(null);
     setPlanning(true);
     try {
-      const qs = await planQuestionsAction(value, sourceText);
-      setQuestions(qs);
+      const result = await planQuestionsAction(value, sourceText);
+      if (!result.ok) {
+        if (result.code === "out_of_credits") setOutOfCredits(true);
+        else setError(result.message);
+        return;
+      }
+      setQuestions(result.questions);
       setSelected({});
       setCustomAnswers({});
       setOtherOpen({});
@@ -125,7 +163,7 @@ export function GeneratorClient({
           question: q.question,
           answers: [
             ...(selected[q.id] ?? []).map(
-          (oid) => q.options.find((o) => o.id === oid)?.label ?? oid,
+              (oid) => q.options.find((o) => o.id === oid)?.label ?? oid,
             ),
             ...(typed ? [typed] : []),
           ],
@@ -134,6 +172,7 @@ export function GeneratorClient({
       .filter((a) => a.answers.length > 0);
 
     setError(null);
+    setFailure(null);
     setBuilding(true);
     setGenerationPlan(null);
     setComponentProgress({});
@@ -143,18 +182,26 @@ export function GeneratorClient({
 
     const controller = new AbortController();
     generationController.current = controller;
+    const generationId = newGenerationId();
+    generationIdRef.current = generationId;
     let completed = false;
 
     try {
       const response = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, answers, sourceText }),
+        body: JSON.stringify({
+          prompt,
+          answers,
+          sourceText,
+          timeZone: browserTimeZone(),
+          generationId,
+        }),
         signal: controller.signal,
       });
       if (!response.ok || !response.body) {
         const body = await response.json().catch(() => null);
-        throw new Error(body?.error ?? "Generation request failed");
+        throw new Error(body?.error ?? dict.generate.errorBuild);
       }
 
       const reader = response.body.getReader();
@@ -212,6 +259,14 @@ export function GeneratorClient({
             setOverallProgress(100);
             router.push(`/app/${event.workspaceId}`);
           } else if (event.type === "error") {
+            if (event.code === "out_of_credits") {
+              setOutOfCredits(true);
+              return;
+            }
+            if (event.code === "generation_failed") {
+              setFailure(event.message);
+              return;
+            }
             throw new Error(event.message);
           }
         }
@@ -219,24 +274,37 @@ export function GeneratorClient({
         if (done) break;
       }
 
-      if (!completed) throw new Error("Generation ended before saving");
+      if (!completed) setFailure(dict.generate.errorBuild);
     } catch (cause) {
       if (!controller.signal.aborted) {
         setError(
-          cause instanceof Error
+          cause instanceof Error && cause.message
             ? cause.message
             : dict.generate.errorBuild,
         );
       }
     } finally {
       generationController.current = null;
+      generationIdRef.current = null;
       if (!completed) setBuilding(false);
     }
   };
 
   const cancelBuild = () => {
+    const generationId = generationIdRef.current;
     generationController.current?.abort();
     generationController.current = null;
+    generationIdRef.current = null;
+    // Tell the server too, so it stops the model and never saves the
+    // workspace even if a proxy keeps the aborted connection open.
+    if (generationId) {
+      void fetch("/api/generate/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ generationId }),
+        keepalive: true,
+      }).catch(() => {});
+    }
     setBuilding(false);
     setGenerationPlan(null);
     setComponentProgress({});
@@ -291,6 +359,8 @@ export function GeneratorClient({
       </header>
 
       <div className="mx-auto flex max-w-2xl flex-col px-6 pb-24 pt-14 sm:pt-20">
+        {outOfCredits && <OutOfCreditsPanel />}
+
         {stage === "describe" ? (
           <DescribeStage
             prompt={prompt}
@@ -298,6 +368,7 @@ export function GeneratorClient({
             sourceText={sourceText}
             setSourceText={setSourceText}
             busy={planning}
+            blocked={outOfCredits}
             onContinue={() => askQuestions(prompt)}
             onExample={askQuestions}
           />
@@ -313,14 +384,87 @@ export function GeneratorClient({
             toggleOther={toggleOther}
             setCustomAnswer={setCustomAnswer}
             building={building}
+            blocked={outOfCredits}
             onBack={() => setStage("describe")}
             onBuild={build}
           />
         )}
 
-        {error && <p className="mt-7 text-sm text-rose-600">{error}</p>}
+        {failure && !building && (
+          <FailurePanel message={failure} onRetry={build} />
+        )}
+        {error && (
+          <p role="alert" className="mt-7 text-sm text-rose-600 dark:text-rose-400">
+            {error}
+          </p>
+        )}
       </div>
     </main>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Out of credits / failed generation
+// ---------------------------------------------------------------------------
+
+function OutOfCreditsPanel() {
+  const { dict } = useI18n();
+  const C = dict.generate.outOfCredits;
+  return (
+    <section
+      role="alert"
+      className="mb-10 rounded-xl border border-line-strong bg-card p-5 shadow-card"
+    >
+      <div className="flex items-start gap-3">
+        <Coins className="mt-0.5 h-5 w-5 shrink-0 text-lime-deep" aria-hidden />
+        <div className="min-w-0">
+          <h2 className="font-display text-lg font-bold text-ink">{C.title}</h2>
+          <p className="mt-1 text-sm leading-relaxed text-ink-soft">{C.body}</p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Link
+              href="/app/credits"
+              className="inline-flex min-h-11 items-center rounded-lg bg-ink px-4 text-sm font-semibold text-paper transition hover:opacity-90"
+            >
+              {C.buy}
+            </Link>
+            <Link
+              href="/pricing"
+              className="inline-flex min-h-11 items-center rounded-lg border border-line-strong px-4 text-sm font-semibold text-ink transition hover:bg-hover"
+            >
+              {C.plans}
+            </Link>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function FailurePanel({ message, onRetry }: { message: string; onRetry: () => void }) {
+  const { dict } = useI18n();
+  return (
+    <section
+      role="alert"
+      className="mt-7 rounded-xl border border-rose-500/30 bg-card p-5 shadow-card"
+    >
+      <div className="flex items-start gap-3">
+        <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-rose-600 dark:text-rose-400" aria-hidden />
+        <div className="min-w-0">
+          <h2 className="font-display text-base font-bold text-ink">
+            {dict.generate.failed.title}
+          </h2>
+          <p className="mt-1 text-sm leading-relaxed text-ink-soft">{message}</p>
+          <button
+            type="button"
+            onClick={onRetry}
+            className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-lg bg-ink px-4 text-sm font-semibold text-paper transition hover:opacity-90"
+          >
+            <RotateCcw className="h-4 w-4" aria-hidden />
+            {dict.generate.failed.retry}
+          </button>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -334,6 +478,7 @@ function DescribeStage({
   sourceText,
   setSourceText,
   busy,
+  blocked,
   onContinue,
   onExample,
 }: {
@@ -342,6 +487,8 @@ function DescribeStage({
   sourceText: string;
   setSourceText: (v: string) => void;
   busy: boolean;
+  /** Out of credits: the student can still read and type, but not start. */
+  blocked: boolean;
   onContinue: () => void;
   onExample: (text: string) => void;
 }) {
@@ -364,18 +511,21 @@ function DescribeStage({
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) onContinue();
           }}
           placeholder={dict.generate.describe.placeholder}
+          aria-label={dict.generate.describe.title}
           rows={3}
           disabled={busy}
           className="w-full resize-none bg-transparent px-4 py-4 text-[15px] leading-relaxed text-ink placeholder:text-ink-soft/55 focus:outline-none disabled:opacity-60"
         />
-        <div className="flex items-center justify-between border-t border-ink/10 px-4 py-3">
-          <span className="text-xs text-ink-soft">{dict.generate.describe.shortcut}</span>
+        <div className="flex items-center justify-between gap-3 border-t border-ink/10 px-4 py-3">
+          <span className="hidden text-xs text-ink-soft sm:inline">
+            {dict.generate.describe.shortcut}
+          </span>
           <button
             onClick={onContinue}
-            disabled={busy || !prompt.trim()}
-            className="flex items-center gap-2 rounded-lg bg-ink px-5 py-2.5 text-sm font-semibold text-paper transition enabled:hover:bg-ink/90 disabled:opacity-40"
+            disabled={busy || blocked || !prompt.trim()}
+            className="ms-auto flex min-h-11 items-center gap-2 rounded-lg bg-ink px-5 text-sm font-semibold text-paper transition enabled:hover:bg-ink/90 disabled:opacity-40"
           >
-            {dict.generate.describe.continue} <span aria-hidden>→</span>
+            {dict.generate.describe.continue} <span aria-hidden className="inline-block rtl:rotate-180">→</span>
           </button>
         </div>
       </div>
@@ -393,8 +543,8 @@ function DescribeStage({
             <button
               key={ex.text}
               onClick={() => onExample(ex.text)}
-              disabled={busy}
-              className="group flex items-center gap-2 rounded-lg border border-line bg-card px-3.5 py-2 text-left text-sm transition hover:border-lime/40 hover:text-ink disabled:opacity-50"
+              disabled={busy || blocked}
+              className="group flex items-center gap-2 rounded-lg border border-line bg-card px-3.5 py-2 text-start text-sm transition hover:border-lime/40 hover:text-ink disabled:opacity-50"
             >
               <span>{ex.emoji}</span>
               <span className="text-ink-soft transition group-hover:text-ink">
@@ -412,9 +562,18 @@ function DescribeStage({
   );
 }
 
-// Optional syllabus grounding: paste text or upload a .txt file so the
-// generator builds from the student's REAL courses and deadlines.
-function SyllabusImport({
+type UploadErrorCode =
+  | "too_large"
+  | "unsupported"
+  | "no_text"
+  | "unreadable"
+  | "timeout"
+  | "failed";
+
+// Optional syllabus grounding: paste text or upload a PDF / Word / text file
+// so the generator builds from the student's REAL courses, deadlines and
+// grading weights. Files are read on the server (/api/import/syllabus).
+export function SyllabusImport({
   sourceText,
   setSourceText,
   busy,
@@ -423,34 +582,83 @@ function SyllabusImport({
   setSourceText: (v: string) => void;
   busy: boolean;
 }) {
-  const { dict, t } = useI18n();
+  const { dict, t, locale } = useI18n();
   const S = dict.generate.syllabus;
   const [open, setOpen] = useState(false);
+  const [reading, setReading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [pagesRead, setPagesRead] = useState<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  const CAP = MAX_SOURCE_TEXT * 3;
 
-  const onFile = (file: File | undefined) => {
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () =>
-      setSourceText(String(reader.result ?? "").slice(0, CAP));
-    reader.readAsText(file);
+  const errorText = (code: UploadErrorCode, kind?: string) => {
+    switch (code) {
+      case "too_large":
+        return S.errors.tooLarge;
+      case "unsupported":
+        return S.errors.unsupported;
+      case "no_text":
+        return kind === "pdf" ? S.errors.scanned : S.errors.empty;
+      case "unreadable":
+        return S.errors.unreadable;
+      case "timeout":
+        return S.errors.timeout;
+      default:
+        return S.errors.failed;
+    }
   };
 
-  const has = sourceText.trim().length > 0;
+  const onFile = async (file: File | undefined) => {
+    if (!file) return;
+    setUploadError(null);
+    setPagesRead(null);
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setUploadError(errorText("too_large"));
+      return;
+    }
+    setReading(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const response = await fetch("/api/import/syllabus", { method: "POST", body: form });
+      const body = (await response.json().catch(() => null)) as {
+        text?: string;
+        code?: UploadErrorCode;
+        kind?: string;
+        pagesRead?: number;
+        pagesTruncated?: boolean;
+      } | null;
+      if (!response.ok || typeof body?.text !== "string") {
+        setUploadError(errorText(body?.code ?? "failed", body?.kind));
+        return;
+      }
+      setSourceText(body.text.slice(0, MAX_SOURCE_INPUT));
+      if (body.pagesTruncated && body.pagesRead) setPagesRead(body.pagesRead);
+    } catch {
+      setUploadError(errorText("failed"));
+    } finally {
+      setReading(false);
+      // Let the student pick the same file again after fixing it.
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+
+  const length = sourceText.trim().length;
+  const has = length > 0;
+  const overLimit = length > MAX_SOURCE_TEXT;
+  const disabled = busy || reading;
 
   return (
     <div className="mt-4">
       <button
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex items-center gap-2 rounded-lg border border-line bg-card px-3.5 py-2 text-sm text-ink-soft transition hover:border-lime/40 hover:text-ink"
+        className="flex min-h-11 flex-wrap items-center gap-2 rounded-lg border border-line bg-card px-3.5 py-2 text-sm text-ink-soft transition hover:border-lime/40 hover:text-ink"
       >
         <span>{S.toggle}</span>
         <span className="text-xs text-ink-soft/60">· {S.optional}</span>
         {has && !open && (
           <span className="rounded-full bg-lime-faint px-2 py-0.5 text-[10px] font-semibold text-lime-deep">
-            {t(S.attached, { chars: sourceText.trim().length.toLocaleString() })}
+            {t(S.attached, { chars: length.toLocaleString(locale) })}
           </span>
         )}
       </button>
@@ -460,42 +668,75 @@ function SyllabusImport({
           <p className="mb-3 text-sm text-ink-soft">{S.hint}</p>
           <textarea
             value={sourceText}
-            onChange={(e) => setSourceText(e.target.value.slice(0, CAP))}
+            onChange={(e) => setSourceText(e.target.value.slice(0, MAX_SOURCE_INPUT))}
             placeholder={S.placeholder}
+            aria-label={S.toggle}
             rows={5}
-            disabled={busy}
+            disabled={disabled}
             className="w-full resize-y rounded-lg border border-line bg-paper px-3 py-2 text-sm leading-relaxed text-ink placeholder:text-ink-soft/50 outline-none focus:border-lime/50 disabled:opacity-60"
           />
           <div className="mt-2 flex flex-wrap items-center gap-3">
             <input
               ref={fileRef}
               type="file"
-              accept=".txt,.md,text/plain,text/markdown"
+              accept=".pdf,.docx,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown"
               className="hidden"
-              onChange={(e) => onFile(e.target.files?.[0] ?? undefined)}
+              aria-hidden
+              tabIndex={-1}
+              onChange={(e) => void onFile(e.target.files?.[0] ?? undefined)}
             />
             <button
+              type="button"
               onClick={() => fileRef.current?.click()}
-              disabled={busy}
-              className="rounded-lg border border-line-strong bg-card px-3 py-1.5 text-sm font-medium text-ink transition hover:bg-hover disabled:opacity-50"
+              disabled={disabled}
+              className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-line-strong bg-card px-3.5 text-sm font-medium text-ink transition hover:bg-hover disabled:opacity-50"
             >
-              {S.upload}
+              {reading ? (
+                <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden />
+              ) : (
+                <Upload className="h-4 w-4" aria-hidden />
+              )}
+              {reading ? S.reading : S.upload}
             </button>
+            <span className="text-xs text-ink-soft/80">{S.formats}</span>
             {has && (
               <>
                 <span className="text-xs text-ink-soft">
-                  {t(S.attached, {
-                    chars: sourceText.trim().length.toLocaleString(),
-                  })}
+                  {t(S.attached, { chars: length.toLocaleString(locale) })}
                 </span>
                 <button
-                  onClick={() => setSourceText("")}
-                  disabled={busy}
-                  className="text-xs text-ink-soft transition hover:text-rose-600 disabled:opacity-50"
+                  type="button"
+                  onClick={() => {
+                    setSourceText("");
+                    setPagesRead(null);
+                    setUploadError(null);
+                  }}
+                  disabled={disabled}
+                  className="min-h-11 px-1 text-xs text-ink-soft transition hover:text-rose-600 disabled:opacity-50"
                 >
                   {S.clear}
                 </button>
               </>
+            )}
+          </div>
+          <div aria-live="polite">
+            {uploadError && (
+              <p role="alert" className="mt-3 text-sm text-rose-600 dark:text-rose-400">
+                {uploadError}
+              </p>
+            )}
+            {overLimit && (
+              <p className="mt-3 text-sm text-ink-soft">
+                {t(S.truncated, {
+                  total: length.toLocaleString(locale),
+                  limit: MAX_SOURCE_TEXT.toLocaleString(locale),
+                })}
+              </p>
+            )}
+            {pagesRead !== null && (
+              <p className="mt-2 text-sm text-ink-soft">
+                {t(S.pagesTruncated, { pages: pagesRead })}
+              </p>
             )}
           </div>
         </div>
@@ -519,6 +760,7 @@ function QuestionsStage({
   toggleOther,
   setCustomAnswer,
   building,
+  blocked,
   onBack,
   onBuild,
 }: {
@@ -532,6 +774,7 @@ function QuestionsStage({
   toggleOther: (q: GenQuestion) => void;
   setCustomAnswer: (q: GenQuestion, value: string) => void;
   building: boolean;
+  blocked: boolean;
   onBack: () => void;
   onBuild: () => void;
 }) {
@@ -638,10 +881,10 @@ function QuestionsStage({
       <div className="mt-8 flex flex-wrap items-center gap-4">
         <button
           onClick={onBuild}
-          disabled={building}
-          className="flex items-center gap-2 rounded-lg bg-ink px-6 py-3 text-sm font-semibold text-paper transition enabled:hover:bg-ink/90 disabled:opacity-40"
+          disabled={building || blocked}
+          className="flex min-h-11 items-center gap-2 rounded-lg bg-ink px-6 text-sm font-semibold text-paper transition enabled:hover:bg-ink/90 disabled:opacity-40"
         >
-          {dict.generate.questions.build} <span aria-hidden>→</span>
+          {dict.generate.questions.build} <span aria-hidden className="inline-block rtl:rotate-180">→</span>
         </button>
         <span className="text-sm text-ink-soft">
           {answeredCount === 0

@@ -50,6 +50,13 @@ import {
 import { isAuthenticAgentEnabled } from "@/lib/flags";
 import { runAgentLoop } from "@/lib/ai/agent-loop";
 import { budgetForPlan } from "@/lib/ai/budgets";
+import {
+  resolveTimeZone,
+  studentClock,
+  timeZoneFromCookieHeader,
+  validTimeZone,
+} from "@/lib/ai/student-clock";
+import { prisma } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -66,7 +73,29 @@ const requestSchema = z.object({
     .max(12)
     .default([]),
   message: z.string().trim().min(1).max(2000),
+  // The browser's IANA zone, so relative dates ("next Friday") resolve to the
+  // student's local calendar. Optional: the cookie set by the generator and
+  // the Daily Study Agent's saved zone are the fallbacks.
+  timeZone: z.string().max(100).optional(),
 });
+
+/**
+ * The student's time zone: request body, then the generator's cookie, then
+ * the zone the Daily Study Agent saved from their browser, then UTC.
+ */
+async function studentTimeZone(
+  request: Request,
+  userId: string,
+  requested: string | undefined,
+): Promise<string> {
+  const direct =
+    validTimeZone(requested) ?? timeZoneFromCookieHeader(request.headers.get("cookie"));
+  if (direct) return direct;
+  const saved = await prisma.dailyStudyAgentConfig
+    .findUnique({ where: { userId }, select: { timeZone: true } })
+    .catch(() => null);
+  return resolveTimeZone([saved?.timeZone]);
+}
 
 const encoder = new TextEncoder();
 
@@ -192,6 +221,9 @@ export async function POST(request: Request) {
         };
 
         const model = modelForPlan(await getUserPlan());
+        const clock = studentClock(
+          await studentTimeZone(request, userId, parsed.data.timeZone),
+        );
         const allAreas = workspaceAreas(workspace);
         let usage: TokenUsage = { promptTokens: 0, completionTokens: 0 };
 
@@ -228,6 +260,7 @@ export async function POST(request: Request) {
               signal: taskSignal,
               emit,
               startedAt: requestStartedAt,
+              clock,
             }),
           );
           result = loop.result;
@@ -278,6 +311,7 @@ export async function POST(request: Request) {
           const planned = await withUsageMeter(() =>
             planAgentTurn(workspace, history, message, model, locale, {
               signal: taskSignal,
+              clock,
               onReasoning: (delta) => {
                 void emit({ type: "thinking", phase: "planning", delta });
               },
@@ -336,6 +370,7 @@ export async function POST(request: Request) {
           const edited = await withUsageMeter(() =>
             executeAgentEdit(workspace, history, message, decision, model, locale, {
               signal: taskSignal,
+              clock,
               onReasoning: (delta) => {
                 void emit({ type: "thinking", phase: "updating", delta });
               },

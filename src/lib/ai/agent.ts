@@ -19,6 +19,8 @@ import { extractJson, WORKSPACE_SHAPE, languageDirective } from "./generate";
 import { applyAgentOps, agentOpsSchema, type AgentOp } from "./agent-ops";
 import { assertResultWithinLimits } from "./limits";
 import { streamChatCompletion, type ChatMessage } from "./openrouter";
+import { isAiConfigured, missingAiKeyMessage } from "./provider";
+import { clockPromptBlock, studentClock, type StudentClock } from "./student-clock";
 import { DEFAULT_LOCALE, type Locale } from "@/lib/i18n/config";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 
@@ -33,6 +35,8 @@ const MAX_HISTORY = 8;
 export interface AgentModelCallOptions {
   signal?: AbortSignal;
   onReasoning?: (text: string) => void;
+  /** The student's local clock, so relative dates resolve. Defaults to now in UTC. */
+  clock?: StudentClock;
 }
 
 const decisionSchema = z.discriminatedUnion("action", [
@@ -79,7 +83,7 @@ export async function planAgentTurn(
   locale: Locale = DEFAULT_LOCALE,
   options: AgentModelCallOptions = {},
 ): Promise<AgentDecision> {
-  requireAgentKey();
+  requireAgentKey(model);
 
   const areas = workspaceAreas(current);
   const messages: ChatMessage[] = [
@@ -97,6 +101,9 @@ export async function planAgentTurn(
         JSON.stringify(current),
         "",
         `Latest user message: ${message}`,
+        "",
+        // Last, after the stable prefix, so prompt caching still works.
+        clockPromptBlock(options.clock ?? studentClock(), "agent"),
       ].join("\n"),
     },
   ];
@@ -134,7 +141,7 @@ export async function executeAgentEdit(
   locale: Locale = DEFAULT_LOCALE,
   options: AgentModelCallOptions = {},
 ): Promise<AgentResponse> {
-  requireAgentKey();
+  requireAgentKey(model);
 
   const messages: ChatMessage[] = [
     { role: "system", content: buildEditorSystemPrompt(locale) },
@@ -158,6 +165,8 @@ export async function executeAgentEdit(
           .join(", ")}`,
         "",
         "Return a concise reply and ONLY the operations needed for this change.",
+        "",
+        clockPromptBlock(options.clock ?? studentClock(), "agent"),
       ].join("\n"),
     },
   ];
@@ -264,11 +273,9 @@ function parseEditReply(
   return { reply, ops: parsed.data.ops };
 }
 
-function requireAgentKey() {
-  if (!process.env.OPENROUTER_API_KEY) {
-    throw new Error(
-      "The AI agent needs an OpenRouter API key (add OPENROUTER_API_KEY to .env.local).",
-    );
+function requireAgentKey(model: string) {
+  if (!isAiConfigured(model)) {
+    throw new Error(missingAiKeyMessage(model, "The AI agent"));
   }
 }
 

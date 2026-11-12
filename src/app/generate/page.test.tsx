@@ -1,13 +1,35 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 
+const mocks = vi.hoisted(() => ({
+  auth: vi.fn(),
+  hasCredits: vi.fn(),
+}));
+
+vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }));
+vi.mock("@/lib/credits", () => ({ hasCredits: mocks.hasCredits }));
 vi.mock("./GeneratorClient", () => ({
-  GeneratorClient: ({ initialPrompt }: { initialPrompt?: string }) => (
-    <div data-testid="generator" data-initial-prompt={initialPrompt} />
+  GeneratorClient: ({
+    initialPrompt,
+    outOfCredits,
+  }: {
+    initialPrompt?: string;
+    outOfCredits?: boolean;
+  }) => (
+    <div
+      data-testid="generator"
+      data-initial-prompt={initialPrompt}
+      data-out-of-credits={String(Boolean(outOfCredits))}
+    />
   ),
 }));
 
 import GeneratePage from "./page";
+
+beforeEach(() => {
+  mocks.auth.mockResolvedValue({ userId: "user-1" });
+  mocks.hasCredits.mockResolvedValue(true);
+});
 
 describe("generate page", () => {
   test("passes a landing-page prompt into the generator", async () => {
@@ -34,5 +56,17 @@ describe("generate page", () => {
       "data-initial-prompt",
       "",
     );
+  });
+
+  test("tells the generator up front when the student is out of credits", async () => {
+    mocks.hasCredits.mockResolvedValue(false);
+    render(await GeneratePage({ searchParams: Promise.resolve({}) }));
+    expect(screen.getByTestId("generator")).toHaveAttribute("data-out-of-credits", "true");
+  });
+
+  test("a failed credit lookup never blocks the generator", async () => {
+    mocks.hasCredits.mockRejectedValue(new Error("db down"));
+    render(await GeneratePage({ searchParams: Promise.resolve({}) }));
+    expect(screen.getByTestId("generator")).toHaveAttribute("data-out-of-credits", "false");
   });
 });

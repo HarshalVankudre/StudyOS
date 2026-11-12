@@ -19,6 +19,10 @@ import {
 import { getI18n } from "@/lib/i18n/server";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import {
+  BillingNotice,
+  parseBillingNotice,
+} from "@/components/account/BillingNotice";
 
 export async function generateMetadata(): Promise<Metadata> {
   const { dict } = await getI18n();
@@ -27,7 +31,12 @@ export async function generateMetadata(): Promise<Metadata> {
 
 type Cell = boolean | string;
 
-export default async function PricingPage() {
+export default async function PricingPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ billing?: string | string[] }>;
+}) {
+  const billingNotice = parseBillingNotice((await searchParams).billing);
   const { dict, t, locale } = await getI18n();
   const { userId } = await auth();
   const signedIn = Boolean(userId);
@@ -145,6 +154,12 @@ export default async function PricingPage() {
             {dict.pricing.subtitle}
           </p>
         </div>
+
+        <BillingNotice
+          code={billingNotice}
+          messages={dict.billingNotice}
+          className="mx-auto mt-8 max-w-xl"
+        />
 
         {/* Plan cards */}
         <div className="mt-12 grid items-start gap-5 sm:grid-cols-2">
