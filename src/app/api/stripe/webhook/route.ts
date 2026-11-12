@@ -5,6 +5,7 @@ import {
   grantProInvoice,
   recordBillingEvent,
   syncSubscription,
+  userForCustomer,
 } from "@/lib/billing";
 import { prisma } from "@/lib/db";
 import { reportError } from "@/lib/ops/report-error";
@@ -14,6 +15,7 @@ import {
   handleChargeRefunded,
   handleDisputeClosed,
   handleDisputeCreated,
+  handleRefundUpdated,
 } from "./reversals";
 
 // Stripe → us. Keeps subscription status in sync and grants credits only for
@@ -22,7 +24,8 @@ import {
 //   invoice.paid,
 //   customer.subscription.created, customer.subscription.updated,
 //   customer.subscription.deleted,
-//   charge.refunded, charge.dispute.created, charge.dispute.closed
+//   charge.refunded, charge.refund.updated (a refund that failed),
+//   charge.dispute.created, charge.dispute.closed
 // Locally, forward with: stripe listen --forward-to
 // localhost:3000/api/stripe/webhook
 //
@@ -101,6 +104,12 @@ async function handleEvent(event: Stripe.Event): Promise<Response> {
       await handleChargeRefunded(event.data.object);
       return ok();
 
+    case "charge.refund.updated":
+    case "refund.updated":
+    case "refund.failed":
+      await handleRefundUpdated(event.data.object as Stripe.Refund);
+      return ok();
+
     case "charge.dispute.created":
       await handleDisputeCreated(event.data.object);
       return ok();
@@ -176,21 +185,3 @@ async function userForSubscription(subId: string): Promise<string | null> {
   return row?.userId ?? null;
 }
 
-async function userForCustomer(customerId: string | null): Promise<string | null> {
-  if (!customerId) return null;
-  const row = await prisma.subscription.findFirst({
-    where: { stripeCustomerId: customerId },
-    select: { userId: true },
-  });
-  if (row) return row.userId;
-  // Every customer this app creates carries its user id (ensureStripeCustomer),
-  // e.g. a subscription made by hand in the dashboard for a known customer.
-  try {
-    const customer = await stripe.customers.retrieve(customerId);
-    if ("deleted" in customer && customer.deleted) return null;
-    return (customer as Stripe.Customer).metadata?.userId || null;
-  } catch (err) {
-    if ((err as { type?: string })?.type === "StripeInvalidRequestError") return null;
-    throw err;
-  }
-}

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Workspace } from "@/lib/workspace/types";
+import { planSourcesKey } from "./planner";
 import { applyCompletion } from "./reconcile";
 import type { DailyStudyPlanItem } from "./types";
 
@@ -44,6 +45,7 @@ vi.mock("@/lib/db", () => ({
 
 import {
   getAgentCenterSnapshot,
+  getDailyStudyAgentOverview,
   localDateInTimeZone,
   normalizeTimeZone,
   runDailyStudyAgent,
@@ -97,7 +99,14 @@ function planRow(items: DailyStudyPlanItem[] | object[], overrides: Record<strin
     summary: "",
     items: JSON.stringify(items),
     version: 2,
-    details: JSON.stringify({ budgetMinutes: 60, workload: null, exams: [], progress: {} }),
+    // Built from the workspaces as they are now, unless a test says otherwise.
+    details: JSON.stringify({
+      budgetMinutes: 60,
+      workload: null,
+      exams: [],
+      progress: {},
+      sources: planSourcesKey([WORKSPACE]),
+    }),
     sourceCount: 1,
     candidateCount: 2,
     generatedAt: new Date("2026-11-12T08:00:00.000Z"),
@@ -317,6 +326,140 @@ describe("Daily Study Agent store", () => {
       mocks.planFindFirst.mockResolvedValue(null);
       expect(await setDailyStudyItemCompleted("plan-x", "item", true)).toEqual({ ok: false, reason: "not_found" });
       expect(mocks.planFindFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "plan-x", userId: "user-1" } }));
+    });
+  });
+
+  describe("refreshing today's plan when the workspaces change", () => {
+    const at = () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-11-12T09:00:00.000Z"));
+    };
+    const details = (extra: Record<string, unknown> = {}) =>
+      JSON.stringify({ budgetMinutes: 60, workload: null, exams: [], progress: {}, ...extra });
+
+    it("plans again when the first workspace appears after an empty sign-up plan", async () => {
+      at();
+      // Built at sign-up, before any workspace existed: nothing to do.
+      mocks.planFindUnique.mockResolvedValue(
+        planRow([], { details: details({ sources: planSourcesKey([]) }), sourceCount: 0 }),
+      );
+      const { plan } = await getDailyStudyAgentOverview();
+      expect(plan?.items.map((i) => i.id)).toEqual(["deadline:ws-1:db:essay", "task:ws-1:home:todo-1"]);
+      // Only the plan that was read is replaced (a concurrent check-off wins).
+      const update = mocks.planUpdateMany.mock.calls[0][0];
+      expect(update.where).toEqual({ id: "plan-1", userId: "user-1", items: "[]" });
+      expect(JSON.parse(update.data.details).sources).toBe(planSourcesKey([WORKSPACE]));
+      expect(mocks.planUpsert).not.toHaveBeenCalled();
+    });
+
+    it("leaves an up-to-date plan alone", async () => {
+      at();
+      mocks.planFindUnique.mockResolvedValue(planRow([todoItem()]));
+      const { plan } = await getDailyStudyAgentOverview();
+      expect(plan?.items.map((i) => i.id)).toEqual(["task:ws-1:home:todo-1"]);
+      expect(mocks.planUpdateMany).not.toHaveBeenCalled();
+    });
+
+    it("keeps what is checked off, today's chosen time, and does not grow the day", async () => {
+      at();
+      mocks.planFindUnique.mockResolvedValue(
+        planRow([todoItem({ completed: true, minutes: 15, completedAt: "2026-11-12T08:30:00.000Z" })], {
+          details: details({ budgetMinutes: 30, budgetOverride: true, sources: planSourcesKey([]) }),
+        }),
+      );
+      // The to-do was checked through the plan, so it is checked in the workspace too.
+      (stored.pages[0].blocks[0] as { checked: boolean }).checked = true;
+      const { plan } = await getDailyStudyAgentOverview();
+      expect(plan?.items.find((i) => i.id === "task:ws-1:home:todo-1")).toMatchObject({ completed: true });
+      expect(plan?.details).toMatchObject({ budgetMinutes: 30, budgetOverride: true });
+      const total = plan!.items.reduce((sum, i) => sum + i.minutes, 0);
+      expect(total).toBeLessThanOrEqual(30);
+      expect(plan?.items.some((i) => i.id === "deadline:ws-1:db:essay")).toBe(true);
+    });
+
+    it("picks up rows a deadline import added", async () => {
+      at();
+      mocks.planFindUnique.mockResolvedValue(planRow([todoItem()]));
+      stored.databases[0].rows.push({
+        id: "imported-quiz",
+        cells: { name: "Quiz 4", due: "2026-11-13", status: "todo" },
+      });
+      const { plan } = await getDailyStudyAgentOverview();
+      expect(plan?.items.map((i) => i.id)).toContain("deadline:ws-1:db:imported-quiz");
+      expect(mocks.planUpdateMany).toHaveBeenCalledTimes(1);
+    });
+
+    it("never shows items from a trashed workspace, and plans from the others", async () => {
+      at();
+      const other = (overrides: Partial<DailyStudyPlanItem>) =>
+        todoItem({
+          workspaceName: "Old term",
+          target: { workspaceId: "ws-trashed", pageId: "home", blockId: "todo-1" },
+          ...overrides,
+        });
+      mocks.planFindUnique.mockResolvedValue(
+        planRow(
+          [
+            other({ id: "task:ws-trashed:home:todo-1", completed: true }),
+            other({ id: "task:ws-trashed:home:todo-2", completed: false }),
+            todoItem(),
+          ],
+          { details: details({ sources: planSourcesKey([WORKSPACE, { ...WORKSPACE, id: "ws-trashed" }]) }) },
+        ),
+      );
+      const { plan } = await getDailyStudyAgentOverview();
+      expect(mocks.workspaceFindMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { ownerId: "user-1", deletedAt: null } }),
+      );
+      expect(plan?.items.length).toBeGreaterThan(0);
+      expect(plan?.items.every((i) => i.target.workspaceId === "ws-1")).toBe(true);
+      // The done item is still stored, so restoring the workspace brings it back.
+      const saved = JSON.parse(mocks.planUpdateMany.mock.calls[0][0].data.items) as DailyStudyPlanItem[];
+      expect(saved.find((i) => i.id === "task:ws-trashed:home:todo-1")).toMatchObject({ completed: true });
+      expect(saved.some((i) => i.id === "task:ws-trashed:home:todo-2")).toBe(false);
+    });
+
+    it("hides a trashed workspace's items even when the plan is otherwise current", async () => {
+      at();
+      mocks.planFindUnique.mockResolvedValue(
+        planRow([
+          todoItem({
+            id: "task:ws-trashed:home:todo-1",
+            completed: true,
+            target: { workspaceId: "ws-trashed", pageId: "home", blockId: "todo-1" },
+          }),
+          todoItem(),
+        ]),
+      );
+      const { plan } = await getDailyStudyAgentOverview();
+      expect(plan?.items.map((i) => i.id)).toEqual(["task:ws-1:home:todo-1"]);
+    });
+
+    it("yields to a check-off that landed while it was planning", async () => {
+      at();
+      const fresher = planRow([todoItem({ completed: true })]);
+      mocks.planFindUnique
+        .mockResolvedValueOnce(planRow([todoItem()], { details: details({ sources: planSourcesKey([]) }) }))
+        .mockResolvedValueOnce(fresher);
+      mocks.planUpdateMany.mockResolvedValueOnce({ count: 0 });
+      const { plan } = await getDailyStudyAgentOverview();
+      expect(plan?.items).toEqual([expect.objectContaining({ id: "task:ws-1:home:todo-1", completed: true })]);
+    });
+
+    it("rebuilding a manual run keeps check-offs from a trashed workspace out of the summary", async () => {
+      at();
+      mocks.planFindUnique.mockResolvedValue(
+        planRow([
+          todoItem({
+            id: "task:ws-trashed:home:todo-1",
+            completed: true,
+            target: { workspaceId: "ws-trashed", pageId: "home", blockId: "todo-1" },
+          }),
+        ]),
+      );
+      await runDailyStudyAgent({ trigger: "manual", timeZone: "UTC" });
+      const summary = JSON.parse(mocks.runUpdateMany.mock.calls[0][0].data.summary);
+      expect(summary.workspaces).toBe(1);
     });
   });
 

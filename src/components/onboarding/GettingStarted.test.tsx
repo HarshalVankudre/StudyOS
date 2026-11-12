@@ -206,6 +206,57 @@ describe("GettingStarted", () => {
     await screen.findByRole("button", { name: `${G.button} · 1 of 5` });
     expect(screen.queryByRole("dialog")).toBeNull();
   });
+
+  const largeScreen = () => {
+    window.matchMedia = ((query: string) => ({ matches: true, media: query }) as MediaQueryList) as typeof window.matchMedia;
+  };
+
+  it("does not open by itself when the student arrived through a deep link, and still can later", async () => {
+    largeScreen();
+    window.history.replaceState(null, "", "/app/w1?page=p1&db=d1&row=r1");
+    try {
+      const { unmount } = render(<Harness ws={workspace()} />);
+      await screen.findByRole("button", { name: `${G.button} · 1 of 5` });
+      expect(screen.queryByRole("dialog")).toBeNull();
+      unmount();
+    } finally {
+      window.history.replaceState(null, "", "/");
+    }
+    // The one automatic opening was not used up by the deep link.
+    render(<Harness ws={workspace()} />);
+    expect(await screen.findByRole("dialog", { name: G.title })).toBeInTheDocument();
+  });
+
+  it("does not open by itself over a dialog that is already showing", async () => {
+    largeScreen();
+    const other = document.createElement("div");
+    other.setAttribute("role", "dialog");
+    other.setAttribute("data-state", "open");
+    document.body.appendChild(other);
+    try {
+      render(<Harness ws={workspace()} />);
+      await screen.findByRole("button", { name: `${G.button} · 1 of 5` });
+      expect(screen.queryByRole("dialog", { name: G.title })).toBeNull();
+    } finally {
+      other.remove();
+    }
+  });
+
+  it("steps aside when a dialog opens", async () => {
+    render(<Harness ws={workspace()} />);
+    await openPanel();
+    const other = document.createElement("div");
+    other.setAttribute("role", "dialog");
+    other.setAttribute("data-state", "open");
+    act(() => {
+      document.body.appendChild(other);
+    });
+    try {
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: G.title })).toBeNull());
+    } finally {
+      other.remove();
+    }
+  });
 });
 
 describe("checklist logic", () => {

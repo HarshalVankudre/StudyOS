@@ -44,6 +44,28 @@ export const MATERIAL_EXTRACTION_TIMEOUT_MS = 40_000;
 export const SECTION_TARGET_CHARS = 12_000;
 /** Most sections (model calls) one run makes. Bounds the cost of a run. */
 export const MAX_SECTIONS_PER_RUN = 10;
+/**
+ * Most pages one material keeps, whatever its format. A .docx of thousands of
+ * one-character pages is packed into at most this many (see packPages), so
+ * nothing downstream (storage, listing, run planning, quote checks) scales
+ * with a page count the file chose.
+ */
+export const MAX_MATERIAL_PAGES = MAX_MATERIAL_PDF_PAGES;
+/** Most pages in one section, however short they are. */
+export const MAX_SECTION_PAGES = 60;
+/**
+ * Prompt characters each page adds besides its text: the "[[page N]]" marker
+ * and line breaks (see prompt.ts). An empty page is sent as a short
+ * placeholder. Counted in section sizing so many short pages cannot make a
+ * section's prompt (and its cost) far larger than its text.
+ */
+export const PAGE_MARKER_CHARS = 16;
+export const EMPTY_PAGE_CHARS = 24;
+
+/** Prompt characters a page of `chars` text characters takes in a section. */
+export function pagePromptChars(chars: number): number {
+  return PAGE_MARKER_CHARS + (chars > 0 ? Math.min(chars, MAX_PAGE_CHARS) : EMPTY_PAGE_CHARS);
+}
 
 export type KitAmount = "few" | "standard" | "many";
 export const KIT_AMOUNTS: readonly KitAmount[] = ["few", "standard", "many"];
@@ -82,7 +104,10 @@ export interface RunSection {
   /** 1-based page numbers, inclusive. */
   from: number;
   to: number;
+  /** Text characters of its pages. */
   chars: number;
+  /** Characters the section's pages take in the prompt (text plus page markers). */
+  promptChars?: number;
 }
 
 export interface RunPlan {
@@ -97,37 +122,46 @@ export interface RunPlan {
 }
 
 /**
- * Pack pages (by their lengths) into sections of about SECTION_TARGET_CHARS,
- * starting at `range.from`, stopping at `range.to` or after
- * MAX_SECTIONS_PER_RUN sections, whichever comes first. Pages are never split:
- * a section boundary always falls between pages, so every page a card cites
- * was read whole. Empty pages (picture slides) are carried along for free.
+ * Pack pages (by their lengths) into sections of about SECTION_TARGET_CHARS
+ * of prompt (text plus each page's marker, see pagePromptChars) and at most
+ * MAX_SECTION_PAGES pages, starting at `range.from`, stopping at `range.to`
+ * or after MAX_SECTIONS_PER_RUN sections, whichever comes first. Pages are
+ * never split: a section boundary always falls between pages, so every page
+ * a card cites was read whole. Empty pages (picture slides) are carried
+ * along; only their markers count.
  */
 export function planRun(
   pageChars: readonly number[],
   range?: { from?: number; to?: number },
-  limits: { target?: number; maxSections?: number } = {},
+  limits: { target?: number; maxSections?: number; maxSectionPages?: number } = {},
 ): RunPlan {
   const target = limits.target ?? SECTION_TARGET_CHARS;
   const maxSections = limits.maxSections ?? MAX_SECTIONS_PER_RUN;
+  const maxSectionPages = limits.maxSectionPages ?? MAX_SECTION_PAGES;
   const total = pageChars.length;
   const from = clamp(Math.floor(range?.from ?? 1), 1, Math.max(1, total));
   const to = clamp(Math.floor(range?.to ?? total), from, Math.max(1, total));
   const sections: RunSection[] = [];
   if (total === 0) return { sections, from: 0, to: 0, cutShort: false, chars: 0 };
 
-  let current: RunSection | null = null;
+  let current: Required<RunSection> | null = null;
   let page = from;
   for (; page <= to; page += 1) {
-    const chars = Math.min(pageChars[page - 1] ?? 0, MAX_PAGE_CHARS);
-    if (current && current.chars > 0 && current.chars + chars > target) {
+    const chars = Math.max(0, Math.min(pageChars[page - 1] ?? 0, MAX_PAGE_CHARS));
+    const prompt = pagePromptChars(chars);
+    const full =
+      current !== null &&
+      ((current.chars > 0 && current.promptChars + prompt > target) ||
+        current.to - current.from + 1 >= maxSectionPages);
+    if (current && full) {
       sections.push(current);
       current = null;
       if (sections.length >= maxSections) break;
     }
-    if (!current) current = { from: page, to: page, chars: 0 };
+    if (!current) current = { from: page, to: page, chars: 0, promptChars: 0 };
     current.to = page;
     current.chars += chars;
+    current.promptChars += prompt;
   }
   if (current && sections.length < maxSections) {
     sections.push(current);

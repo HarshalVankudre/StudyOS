@@ -82,6 +82,35 @@ function tabIdFor(storage: Storage | null): string {
   }
 }
 
+/**
+ * Hand the closing tab's last edits to the browser with a request that
+ * outlives the page (the route applies them through the version-checked save
+ * gate under the tab's save id, see /api/workspace/save).
+ */
+function sendWhileClosing(body: string): boolean {
+  try {
+    if (typeof fetch === "function") {
+      void fetch("/api/workspace/save", {
+        method: "POST",
+        keepalive: true,
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body,
+      }).catch(() => {});
+      return true;
+    }
+  } catch {
+    // fall through to sendBeacon
+  }
+  try {
+    return typeof navigator !== "undefined" && typeof navigator.sendBeacon === "function"
+      ? navigator.sendBeacon("/api/workspace/save", new Blob([body], { type: "application/json" }))
+      : false;
+  } catch {
+    return false;
+  }
+}
+
 export interface SyncCallbacks {
   onRemoval: (removal: Removal, entryId: number) => void;
   onNotice: (notice: Notice) => void;
@@ -139,6 +168,7 @@ export function useWorkspaceSync(
       onRemoval: (removal, entryId) =>
         callbacksRef.current.onRemoval(removal, entryId),
       onNotice: (notice) => callbacksRef.current.onNotice(notice),
+      beacon: sendWhileClosing,
     });
     sync.start();
 
@@ -159,17 +189,22 @@ export function useWorkspaceSync(
       }
     };
     const onPageHide = () => {
-      sync.prepareToLeave();
-      // Closing (or into the back/forward cache): its draft may be recovered
-      // by the next visit; `pageshow` marks it alive again if it comes back.
+      // Closing: the last edits go to the server with a request that
+      // outlives the page; the local draft stays as the fallback.
+      sync.prepareToLeave(true);
+      // A clean exit: its draft may be recovered by the next tab at once;
+      // `pageshow` marks it alive again if it comes back (back/forward cache).
       sync.releaseTab();
     };
     const onPageShow = () => sync.heartbeat();
     const onFocus = () => void sync.checkRemote();
     const onOnline = () => sync.retry();
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
-      sync.prepareToLeave();
-      if (!sync.hasUnsavedChanges) return;
+      // Ask "leave site?" only when something would not reach the server:
+      // offline, a patch too large to send while closing, saving stuck, or
+      // work that is not a document edit yet (an exam in progress).
+      const sent = sync.prepareToLeave(true);
+      if (!sync.hasUnsavedChanges || (sent && !sync.hasBufferedWork())) return;
       event.preventDefault();
       // Legacy browsers need returnValue set to show the "leave site?" prompt.
       event.returnValue = "";

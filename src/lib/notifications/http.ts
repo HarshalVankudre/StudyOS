@@ -1,4 +1,5 @@
 /** Small helpers shared by the /api/notifications routes. */
+import { isSameOriginRequest } from "@/lib/http/same-origin";
 
 const MAX_BODY_BYTES = 8_000;
 
@@ -20,21 +21,9 @@ export async function readJsonBody(req: Request): Promise<unknown | null> {
   }
 }
 
-/**
- * Same-origin check for state-changing requests from the browser. A request
- * without an Origin header (not a browser form or fetch) passes; Clerk's
- * session cookie is SameSite=Lax on top of this.
- */
+/** Same-origin check for state-changing requests (see lib/http/same-origin). */
 export function sameOrigin(req: Request): boolean {
-  const origin = req.headers.get("origin");
-  if (!origin) return true;
-  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
-  if (!host) return false;
-  try {
-    return new URL(origin).host === host;
-  } catch {
-    return false;
-  }
+  return isSameOriginRequest(req);
 }
 
 export const noStore = { "Cache-Control": "no-store" } as const;

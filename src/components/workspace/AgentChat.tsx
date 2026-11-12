@@ -105,7 +105,7 @@ export function AgentChat({
   const inputHintId = useId();
   const errorId = useId();
   const clearPromptId = useId();
-  const { dict, t } = useI18n();
+  const { dict, plural } = useI18n();
   const initialActivity = createInitialAgentActivity(
     dict.agentChat.initialMessage,
   );
@@ -676,7 +676,7 @@ export function AgentChat({
                       className="font-mono text-[10px] text-ink-soft/70"
                       title={dict.credits.turnCostTitle}
                     >
-                      {t(dict.credits.amount, { count: item.creditsCost })}
+                      {plural(dict.counts.credits, item.creditsCost)}
                     </span>
                   )}
                 </div>

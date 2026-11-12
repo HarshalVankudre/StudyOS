@@ -208,11 +208,25 @@ export function DatabaseSettings({
   const smallSelect = "min-h-8 rounded border border-line bg-card px-2 py-1 text-xs text-ink-soft";
 
   return (
-    <details className="mb-3 rounded-md border border-line bg-surface">
+    <details data-print="hide" className="mb-3 rounded-md border border-line bg-surface">
       <summary className="min-h-9 cursor-pointer select-none px-3 py-2.5 font-mono text-[10px] uppercase tracking-wider text-ink-soft hover:text-ink">
         {dict.dbSettings.customize}
       </summary>
       <div className="border-t border-line p-3">
+        {/* Also here: the label above the views hides when it repeats the page title. */}
+        <label className="mb-3 block text-xs font-medium text-ink-soft">
+          {dict.db.nameAria}
+          <input
+            value={database.name}
+            onChange={(e) =>
+              withDb((target) => {
+                target.name = e.target.value;
+              })
+            }
+            dir="auto"
+            className={`mt-1 w-full font-normal ${fieldInput}`}
+          />
+        </label>
         <label className="block text-xs font-medium text-ink-soft">
           {dict.dbSettings.description}
           <input

@@ -62,6 +62,13 @@ describe("POST /api/notifications/subscriptions", () => {
     expect(JSON.stringify(await res.json())).not.toContain("fcm.googleapis.com");
   });
 
+  it("answers 409 when the endpoint is another student's device, so the browser re-subscribes", async () => {
+    m.add.mockResolvedValueOnce("taken");
+    const res = await subscriptions.POST(json("POST", { subscription: subscription() }));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "endpoint_taken" });
+  });
+
   it("refuses endpoints that are not a push service", async () => {
     const res = await subscriptions.POST(json("POST", { subscription: subscription("https://10.0.0.5/admin") }));
     expect(res.status).toBe(400);

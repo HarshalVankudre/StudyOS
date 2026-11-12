@@ -30,6 +30,11 @@ model Workspace {
   icon      String?
   data      String
   version   Int       @default(1)
+  // The editor's recent save ids and the versions they produced (a small
+  // bounded JSON list, lib/workspace/save-ids.ts): lets a tab whose save
+  // landed without its reply (or a draft left by a closed tab) recognise
+  // its own write instead of applying it again over newer changes.
+  saveIds   String    @default("")
   deletedAt DateTime?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -179,20 +184,33 @@ model Subscription {
   allowancePeriodStart DateTime?
   allowancePeriodEnd   DateTime?
   // When the live Stripe state written here was fetched: a write carrying an
-  // older fetch never overwrites a newer one (concurrent webhooks).
+  // older fetch never overwrites a newer one (concurrent webhooks). Only this
+  // code writes it, so a row where it is null was last written by the code
+  // before it (lib/billing.ts reconcileUnsyncedSubscriptions re-reads those).
   stripeSyncedAt           DateTime?
+  // A subscription this code saw ended on a live Stripe read, and when it
+  // ended. Stripe never revives an ended subscription, so a live status for
+  // it is stale. Written only from live reads: a status written by older
+  // code can never lock a subscriber out.
+  endedSubscriptionId      String?
+  endedAt                  DateTime?
+  // When the maintenance job last re-read this row (it takes the least
+  // recently checked first, so a row that keeps failing never blocks others).
+  stripeCheckedAt          DateTime?
   // The subscription and payment the allowance period belongs to. Cleared
-  // when another subscription is adopted; a refund or dispute of that
-  // payment stops the accrual.
+  // when another subscription is adopted.
   allowanceSubscriptionId  String?
   allowancePaymentIntentId String?
+  allowancePaymentCents    Int?
   // Only a yearly period accrues further monthly allowances.
   allowanceYearly          Boolean   @default(false)
-  // No allowance month on or after this instant (subscription ended early,
-  // or its payment was refunded in full).
+  // Derived (lib/billing.ts refreshAllowanceState, from the facts above and
+  // the payment's refunds and disputes), never written anywhere else:
+  //  - no allowance month on or after allowanceStopAt (the subscription
+  //    ended, or its payment is refunded in full);
+  //  - disputeId: an open or lost dispute on the payment of the current
+  //    period: not Pro, and no accrual from disputedAt.
   allowanceStopAt          DateTime?
-  // An open dispute on the payment of the current period: not Pro and no
-  // accrual until it closes in our favour.
   disputeId                String?
   disputedAt               DateTime?
   updatedAt            DateTime  @updatedAt
@@ -215,6 +233,9 @@ model BillingEvent {
   amountCents     Int?
   credits         Int?
   detail          String?
+  // When it happened on Stripe (a refund's or dispute's own timestamp), so
+  // what it affects does not depend on when its webhook arrived.
+  occurredAt      DateTime?
   createdAt       DateTime @default(now())
 
   @@unique([kind, stripeObjectId])
@@ -260,16 +281,20 @@ model BillingIntent {
 // `amount` is taken from the balance when the hold is made; settling charges
 // the real cost and returns the difference, releasing returns it all, and a
 // hold left "held" past `expiresAt` (a crashed request) is released.
+// `pendingCharge` is written before a settle runs: a hold that has one is
+// never given back, it is settled (by the next release or the maintenance
+// job), so a settle that failed does not give the work away.
 model CreditHold {
-  id        String    @id @default(cuid())
-  userId    String
-  amount    Int
-  reason    String
-  state     String    @default("held")
-  charged   Int?
-  expiresAt DateTime
-  createdAt DateTime  @default(now())
-  settledAt DateTime?
+  id            String    @id @default(cuid())
+  userId        String
+  amount        Int
+  reason        String
+  state         String    @default("held")
+  charged       Int?
+  pendingCharge Int?
+  expiresAt     DateTime
+  createdAt     DateTime  @default(now())
+  settledAt     DateTime?
 
   @@index([userId, state])
   @@index([state, expiresAt])

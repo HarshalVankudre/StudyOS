@@ -244,14 +244,76 @@ describe("PageView editor: slash menu", () => {
     expect(screen.getByTestId("db-view")).toHaveTextContent(current.databases[0].id);
   });
 
-  it("closes on Escape and leaves the typed text alone", async () => {
+  it("closes on Escape and takes back the typed command", async () => {
+    const { user } = setup([para("a", "")]);
+    await user.click(area(0));
+    await user.keyboard("/grade");
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(area(0).value).toBe("");
+    expect(area(0)).toHaveFocus();
+    expect(blocks()[0]).toEqual(para("a", ""));
+  });
+
+  it("Escape keeps the text written before the command", async () => {
+    const { user } = setup([para("a", "Tasks")]);
+    await caretAt(user, area(0), 5);
+    await user.keyboard(" /xyz");
+    expect(screen.getByText("No matching blocks")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByText("No matching blocks")).not.toBeInTheDocument();
+    expect(blocks()[0]).toEqual(para("a", "Tasks "));
+    expect(area(0).selectionStart).toBe(6);
+  });
+
+  it("clicking away dismisses the menu without leaving the command behind", async () => {
+    const { user } = setup([para("a", "Intro"), para("b", "")]);
+    await user.click(area(1));
+    await user.keyboard("/grade");
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+    await user.click(area(0));
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(blocks().map((b) => (b as { text: string }).text)).toEqual(["Intro", ""]);
+  });
+
+  it("keeps the menu open for a query of several words", async () => {
+    const opened = vi.fn();
+    const onKit = (e: Event) => opened((e as CustomEvent).detail);
+    window.addEventListener("studyos:study-kit", onKit);
+    try {
+      const { user } = setup([para("a", "")]);
+      await user.click(area(0));
+      await user.keyboard("/study kit");
+      const options = within(screen.getByRole("listbox")).getAllByRole("option");
+      expect(options[0]).toHaveTextContent("Study kit from slides or notes");
+      await user.keyboard("{Enter}");
+      expect(opened).toHaveBeenCalledWith({ mode: "material" });
+      expect(blocks()[0]).toEqual(para("a", ""));
+    } finally {
+      window.removeEventListener("studyos:study-kit", onKit);
+    }
+  });
+
+  it("closes on a space after a query that matches nothing, keeping the text as written", async () => {
     const { user } = setup([para("a", "")]);
     await user.click(area(0));
     await user.keyboard("/xyz");
     expect(screen.getByText("No matching blocks")).toBeInTheDocument();
-    await user.keyboard("{Escape}");
+    await user.keyboard(" more");
     expect(screen.queryByText("No matching blocks")).not.toBeInTheDocument();
-    expect(blocks()[0]).toEqual(para("a", "/xyz"));
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    await user.tab();
+    expect(blocks()[0]).toEqual(para("a", "/xyz more"));
+  });
+
+  it("closes on two spaces, keeping the text", async () => {
+    const { user } = setup([para("a", "")]);
+    await user.click(area(0));
+    await user.keyboard("/study  ");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    await user.tab();
+    expect(blocks()[0]).toEqual(para("a", "/study  "));
   });
 });
 
@@ -278,6 +340,41 @@ describe("PageView editor: slash menu extras", () => {
     expect(opened).toHaveBeenCalledWith({ mode: "page", pageId: "p", make: "quiz" });
     // The typed command is removed, the text kept, and no block inserted.
     expect(blocks()).toEqual([para("a", "Notes ")]);
+  });
+});
+
+describe("PageView accessibility", () => {
+  it("has exactly one h1, the page title", () => {
+    setup([{ id: "h", type: "heading", level: 1, text: "Week 1" }, para("a", "Text")]);
+    const h1s = screen.getAllByRole("heading", { level: 1 });
+    expect(h1s).toHaveLength(1);
+    expect(h1s[0]).toHaveTextContent("Notes");
+  });
+
+  it("gives a text block one Tab stop; its handle is reached with Esc or Ctrl+/", async () => {
+    const { user } = setup([para("a", "One"), para("b", "Two")]);
+    const handles = screen.getAllByRole("button", { name: "Block options" });
+    for (const h of handles) expect(h).toHaveAttribute("tabindex", "-1");
+    expect(handles[0]).toHaveAttribute("aria-keyshortcuts", "Control+/ Meta+/");
+    // Tab goes from one block's text straight to the next block's text.
+    await user.click(area(0));
+    await user.tab();
+    expect(area(1)).toHaveFocus();
+    // Ctrl+/ opens the focused block's menu.
+    await user.keyboard("{Control>}/{/Control}");
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).getByRole("menuitem", { name: "Duplicate" })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+    expect(handles[1]).toHaveFocus();
+    expect(blocks().map((b) => (b as { text: string }).text)).toEqual(["One", "Two"]);
+  });
+
+  it("keeps the handle as the Tab stop of a block without text", () => {
+    setup([para("a", "One"), { id: "d", type: "divider" }]);
+    const handles = screen.getAllByRole("button", { name: "Block options" });
+    expect(handles[0]).toHaveAttribute("tabindex", "-1");
+    expect(handles[1]).not.toHaveAttribute("tabindex", "-1");
   });
 });
 

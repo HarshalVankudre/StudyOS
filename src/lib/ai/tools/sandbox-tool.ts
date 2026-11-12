@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { SandboxRunner, SandboxRunSpec } from "@/lib/ai/sandbox/runner";
 import type { CreateAssetFn } from "@/lib/assets/service";
 import { mimeForOutputPath } from "@/lib/assets/mime";
+import { SANDBOX_RUN_CREDITS } from "@/lib/credits-info";
 import type { ToolContext, ToolDefinition } from "./registry";
 
 const MAX_CMDS = 20;
@@ -42,6 +43,20 @@ const sandboxOutput = z.object({
   logTail: z.string(),
   exitCode: z.number().int(),
 });
+
+/**
+ * Credits charged for renders, per agent task, so the turn's own charge can
+ * keep the whole turn within the plan's per-message cap (lib/ai/
+ * agent-charging.ts). The turn and its tool calls run in one process.
+ */
+const chargedByTask = new Map<string, number>();
+
+/** The credits this task's renders were charged, once (the entry is removed). */
+export function takeSandboxCreditsCharged(taskId: string): number {
+  const charged = chargedByTask.get(taskId) ?? 0;
+  chargedByTask.delete(taskId);
+  return charged;
+}
 
 /** A run's reserved credits: charge them (the run delivered) or give them back. */
 export interface SandboxCharge {
@@ -144,8 +159,11 @@ export function createSandboxTool(deps: {
     // nothing usable is not billed: we don't charge for failed renders. The
     // daily quota was already consumed by the reservation, which bounds how
     // many failed runs anyone can provoke.
-    if (artifacts.length > 0) {
-      await charge?.settle().catch(() => {});
+    if (artifacts.length > 0 && charge) {
+      // Charged even when this settle fails: the hold records the charge
+      // first and the credits layer completes it later (lib/credits.ts).
+      await charge.settle().catch(() => {});
+      chargedByTask.set(ctx.taskId, (chargedByTask.get(ctx.taskId) ?? 0) + SANDBOX_RUN_CREDITS);
     }
 
     return { artifacts, logTail: result.logTail, exitCode: result.exitCode };

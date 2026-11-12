@@ -5,6 +5,7 @@ const m = vi.hoisted(() => ({
   createCreditPackCheckout: vi.fn(),
   portalCreate: vi.fn(),
   subFindUnique: vi.fn(),
+  pricing: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -26,6 +27,8 @@ vi.mock("@/lib/billing", () => ({
 vi.mock("@/lib/db", () => ({
   prisma: { subscription: { findUnique: m.subFindUnique } },
 }));
+// What the pricing page offers (from the Stripe Prices, lib/plan-pricing.ts).
+vi.mock("@/lib/plan-pricing", () => ({ getProPricing: m.pricing }));
 vi.mock("@/lib/stripe", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/stripe")>();
   return {
@@ -59,6 +62,9 @@ function form(fields: Record<string, string> = {}) {
 
 beforeEach(() => {
   for (const fn of Object.values(m)) fn.mockReset();
+  m.pricing.mockImplementation(async () => ({
+    offered: { month: true, year: Boolean(process.env.STRIPE_PRICE_PRO_ANNUAL) },
+  }));
   vi.spyOn(console, "error").mockImplementation(() => {});
   vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_x");
   vi.stubEnv("STRIPE_PRICE_PRO", "price_month");
@@ -97,6 +103,19 @@ describe("startCheckoutAction", () => {
     expect(await redirectOf(startCheckoutAction(form({ interval: "year" })))).toBe(
       "/pricing?billing=unavailable",
     );
+    expect(m.createProCheckout).not.toHaveBeenCalled();
+  });
+
+  it("refuses an interval the pricing page does not offer, even when its price id is set", async () => {
+    // STRIPE_PRICE_PRO_ANNUAL is set, but its Stripe Price is not a yearly price.
+    vi.stubEnv("STRIPE_PRICE_PRO_ANNUAL", "price_year");
+    m.pricing.mockResolvedValue({ offered: { month: true, year: false } });
+    expect(await redirectOf(startCheckoutAction(form({ interval: "year" })))).toBe(
+      "/pricing?billing=unavailable",
+    );
+    // Monthly not offered (its Stripe Price cannot be read right now).
+    m.pricing.mockResolvedValue({ offered: { month: false, year: false } });
+    expect(await redirectOf(startCheckoutAction(form()))).toBe("/pricing?billing=unavailable");
     expect(m.createProCheckout).not.toHaveBeenCalled();
   });
 

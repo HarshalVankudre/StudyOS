@@ -14,10 +14,16 @@
  *
  * Stripe fake: customers, subscriptions with Stripe's real period boundaries
  * (the anchor day is kept and clamped to short months, so Jan 31 renews on
- * Feb 28 and then Mar 31), checkout sessions, invoices with `total`,
- * `amount_paid` and `starting_balance`, invoice payments, charges, refunds and
- * disputes. Any call can be made to fail (`failNext`), including part-way
- * through a multi-call flow.
+ * Feb 28 and then Mar 31), renewals that fail and go past_due with the period
+ * already advanced, checkout sessions, invoices with `total`, `amount_paid`
+ * and `starting_balance`, invoice payments, charges, refunds that can be
+ * pending and then fail, disputes, and prices. Any call can be made to fail
+ * (`failNext`), with a transient error or any Stripe error (`stripeError`),
+ * including part-way through a multi-call flow.
+ *
+ * Also: rows shaped like the ones the code before billing round 2 wrote
+ * (`seedLegacySubscription`, `seedLegacyProGrant`), and `permutations` for
+ * delivering webhooks in every order.
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -187,8 +193,12 @@ const TABLES: Record<string, TableSpec> = {
       allowancePeriodStart: null,
       allowancePeriodEnd: null,
       stripeSyncedAt: null,
+      endedSubscriptionId: null,
+      endedAt: null,
+      stripeCheckedAt: null,
       allowanceSubscriptionId: null,
       allowancePaymentIntentId: null,
+      allowancePaymentCents: null,
       allowanceYearly: false,
       allowanceStopAt: null,
       disputeId: null,
@@ -217,6 +227,7 @@ const TABLES: Record<string, TableSpec> = {
       amountCents: null,
       credits: null,
       detail: null,
+      occurredAt: null,
     }),
   },
   deletedAccount: {
@@ -248,6 +259,7 @@ const TABLES: Record<string, TableSpec> = {
       id: nextId("hold"),
       state: "held",
       charged: null,
+      pendingCharge: null,
       createdAt: now(),
       settledAt: null,
     }),
@@ -322,11 +334,24 @@ export function createFakeDb() {
 
   function sortRows(rows: Row[], orderBy: any): Row[] {
     if (!orderBy) return rows;
+    // { field: "asc" } or { field: { sort: "asc", nulls: "first" } }. Like
+    // Postgres, NULLs sort last ascending (first descending) unless told.
     const orders = (Array.isArray(orderBy) ? orderBy : [orderBy]).flatMap((o: Row) =>
-      Object.entries(o),
-    ) as [string, "asc" | "desc"][];
+      Object.entries(o).map(([field, spec]) => {
+        const dir: "asc" | "desc" = typeof spec === "string" ? (spec as "asc" | "desc") : spec.sort;
+        const nulls: "first" | "last" =
+          typeof spec === "object" && spec.nulls ? spec.nulls : dir === "asc" ? "last" : "first";
+        return { field, dir, nulls };
+      }),
+    );
     return [...rows].sort((a, b) => {
-      for (const [field, dir] of orders) {
+      for (const { field, dir, nulls } of orders) {
+        const an = a[field] === null || a[field] === undefined;
+        const bn = b[field] === null || b[field] === undefined;
+        if (an || bn) {
+          if (an && bn) continue;
+          return (an ? -1 : 1) * (nulls === "first" ? 1 : -1);
+        }
         const c = cmp(a[field], b[field]);
         if (c !== 0) return dir === "desc" ? -c : c;
       }
@@ -544,6 +569,44 @@ export function createFakeDb() {
   return {
     db,
     state,
+    /**
+     * A Subscription row exactly as the code before billing round 2 left it:
+     * status "active" or "canceled" (it stored "canceled" for EVERY status
+     * that was not active: past_due, unpaid, incomplete...), the Stripe ids,
+     * and nothing else (no period end, never stripeSyncedAt, no allowance).
+     */
+    seedLegacySubscription: (row: {
+      userId: string;
+      status: "active" | "canceled" | "free";
+      stripeCustomerId?: string | null;
+      stripeSubscriptionId?: string | null;
+    }) => {
+      base.subscription.set(row.userId, {
+        ...TABLES.subscription.defaults({}),
+        stripeCustomerId: null,
+        stripeSubscriptionId: null,
+        ...row,
+      });
+    },
+    /**
+     * A Pro grant written by the code before coverage months existed: one
+     * per paid invoice, keyed `pro_grant:<invoice id>`, created when the
+     * webhook ran.
+     */
+    seedLegacyProGrant: (userId: string, invoiceId: string, createdAt: Date, credits = 1000) => {
+      const id = nextId("led");
+      base.creditLedger.set(id, {
+        id,
+        userId,
+        delta: credits,
+        reason: "pro_monthly",
+        idempotencyKey: `pro_grant:${invoiceId}`,
+        createdAt,
+      });
+      const account = base.creditAccount.get(userId);
+      if (account) account.balance += credits;
+      else base.creditAccount.set(userId, { userId, balance: credits, createdAt, updatedAt: createdAt });
+    },
     balance: (userId: string) => base.creditAccount.get(userId)?.balance ?? 0,
     ledgerFor: (userId: string) => state.ledger.filter((l) => l.userId === userId),
     /** Sum of the ledger for a user (must always equal the balance). */
@@ -557,8 +620,17 @@ export function createFakeDb() {
 
 // ---- Stripe -----------------------------------------------------------------
 
-function stripeError(type: string, code: string, message = code): Error {
+/** A Stripe API error (e.g. `stripeError("StripeInvalidRequestError", "resource_missing")`). */
+export function stripeError(type: string, code: string, message = code): Error {
   return Object.assign(new Error(message), { type, code });
+}
+
+/** Every ordering of `items` (n! of them), for order-independence tests. */
+export function permutations<T>(items: T[]): T[][] {
+  if (items.length <= 1) return [items];
+  return items.flatMap((x, i) =>
+    permutations([...items.slice(0, i), ...items.slice(i + 1)]).map((rest) => [x, ...rest]),
+  );
 }
 
 /** What a transient Stripe failure looks like (network/5xx): callers must retry. */
@@ -602,6 +674,7 @@ export function createFakeStripe() {
     refunds: [] as Row[],
     refundKeys: new Map<string, Row>(),
     charges: new Map<string, Row>(),
+    prices: new Map<string, Row>(),
     portalSessions: [] as Row[],
     /** Calls made, by path ("refunds.create"), for assertions. */
     calls: [] as string[],
@@ -673,6 +746,8 @@ export function createFakeStripe() {
       cancel: async (id: string) => {
         const sub = s.subscriptions.get(id);
         if (!sub) throw stripeError("StripeInvalidRequestError", "resource_missing");
+        // Stripe refuses a second cancel with an invalid-request error that
+        // is NOT resource_missing.
         if (sub.status === "canceled") throw stripeError("StripeInvalidRequestError", "subscription_canceled");
         endSubscription(sub);
         return structuredClone(sub);
@@ -729,7 +804,21 @@ export function createFakeStripe() {
         if (!inv) throw stripeError("StripeInvalidRequestError", "resource_missing");
         return structuredClone(inv);
       },
+      list: async ({ subscription, status }: any) =>
+        list(
+          [...s.invoices.values()]
+            .filter((i) => (subscription ? i.parent?.subscription_details?.subscription === subscription : true))
+            .filter((i) => (status ? i.status === status : true))
+            .map((i) => structuredClone(i)),
+        ),
       listLineItems: async (id: string) => list(s.invoiceLines.get(id) ?? []),
+    },
+    prices: {
+      retrieve: async (id: string) => {
+        const p = s.prices.get(id);
+        if (!p) throw stripeError("StripeInvalidRequestError", "resource_missing");
+        return structuredClone(p);
+      },
     },
     invoicePayments: {
       list: async ({ invoice, payment }: any) => {
@@ -753,7 +842,15 @@ export function createFakeStripe() {
         const amount = Math.min(params.amount ?? remaining, remaining);
         charge.amount_refunded += amount;
         charge.refunded = charge.amount_refunded >= charge.amount;
-        const refund = { id: nextId("re"), object: "refund", status: "succeeded", ...params, amount };
+        const refund = {
+          id: nextId("re"),
+          object: "refund",
+          status: "succeeded",
+          charge: charge.id,
+          created: nowSec(),
+          ...params,
+          amount,
+        };
         s.refunds.push(refund);
         if (key) s.refundKeys.set(key, refund);
         return { ...refund };
@@ -832,6 +929,8 @@ export function createFakeStripe() {
       extraLines?: { amount: number; start: number; end: number }[];
       /** Credit applied from the customer's balance (cents, positive). */
       balanceApplied?: number;
+      /** Leave it open (its payment failed). */
+      unpaid?: boolean;
     },
   ) {
     const sub = s.subscriptions.get(subId)!;
@@ -860,11 +959,13 @@ export function createFakeStripe() {
       id,
       object: "invoice",
       customer: sub.customer,
-      status: "paid",
+      status: opts.unpaid ? "open" : "paid",
+      created: nowSec(),
+      status_transitions: { paid_at: opts.unpaid ? null : nowSec() },
       billing_reason: opts.billingReason ?? "subscription_cycle",
       total,
       amount_due: due,
-      amount_paid: due,
+      amount_paid: opts.unpaid ? 0 : due,
       starting_balance: -balanceApplied,
       lines: { data: lines, has_more: false },
       parent: {
@@ -873,7 +974,7 @@ export function createFakeStripe() {
       },
     };
     s.invoices.set(id, invoice);
-    if (due > 0) payInvoice(id, sub.customer, due);
+    if (due > 0 && !opts.unpaid) payInvoice(id, sub.customer, due);
     return structuredClone(invoice);
   }
 
@@ -901,6 +1002,7 @@ export function createFakeStripe() {
     s.subscriptions.set(subId, {
       id: subId,
       object: "subscription",
+      created: nowSec(),
       customer: session.customer,
       status: opts.status ?? "active",
       metadata: { ...(session.subscription_data?.metadata ?? {}) },
@@ -998,18 +1100,56 @@ export function createFakeStripe() {
     return { ...session };
   }
 
-  /** Refund part or all of a charge on "Stripe"; returns the charge.refunded payload. */
-  function refundCharge(chargeId: string, amount?: number) {
+  /**
+   * Refund part or all of a charge on "Stripe" (by hand in the dashboard);
+   * returns the charge.refunded payload. A `pending` refund (some payment
+   * methods) can still fail later (failRefund).
+   */
+  function refundCharge(chargeId: string, amount?: number, opts: { status?: "succeeded" | "pending" } = {}) {
     const charge = s.charges.get(chargeId)!;
     const amt = Math.min(amount ?? charge.amount - charge.amount_refunded, charge.amount - charge.amount_refunded);
     charge.amount_refunded += amt;
     charge.refunded = charge.amount_refunded >= charge.amount;
-    s.refunds.push({ id: nextId("re"), object: "refund", status: "succeeded", payment_intent: charge.payment_intent, amount: amt });
+    s.refunds.push({
+      id: nextId("re"),
+      object: "refund",
+      status: opts.status ?? "succeeded",
+      charge: chargeId,
+      payment_intent: charge.payment_intent,
+      amount: amt,
+      created: nowSec(),
+    });
     return { ...charge };
   }
 
+  /** The latest refund of a charge (its Refund object). */
+  function latestRefund(chargeId: string) {
+    const r = [...s.refunds].reverse().find((x) => x.charge === chargeId);
+    return r ? { ...r } : null;
+  }
+
+  /**
+   * A refund fails (the bank returned it): Stripe gives the amount back to
+   * the charge and sends charge.refund.updated with the Refund object, which
+   * this returns.
+   */
+  function failRefund(refundId: string, failureReason = "expired_or_canceled_card") {
+    const refund = s.refunds.find((r) => r.id === refundId)!;
+    refund.status = "failed";
+    refund.failure_reason = failureReason;
+    const charge = s.charges.get(refund.charge);
+    if (charge) {
+      charge.amount_refunded -= refund.amount;
+      charge.refunded = charge.amount_refunded >= charge.amount;
+    }
+    return { ...refund };
+  }
+
   /** A dispute object for a charge (status as given). */
-  function dispute(chargeId: string, opts: { id?: string; amount?: number; status?: string; reason?: string } = {}) {
+  function dispute(
+    chargeId: string,
+    opts: { id?: string; amount?: number; status?: string; reason?: string; created?: number } = {},
+  ) {
     const charge = s.charges.get(chargeId)!;
     return {
       id: opts.id ?? nextId("dp"),
@@ -1019,7 +1159,42 @@ export function createFakeStripe() {
       amount: opts.amount ?? charge.amount,
       reason: opts.reason ?? "fraudulent",
       status: opts.status ?? "needs_response",
+      created: opts.created ?? nowSec(),
     };
+  }
+
+  /**
+   * A renewal whose card payment fails: Stripe advances the period anyway,
+   * leaves the renewal invoice open and moves the subscription to past_due.
+   * `payOpenInvoice` later pays it (the customer fixed their card).
+   */
+  function failRenewal(subId: string) {
+    const sub = s.subscriptions.get(subId)!;
+    const it = sub.items.data[0];
+    const months = intervalMonths(it.price.recurring.interval);
+    let n = 1;
+    while (stripeAddMonths(sub.billing_cycle_anchor, n * months) <= it.current_period_end) n++;
+    const start = it.current_period_end;
+    const end = stripeAddMonths(sub.billing_cycle_anchor, n * months);
+    it.current_period_start = start;
+    it.current_period_end = end;
+    const amount = months === 12 ? 8000 : 800;
+    const invoice = subscriptionInvoice(subId, { start, end, amount, unpaid: true });
+    sub.latest_invoice = invoice.id;
+    sub.status = "past_due";
+    return { invoice, subscription: structuredClone(sub) };
+  }
+
+  /** Pay a subscription's open invoice now (the retry succeeded): active again. */
+  function payOpenInvoice(subId: string) {
+    const sub = s.subscriptions.get(subId)!;
+    const inv = s.invoices.get(sub.latest_invoice)!;
+    inv.status = "paid";
+    inv.amount_paid = inv.amount_due;
+    inv.status_transitions = { paid_at: nowSec() };
+    const paymentIntent = payInvoice(inv.id, sub.customer, inv.amount_due);
+    sub.status = "active";
+    return { invoice: structuredClone(inv), subscription: structuredClone(sub), paymentIntent };
   }
 
   return {
@@ -1032,7 +1207,25 @@ export function createFakeStripe() {
     completePackCheckout,
     markPackPaid,
     refundCharge,
+    latestRefund,
+    failRefund,
     dispute,
+    failRenewal,
+    payOpenInvoice,
+    /** A Stripe Price (default: an active recurring monthly USD 5.00 price). */
+    setPrice: (id: string, price: Row = {}) => {
+      s.prices.set(id, {
+        id,
+        object: "price",
+        active: true,
+        type: "recurring",
+        billing_scheme: "per_unit",
+        currency: "usd",
+        unit_amount: 500,
+        recurring: { interval: "month", interval_count: 1 },
+        ...price,
+      });
+    },
     /** Make the next `times` calls to `path` (e.g. "refunds.create") fail. */
     failNext: (path: string, opts: { error?: () => Error; times?: number } = {}) => {
       const plan = failures.get(path) ?? [];
@@ -1049,6 +1242,7 @@ export function createFakeStripe() {
       const start = clock;
       const full: Row = {
         object: "subscription",
+        created: clock,
         status: "active",
         metadata: {},
         latest_invoice: null,

@@ -10,6 +10,7 @@ import { useI18n } from "@/lib/i18n/client";
 import { fmt } from "@/lib/i18n/interpolate";
 import type { DailyStudyPlanItem, TodayPlanView } from "@/lib/agents/daily-study/types";
 import {
+  examContext,
   examCountdownLabel,
   formatDuration,
   formatLongDay,
@@ -134,7 +135,7 @@ function PlanBody({
   const allDone = totals.total > 0 && totals.done === totals.total;
   const missedDays = details.previousDate ? dayDiff(details.previousDate, plan.localDate) >= 2 : false;
   const carried = details.carried ?? 0;
-  const workload = details.workload?.overloaded ? workloadText(details.workload, T) : null;
+  const workload = details.workload?.overloaded ? workloadText(details.workload, T, locale) : null;
   const percent = totals.total ? Math.round((totals.done / totals.total) * 100) : 0;
 
   return (
@@ -215,24 +216,33 @@ function PlanBody({
             {T.examsTitle}
           </h3>
           <ul className="mt-2 flex flex-wrap gap-2">
-            {details.exams.map((exam) => (
+            {details.exams.map((exam) => {
+              const context = examContext(exam, details.exams);
+              return (
               <li key={exam.id} className="min-w-0 max-w-full">
                 <Link
                   href={workspaceHref(exam.target)}
                   className="flex min-h-10 max-w-full items-center gap-2 rounded-full border border-line-strong bg-surface px-3 text-xs text-ink-soft transition hover:bg-hover hover:text-ink"
                 >
                   <span dir="auto" className="min-w-0 truncate font-medium text-ink">{exam.title}</span>
+                  {context && (
+                    <span dir="auto" className="min-w-0 max-w-[12rem] truncate text-ink-soft">
+                      <span aria-hidden>· </span>
+                      {context}
+                    </span>
+                  )}
                   <span
                     className={cn(
                       "shrink-0 rounded-full px-2 py-0.5 font-semibold tabular-nums",
                       exam.days <= 3 ? "bg-lime-faint text-lime-deep" : "bg-surface-2 text-ink-soft",
                     )}
                   >
-                    {examCountdownLabel(exam, T)}
+                    {examCountdownLabel(exam, T, locale)}
                   </span>
                 </Link>
               </li>
-            ))}
+              );
+            })}
           </ul>
         </div>
       )}

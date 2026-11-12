@@ -11,12 +11,14 @@ import type {
   Database,
   DatabaseProperty,
   DatabaseRow,
+  GradeCategory,
   GradesBlock,
   GradesColumns,
   Workspace,
 } from "@/lib/workspace/types";
 import { titleProperty } from "@/lib/workspace/helpers";
 import { completionField, isRowComplete } from "@/lib/workspace/view-logic";
+import { findRow } from "@/lib/workspace/row-lookup";
 import {
   computeCourseGrade,
   courseRisk,
@@ -27,6 +29,13 @@ import {
   type GradeSummary,
 } from "./calc";
 import { pointsFor, resolveScale, type ScaleDefinition, type UkClassLabels } from "./scales";
+import {
+  categoriesFor,
+  findCategoryRows,
+  placeRow,
+  rowTypeLabels,
+  type CategoryRowCandidate,
+} from "./categories";
 
 // ---------------------------------------------------------------------------
 // Column names in the ten product languages (en es de fr it pt nl zh ja ar)
@@ -185,6 +194,8 @@ export interface GradeCourse {
   color?: string;
   credits: number | null;
   items: GradeItemInput[];
+  /** The course's grading categories (from the database's grading scheme). */
+  categories: GradeCategory[];
 }
 
 /** Key used when the database has no course column at all. */
@@ -204,6 +215,31 @@ function rowTitleText(db: Database, row: DatabaseRow): string {
   return typeof value === "string" ? value.trim() : value == null ? "" : String(value);
 }
 
+/** The course key of a row (see GradeCategory.course): "" = no course. */
+export function rowCourseKey(workspace: Workspace, db: Database, columns: ResolvedColumns, row: DatabaseRow): string {
+  if (!columns.course) return ALL_COURSES_KEY;
+  return rowCourse(workspace, columns.course, row)?.key ?? "";
+}
+
+/** The course key a course name or code maps to in this list (for imports and the agent). */
+export function courseKeyForLabel(workspace: Workspace, db: Database, columns: ResolvedColumns, label: string): string | null {
+  const course = columns.course;
+  if (!course) return ALL_COURSES_KEY;
+  const want = compact(label);
+  if (!want) return null;
+  if (course.type === "text") return `text:${want}`;
+  const code = label.match(/[A-Za-z]{2,5}[ -]?\d{2,4}[A-Za-z]?/)?.[0];
+  const wantCode = code ? compact(code) : "";
+  const fits = (have: string) =>
+    have === want || (wantCode !== "" && have.includes(wantCode)) || (have.length >= 4 && want.includes(have));
+  if (course.type === "relation") {
+    const related = workspace.databases.find((d) => d.id === course.relationDatabaseId);
+    const row = related?.rows.find((r) => fits(compact(rowTitleText(related, r))));
+    return row?.id ?? null;
+  }
+  return course.options?.find((o) => fits(compact(o.label)))?.id ?? null;
+}
+
 /** The course a row belongs to, as {key, label, color}, or null (no course). */
 function rowCourse(
   workspace: Workspace,
@@ -219,7 +255,7 @@ function rowCourse(
   if (!id) return null;
   if (prop.type === "relation") {
     const related = workspace.databases.find((d) => d.id === prop.relationDatabaseId);
-    const target = related?.rows.find((r) => r.id === id);
+    const target = related ? findRow(related, id) : undefined;
     if (!related || !target) return null;
     return { key: id, label: rowTitleText(related, target) };
   }
@@ -284,7 +320,7 @@ export function gradeCourses(workspace: Workspace, db: Database, columns: Resolv
   // Course order: the select's options, the related table's rows, else first seen.
   if (course?.type === "select" || course?.type === "multi_select") {
     for (const o of course.options ?? []) {
-      groups.set(o.id, { key: o.id, label: o.label, color: o.color, credits: null, items: [] });
+      groups.set(o.id, { key: o.id, label: o.label, color: o.color, credits: null, items: [], categories: [] });
     }
   }
 
@@ -293,22 +329,37 @@ export function gradeCourses(workspace: Workspace, db: Database, columns: Resolv
     const key = found?.key ?? "";
     let group = groups.get(key);
     if (!group) {
-      group = { key, label: found?.label ?? "", color: found?.color, credits: null, items: [] };
+      group = { key, label: found?.label ?? "", color: found?.color, credits: null, items: [], categories: [] };
       groups.set(key, group);
     }
-    group.items.push({
+    const name = rowTitleText(db, row);
+    const weight = columns.weight ? num(row.cells[columns.weight.id]) : null;
+    const item: GradeItemInput = {
       id: row.id,
-      name: rowTitleText(db, row),
-      weight: columns.weight ? num(row.cells[columns.weight.id]) : null,
+      name,
+      weight,
       score: columns.score ? num(row.cells[columns.score.id]) : null,
       maxScore: columns.maxScore ? num(row.cells[columns.maxScore.id]) : null,
       due: columns.due ? (typeof row.cells[columns.due.id] === "string" ? (row.cells[columns.due.id] as string) : null) : null,
       done: isRowComplete(db, row, completion),
-    });
+    };
+    const categories = categoriesFor(db.grading, key);
+    if (categories.length > 0) {
+      const place = placeRow(db.grading, categories, {
+        id: row.id,
+        title: name,
+        typeLabels: rowTypeLabels(db, row, course),
+        weight,
+      });
+      if (place.kind === "category") item.category = place.categoryId;
+      else if (place.kind === "excluded") item.excluded = true;
+    }
+    group.items.push(item);
   }
 
-  // "No course" goes last; empty course options are dropped.
-  const list = [...groups.values()].filter((g) => g.items.length > 0);
+  for (const g of groups.values()) g.categories = categoriesFor(db.grading, g.key);
+  // "No course" goes last; empty course options are dropped (unless they have categories).
+  const list = [...groups.values()].filter((g) => g.items.length > 0 || g.categories.length > 0);
   list.sort((a, b) => (a.key === "" ? 1 : 0) - (b.key === "" ? 1 : 0));
   const credits = courseCredits(workspace, db, course, list.filter((g) => g.key !== ""));
   for (const g of list) g.credits = credits.get(g.key) ?? null;
@@ -331,12 +382,21 @@ export interface GradeReport {
   scale: ScaleDefinition;
   courses: CourseReport[];
   summary: GradeSummary;
+  /** Old-style category rows that could become grading categories (the clean-up offer). */
+  categoryRows: CategoryRowCandidate[];
 }
 
 export interface ReportOptions {
   /** Hypothetical percentages by row id (what-if; never saved). */
   whatIf?: Readonly<Record<string, number>>;
+  /** What-if: one percentage for everything not scored yet in a course, by course key. */
+  whatIfFill?: Readonly<Record<string, number>>;
   ukLabels?: UkClassLabels;
+}
+
+/** Old-style category rows in a database (see findCategoryRows), with the block's columns. */
+export function categoryRowsOf(workspace: Workspace, db: Database, columns: ResolvedColumns): CategoryRowCandidate[] {
+  return findCategoryRows(db, columns, (row) => rowCourseKey(workspace, db, columns, row));
 }
 
 /** The database a block reads: its own, or the best guess when it has none. */
@@ -367,7 +427,13 @@ export function buildGradeReport(
   const scale = resolveScale(block.scale, block.bands, options.ukLabels);
   const courses: CourseReport[] = gradeCourses(workspace, database, columns).map((c) => {
     const target = targetFor(block, c.key);
-    const grade = computeCourseGrade(c.items, { target, whatIf: options.whatIf });
+    const fill = options.whatIfFill?.[c.key];
+    const grade = computeCourseGrade(c.items, {
+      target,
+      whatIf: options.whatIf,
+      categories: c.categories,
+      ...(typeof fill === "number" && Number.isFinite(fill) ? { fill } : {}),
+    });
     return { ...c, target, grade, risk: courseRisk(grade) };
   });
   const summary = summarizeCourses(
@@ -380,5 +446,5 @@ export function buildGradeReport(
         credits: c.credits,
       })),
   );
-  return { database, columns, scale, courses, summary };
+  return { database, columns, scale, courses, summary, categoryRows: categoryRowsOf(workspace, database, columns) };
 }

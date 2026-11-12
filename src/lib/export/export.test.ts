@@ -223,3 +223,160 @@ describe("workspace zip", () => {
     expect(safeFileName("x".repeat(200))).toHaveLength(80);
   });
 });
+
+describe("file names keep every script readable", () => {
+  it("keeps the middle dot, Arabic, Japanese and emoji as written", () => {
+    expect(safeFileName("chem210-lecture7 · study kit")).toBe("chem210-lecture7 · study kit");
+    expect(safeFileName("مذكرات الكيمياء")).toBe("مذكرات الكيمياء");
+    expect(safeFileName("日本語ノート：第3章")).toBe("日本語ノート：第3章");
+    expect(safeFileName("👩‍🎓 Notes")).toBe("👩‍🎓 Notes");
+  });
+
+  it("removes invisible direction overrides and replacement characters", () => {
+    expect(safeFileName("invoice‮fdp.exe")).toBe("invoicefdp.exe");
+    expect(safeFileName("bad � name")).toBe("bad name");
+  });
+
+  it("normalises to NFC and cuts long names on a character boundary within 200 bytes", () => {
+    expect(safeFileName("Café")).toBe("Café");
+    const arabic = safeFileName("ك".repeat(150));
+    expect(new TextEncoder().encode(arabic).length).toBeLessThanOrEqual(200);
+    expect(arabic).toBe("ك".repeat(80));
+    const emoji = safeFileName("👩‍🎓".repeat(30));
+    expect(emoji.length % "👩‍🎓".length).toBe(0);
+    expect(new TextEncoder().encode(emoji).length).toBeLessThanOrEqual(200);
+  });
+});
+
+/** Every entry's general purpose flags and extra field ids, from the central directory. */
+function zipEntries(zip: Uint8Array) {
+  const v = new DataView(zip.buffer, zip.byteOffset, zip.byteLength);
+  let end = zip.length - 22;
+  while (v.getUint32(end, true) !== 0x06054b50) end--;
+  const out: { name: string; flag: number; localFlag: number; extras: number[] }[] = [];
+  let at = v.getUint32(end + 16, true);
+  for (let n = v.getUint16(end + 10, true); n > 0; n--) {
+    const nameLen = v.getUint16(at + 28, true);
+    const extraLen = v.getUint16(at + 30, true);
+    const extras: number[] = [];
+    for (let e = at + 46 + nameLen; e < at + 46 + nameLen + extraLen; e += 4 + v.getUint16(e + 2, true)) {
+      extras.push(v.getUint16(e, true));
+    }
+    out.push({
+      name: new TextDecoder().decode(zip.subarray(at + 46, at + 46 + nameLen)),
+      flag: v.getUint16(at + 8, true),
+      localFlag: v.getUint16(v.getUint32(at + 42, true) + 6, true),
+      extras,
+    });
+    at += 46 + nameLen + extraLen + v.getUint16(at + 32, true);
+  }
+  return out;
+}
+
+describe("zip entries are flagged UTF-8", () => {
+  const titled: Workspace = {
+    id: "u",
+    name: "Pharmacy · صيدلة",
+    pages: [
+      { id: "a", title: "chem210-lecture7 · study kit", blocks: [] },
+      { id: "b", title: "مذكرات الكيمياء", blocks: [] },
+      { id: "c", title: "日本語ノート", blocks: [] },
+      { id: "d", title: "Plain", blocks: [] },
+    ],
+    databases: [],
+  };
+  const zip = workspaceToZip(titled, { today: "2026-11-12", mtime: new Date("2026-11-12T00:00:00Z") });
+
+  it("round-trips non-ASCII names exactly", () => {
+    expect(Object.keys(unzipSync(zip)).sort()).toEqual([
+      "Pharmacy · صيدلة/index.md",
+      "Pharmacy · صيدلة/pages/01 chem210-lecture7 · study kit.md",
+      "Pharmacy · صيدلة/pages/02 مذكرات الكيمياء.md",
+      "Pharmacy · صيدلة/pages/03 日本語ノート.md",
+      "Pharmacy · صيدلة/pages/04 Plain.md",
+    ]);
+  });
+
+  it("sets bit 11 in the central and local header of every entry", () => {
+    const entries = zipEntries(zip);
+    expect(entries).toHaveLength(5);
+    for (const e of entries) {
+      expect(e.flag & 0x0800).toBe(0x0800);
+      expect(e.localFlag & 0x0800).toBe(0x0800);
+    }
+  });
+
+  it("adds the Unicode Path field for tools that ignore the flag", () => {
+    for (const e of zipEntries(zip)) expect(e.extras).toContain(0x7075);
+    const ascii = zipEntries(workspaceToZip({ ...titled, name: "X", pages: [{ id: "d", title: "Plain", blocks: [] }] }));
+    for (const e of ascii) {
+      expect(e.flag & 0x0800).toBe(0x0800);
+      expect(e.extras).not.toContain(0x7075);
+    }
+  });
+});
+
+describe("markdown citations and grades", () => {
+  it("cites the source of cards and questions", () => {
+    const md = pageToMarkdown(
+      {
+        id: "k",
+        title: "Kit",
+        blocks: [
+          {
+            id: "f",
+            type: "flashcards",
+            title: "Deck",
+            cards: [
+              { id: "c", front: "SN2?", back: "One step", source: { materialId: "m", page: 3, label: "Lecture 7", quote: "a *concerted* step" } },
+              { id: "c2", front: "No source", back: "x" },
+            ],
+          },
+          {
+            id: "q",
+            type: "quiz",
+            questions: [{ id: "q1", kind: "short", prompt: "Rate law?", answerText: "k[RX][Nu]", source: { page: 4 } }],
+          },
+        ],
+      },
+      { databases: [] },
+      { today: "2026-11-12" },
+    );
+    expect(md).toContain("**A:** One step\n\n*Source: Lecture 7, p. 3 — “a \*concerted\* step”*");
+    expect(md).toContain("**A:** x\n");
+    expect(md).not.toContain("**A:** x\n\n*Source");
+    expect(md).toContain("1. Rate law?\n   **A:** k[RX][Nu]\n\n   *Source: p. 4*");
+  });
+
+  it("writes the grades block as a summary per course, not the raw table", () => {
+    const graded: Database = {
+      id: "g",
+      name: "Graded Work",
+      properties: [
+        { id: "n", name: "Assignment", type: "text" },
+        { id: "co", name: "Course", type: "select", options: [{ id: "chem", label: "CHEM 210" }, { id: "math", label: "MATH 221" }] },
+        { id: "w", name: "Weight %", type: "number" },
+        { id: "s", name: "Score", type: "number" },
+        { id: "st", name: "Status", type: "status", options: [{ id: "x", label: "Done" }] },
+      ],
+      rows: [
+        { id: "1", cells: { n: "Problem sets", co: "chem", w: 20, s: 85, st: "x" } },
+        { id: "2", cells: { n: "Midterm", co: "chem", w: 30 } },
+        { id: "3", cells: { n: "Final", co: "chem", w: 50 } },
+        { id: "4", cells: { n: "Homework", co: "math", w: 100, s: 92 } },
+      ],
+      views: [{ id: "v", name: "All", type: "table" }],
+    };
+    const md = pageToMarkdown(
+      { id: "gp", title: "Grades", blocks: [{ id: "gb", type: "grades", title: "Live grades", databaseId: "g", targets: { chem: 80 } }] },
+      { databases: [graded] },
+      { today: "2026-11-12" },
+    );
+    expect(md).toContain("**Live grades**");
+    expect(md).toContain("**CHEM 210** · Current grade: 85% · 20% of the grade decided · Target: 80%");
+    expect(md).toContain("| Graded work | Weight | Score |\n| --- | --- | --- |\n| Problem sets | 20% | 85% |\n| Midterm | 30% | not graded yet |");
+    expect(md).toContain("**MATH 221** · Current grade: 92% · 100% of the grade decided");
+    expect(md).not.toContain("| Assignment |");
+    expect(md).not.toContain("Status");
+  });
+});

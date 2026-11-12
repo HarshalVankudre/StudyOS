@@ -322,10 +322,13 @@ describe("QuizBlock — authoring", () => {
     await user.click(screen.getByRole("button", { name: Q.addQuestion }));
     const first = screen.getByRole("listitem", { name: "Question 1" });
     expect(within(first).getByText(Q.issues.prompt)).toBeInTheDocument();
+    // Text is written per typing burst: after a pause or on leaving the field.
     await user.type(within(first).getByRole("textbox", { name: /^Question \(Question 1\)/ }), "2 + 2 = ?");
+    await user.tab();
     expect(within(first).getByText(Q.issues.choices)).toBeInTheDocument();
     await user.type(within(first).getByRole("textbox", { name: "Choice 1 (Question 1)" }), "3");
     await user.type(within(first).getByRole("textbox", { name: "Choice 2 (Question 1)" }), "4");
+    await user.tab();
     expect(within(first).getByText(Q.issues.answer)).toBeInTheDocument();
     // Still saved as it is: half-written questions are allowed while editing.
     expect(question(quiz().questions[0].id).prompt).toBe("2 + 2 = ?");

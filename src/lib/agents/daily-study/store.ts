@@ -11,6 +11,9 @@ import {
   buildDailyStudyPlan,
   normalizeDailyMinutes,
   normalizeTodayMinutes,
+  planSourcesKey,
+  visiblePlanDetails,
+  visiblePlanItems,
   type PreviousPlan,
 } from "./planner";
 import { gradesWeightResolver } from "./grades-hook";
@@ -143,11 +146,12 @@ export async function runDailyStudyAgent(
       existing,
     });
     const plan = mapPlan(planRow);
+    const shown = plan ? visiblePlanItems(plan.items, workspaces) : [];
     const summary: RunSummary = {
       v: 2,
-      items: plan?.items.length ?? 0,
-      minutes: plan?.items.reduce((sum, item) => sum + item.minutes, 0) ?? 0,
-      workspaces: new Set(plan?.items.map((item) => item.target.workspaceId)).size,
+      items: shown.length,
+      minutes: shown.reduce((sum, item) => sum + item.minutes, 0),
+      workspaces: new Set(shown.map((item) => item.target.workspaceId)).size,
       ...(plan?.details.workload?.overloaded ? { overloaded: true } : {}),
     };
 
@@ -320,8 +324,10 @@ async function loadToday(
   });
   if (!planRow) return { config, plan: null };
 
+  let workspaces: Workspace[] | null = null;
   try {
-    const workspaces = await loadOwnedWorkspaces(userId);
+    workspaces = await loadOwnedWorkspaces(userId);
+    const stored = planRow.version >= PLAN_VERSION ? mapPlan(planRow) : null;
     if (planRow.version < PLAN_VERSION) {
       // A plan stored as English sentences: rebuild it in structured form,
       // keeping what the student had already checked off.
@@ -333,8 +339,23 @@ async function loadToday(
         workspaces,
         existing: planRow,
       });
+    } else if (stored && stored.details.sources !== planSourcesKey(workspaces)) {
+      // The workspaces changed since the plan was built (the first workspace
+      // was generated, one was duplicated, restored or trashed, or deadlines
+      // were imported): plan again, keeping what is checked off and today's
+      // chosen amount of time.
+      planRow = await buildAndStore({
+        userId,
+        localDate,
+        timeZone: planRow.timeZone,
+        dailyMinutes: config.dailyMinutes,
+        todayMinutes: stored.details.budgetOverride ? stored.details.budgetMinutes : undefined,
+        refresh: true,
+        workspaces,
+        existing: planRow,
+      });
     } else {
-      const plan = mapPlan(planRow);
+      const plan = stored;
       if (plan) {
         const reconciled = reconcilePlanItems(plan.items, workspaces, localDate, plan.timeZone);
         if (reconciled.changed) {
@@ -352,7 +373,7 @@ async function loadToday(
   }
 
   const plan = mapPlan(planRow);
-  return { config, plan: plan && plan.version >= PLAN_VERSION ? toView(plan) : null };
+  return { config, plan: plan && plan.version >= PLAN_VERSION ? toView(plan, workspaces) : null };
 }
 
 async function buildAndStore(input: {
@@ -361,6 +382,8 @@ async function buildAndStore(input: {
   timeZone: string;
   dailyMinutes: number;
   todayMinutes?: number;
+  /** An automatic refresh after the workspaces changed (see planner `refresh`). */
+  refresh?: boolean;
   workspaces: Workspace[];
   existing: PlanRow | null;
 }): Promise<PlanRow> {
@@ -390,6 +413,7 @@ async function buildAndStore(input: {
     todayMinutes: input.todayMinutes,
     previous,
     current,
+    refresh: input.refresh,
     weightOf: gradesWeightResolver(),
   });
 
@@ -414,6 +438,19 @@ async function buildAndStore(input: {
     candidateCount: built.candidateCount,
     generatedAt: new Date(),
   };
+  if (input.refresh && existing) {
+    // Only replace the plan that was read: a check-off that landed while this
+    // refresh was planning wins, and the next load plans again.
+    const update = await prisma.dailyStudyPlan.updateMany({
+      where: { id: existing.id, userId, items: existing.items },
+      data,
+    });
+    if (update.count === 1) return { ...existing, ...data };
+    const latest = await prisma.dailyStudyPlan.findUnique({
+      where: { userId_localDate: { userId, localDate } },
+    });
+    return latest ?? existing;
+  }
   return prisma.dailyStudyPlan.upsert({
     where: { userId_localDate: { userId, localDate } },
     create: { userId, localDate, ...data },
@@ -526,13 +563,15 @@ function mapPlan(row: PlanRow | null): DailyStudyPlanData | null {
   }
 }
 
-function toView(plan: DailyStudyPlanData): TodayPlanView {
+/** `workspaces`: the student's current (not trashed) workspaces, when known. */
+function toView(plan: DailyStudyPlanData, workspaces: Workspace[] | null): TodayPlanView {
   return {
     id: plan.id,
     localDate: plan.localDate,
     timeZone: plan.timeZone,
-    items: plan.items,
-    details: plan.details,
+    items: workspaces ? visiblePlanItems(plan.items, workspaces) : plan.items,
+    // Every part of Today comes from the same plan as the list it shows.
+    details: workspaces ? visiblePlanDetails(plan.details, workspaces) : plan.details,
     sourceCount: plan.sourceCount,
     candidateCount: plan.candidateCount,
     generatedAt: plan.generatedAt.toISOString(),

@@ -1,3 +1,4 @@
+import { rejectCrossSite } from "@/lib/http/same-origin";
 import { auth } from "@clerk/nextjs/server";
 import { z } from "zod";
 import { getDictionary } from "@/lib/i18n/dictionaries";
@@ -16,6 +17,8 @@ const requestSchema = z.object({
 });
 
 export async function POST(request: Request) {
+  const crossSite = rejectCrossSite(request);
+  if (crossSite) return crossSite;
   const T = getDictionary(await getLocale());
   const { userId } = await auth();
   if (!userId) {

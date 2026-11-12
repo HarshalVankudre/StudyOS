@@ -3,7 +3,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { planQuestionsDetailed } from "@/lib/ai/generate";
 import { modelForPlan } from "@/lib/ai/plans";
-import type { GenQuestion } from "@/lib/ai/onboarding";
+import { defaultQuestions, type GenQuestion } from "@/lib/ai/onboarding";
 import { withUsageMeter } from "@/lib/ai/usage-meter";
 import { getUserPlan } from "@/lib/billing";
 import {
@@ -95,7 +95,10 @@ export async function planQuestionsAction(
     );
     // The static fallback is free (the hold is given back in `finally`).
     if (result.fromModel) await settleCreditHold(hold, usageToCredits(usage));
-    return { ok: true, questions: result.questions };
+    // The static fallback leaves out what the description already says (a
+    // student who named two courses is not asked how many they take).
+    const questions = result.fromModel ? result.questions : defaultQuestions(T.onboarding, clean);
+    return { ok: true, questions };
   } finally {
     await releaseCreditHold(hold).catch(() => false);
   }

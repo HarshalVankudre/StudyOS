@@ -8,6 +8,7 @@
  */
 import type { Dictionary } from "@/lib/i18n/dictionaries/en";
 import { fmt } from "@/lib/i18n/interpolate";
+import { plural } from "@/lib/i18n/plural";
 import { workspaceHref } from "@/lib/workspace/deep-link";
 import {
   RESTART_AFTER_CARRIES,
@@ -18,10 +19,6 @@ import {
 } from "./types";
 
 export type TodayCopy = Dictionary["today"];
-
-export function plural(count: number, one: string, other: string): string {
-  return fmt(count === 1 ? one : other, { count });
-}
 
 /** "25 min", "1 h", "1 h 30 min". */
 export function formatDuration(minutes: number, T: TodayCopy): string {
@@ -104,7 +101,7 @@ export function itemReason(item: DailyStudyPlanItem, T: TodayCopy, locale: strin
     case "due_tomorrow":
       return T.reasonDueTomorrow;
     case "due_soon":
-      return fmt(T.reasonDueSoon, { days });
+      return plural(locale, T.reasonDueSoon, days);
     case "due_later":
       return fmt(T.reasonDueLater, { date });
     case "start_early":
@@ -117,11 +114,11 @@ export function itemReason(item: DailyStudyPlanItem, T: TodayCopy, locale: strin
     case "exam_tomorrow":
       return fmt(T.reasonExamTomorrow, { exam });
     case "exam_review":
-      return fmt(T.reasonExamReview, { exam, days });
+      return plural(locale, T.reasonExamReview, days, { exam });
     case "cards_due":
-      return plural(reason.count ?? item.dueCount ?? 0, T.reasonCardsDueOne, T.reasonCardsDueOther);
+      return plural(locale, T.reasonCardsDue, reason.count ?? item.dueCount ?? 0);
     case "new_cards":
-      return plural(reason.count ?? item.dueCount ?? 0, T.reasonNewCardsOne, T.reasonNewCardsOther);
+      return plural(locale, T.reasonNewCards, reason.count ?? item.dueCount ?? 0);
     case "open_task":
       return fmt(T.reasonOpenTask, { page: item.section || item.workspaceName });
   }
@@ -131,6 +128,12 @@ export function itemReason(item: DailyStudyPlanItem, T: TodayCopy, locale: strin
 export function itemNotes(item: DailyStudyPlanItem, T: TodayCopy, locale: string): string[] {
   const notes: string[] = [];
   if (item.weight) notes.push(fmt(T.weight, { weight: formatNumber(item.weight, locale) }));
+  // A bounded review session says how many cards it leaves for later days.
+  const ready = item.reason.readyCount ?? 0;
+  const planned = item.reason.count ?? item.dueCount ?? 0;
+  if (ready > planned && planned > 0) {
+    notes.push(plural(locale, T.cardsReadyPart, ready, { planned: formatNumber(planned, locale) }));
+  }
   if (item.carry && !item.completed) {
     notes.push(
       item.carry.count >= RESTART_AFTER_CARRIES && item.mode !== "study"
@@ -149,19 +152,34 @@ export function itemHref(item: Pick<DailyStudyPlanItem, "target">): string {
   return workspaceHref(item.target);
 }
 
-export function examCountdownLabel(exam: ExamCountdown, T: TodayCopy): string {
+/**
+ * What tells this exam apart on its chip: its course, or, when another exam
+ * in the list has the same title and no course says which is which, the
+ * workspace it comes from.
+ */
+export function examContext(exam: ExamCountdown, all: ExamCountdown[]): string | null {
+  if (exam.course) return exam.course;
+  const sameTitle = all.filter(
+    (other) => other.id !== exam.id && other.title.trim().toLowerCase() === exam.title.trim().toLowerCase(),
+  );
+  if (sameTitle.length === 0) return null;
+  return sameTitle.some((other) => other.workspaceName !== exam.workspaceName) ? exam.workspaceName || null : null;
+}
+
+export function examCountdownLabel(exam: ExamCountdown, T: TodayCopy, locale: string): string {
   if (exam.days <= 0) return T.examToday;
   if (exam.days === 1) return T.examTomorrow;
-  return fmt(T.examIn, { count: exam.days });
+  return plural(locale, T.examIn, exam.days);
 }
 
 export function workloadText(
   workload: Workload,
   T: TodayCopy,
+  locale: string,
 ): { title: string; body: string; start: string | null } {
   const titles = workload.startToday.map((title) => fmt(T.quoted, { title }));
   return {
-    title: fmt(T.overloadTitle, { days: workload.days }),
+    title: plural(locale, T.overloadTitle, workload.days),
     body: fmt(T.overloadBody, {
       needed: formatDuration(workload.neededMinutes, T),
       available: formatDuration(workload.availableMinutes, T),
@@ -170,10 +188,9 @@ export function workloadText(
   };
 }
 
-export function runSummaryText(summary: RunSummary, T: TodayCopy): string {
+export function runSummaryText(summary: RunSummary, T: TodayCopy, locale: string): string {
   if (summary.items === 0) return T.runSummaryEmpty;
-  const base = fmt(summary.items === 1 ? T.runSummaryOne : T.runSummaryOther, {
-    count: summary.items,
+  const base = plural(locale, T.runSummary, summary.items, {
     time: formatDuration(summary.minutes, T),
   });
   return summary.overloaded ? `${base} · ${T.runSummaryOverload}` : base;

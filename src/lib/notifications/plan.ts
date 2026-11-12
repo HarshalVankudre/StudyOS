@@ -3,13 +3,20 @@
  * notification). Uses the Daily Study Agent's deterministic planner (no AI)
  * and its reconcile step exactly as the Today view does, and stores a newly
  * built plan, so what the notification names is what the student finds when
- * they open the app. An existing plan for today is never overwritten: it is
- * read, brought in line with the workspaces, and used as it is.
+ * they open the app. An existing plan for today is read and brought in line
+ * with the workspaces; it is planned again (keeping check-offs) only when the
+ * workspaces it was built from changed, exactly as the Today view does.
  */
 import "server-only";
 
 import { prisma } from "@/lib/db";
-import { buildDailyStudyPlan, normalizeDailyMinutes, type PreviousPlan } from "@/lib/agents/daily-study/planner";
+import {
+  buildDailyStudyPlan,
+  normalizeDailyMinutes,
+  planSourcesKey,
+  visiblePlanItems,
+  type PreviousPlan,
+} from "@/lib/agents/daily-study/planner";
 import { gradesWeightResolver } from "@/lib/agents/daily-study/grades-hook";
 import { reconcilePlanItems } from "@/lib/agents/daily-study/reconcile";
 import {
@@ -46,15 +53,44 @@ export async function ensureTodayPlan(
 
   const existing = await prisma.dailyStudyPlan.findUnique({
     where: { userId_localDate: { userId, localDate } },
-    select: { items: true, version: true, timeZone: true },
+    select: { id: true, items: true, version: true, timeZone: true, details: true },
   });
   if (existing && existing.version >= PLAN_VERSION) {
+    let items: DailyStudyPlanItem[];
     try {
-      const items = parseDailyStudyPlanItems(existing.items);
-      return reconcilePlanItems(items, workspaces, localDate, existing.timeZone, now).items;
+      items = parseDailyStudyPlanItems(existing.items);
     } catch {
       return null;
     }
+    const reconciled = reconcilePlanItems(items, workspaces, localDate, existing.timeZone, now).items;
+    const details = parsePlanDetails(existing.details);
+    if (details.sources === planSourcesKey(workspaces)) return visiblePlanItems(reconciled, workspaces);
+    // The workspaces changed since the plan was built: plan again the way the
+    // Today view does, keeping check-offs, so both name the same work.
+    const rebuilt = buildDailyStudyPlan({
+      workspaces,
+      localDate,
+      dailyMinutes: normalizeDailyMinutes(config?.dailyMinutes ?? DEFAULT_DAILY_MINUTES),
+      todayMinutes: details.budgetOverride ? details.budgetMinutes : undefined,
+      previous: await loadPreviousPlan(userId, localDate),
+      current: { items: reconciled, progress: details.progress },
+      refresh: true,
+      weightOf: gradesWeightResolver(),
+    });
+    const next = reconcilePlanItems(rebuilt.items, workspaces, localDate, existing.timeZone, now).items;
+    await prisma.dailyStudyPlan
+      .updateMany({
+        where: { id: existing.id, userId, items: existing.items },
+        data: {
+          items: JSON.stringify(next),
+          details: JSON.stringify(rebuilt.details),
+          sourceCount: rebuilt.sourceCount,
+          candidateCount: rebuilt.candidateCount,
+          generatedAt: now,
+        },
+      })
+      .catch(() => undefined);
+    return visiblePlanItems(next, workspaces);
   }
 
   const previous = await loadPreviousPlan(userId, localDate);

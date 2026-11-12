@@ -92,6 +92,7 @@ describe("AppShell keyboard and events", () => {
   });
 
   it("opens from the floating search button and the open event", async () => {
+    mocks.pathname = "/app/agents";
     render(<AppShell />);
     await userEvent.click(screen.getByRole("button", { name: en.command.search }));
     expect(await screen.findByRole("combobox")).toBeInTheDocument();
@@ -117,5 +118,19 @@ describe("event helpers", () => {
     cb.type = "checkbox";
     expect(isTypingTarget(cb)).toBe(false);
     expect(isTypingTarget(document.createElement("button"))).toBe(false);
+  });
+});
+
+describe("AppShell floating search (QA round 2: it covered Today on phones)", () => {
+  it("is not shown on the home screen, whose header has search", () => {
+    mocks.pathname = "/app";
+    render(<AppShell />);
+    expect(screen.queryByRole("button", { name: en.command.search })).toBeNull();
+  });
+
+  it("is shown on other app pages", () => {
+    mocks.pathname = "/app/agents";
+    render(<AppShell />);
+    expect(screen.getByRole("button", { name: en.command.search })).toBeInTheDocument();
   });
 });

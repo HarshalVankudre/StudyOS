@@ -10,6 +10,7 @@ import { createHash } from "node:crypto";
 import { dirFor, type Locale } from "@/lib/i18n/config";
 import type { Dictionary } from "@/lib/i18n/dictionaries/en";
 import { fmt } from "@/lib/i18n/interpolate";
+import { plural } from "@/lib/i18n/plural";
 import { formatDuration, itemTitle, planTotals } from "@/lib/agents/daily-study/present";
 import type { DailyStudyPlanItem } from "@/lib/agents/daily-study/types";
 import { workspaceHref, type WorkspaceLinkTarget } from "@/lib/workspace/deep-link";
@@ -85,14 +86,15 @@ export function dailyPlanMessage(
   const total = planTotals(open).minutes;
   const title = fmt(N.msgDailyTitle, { total: formatDuration(total, T) });
   const vars = { title: itemTitle(first, T), time: formatDuration(first.minutes, T), count: open.length - 1 };
-  const body = fmt(open.length === 1 ? N.msgDailyBodyOne : N.msgDailyBodyOther, vars);
+  const body =
+    open.length === 1 ? fmt(N.msgDailyBodyOne, vars) : plural(locale, N.msgDailyBodyOther, vars.count, vars);
   return message("daily", locale, title, body, workspaceHref(first.target), `daily-${localDate}`);
 }
 
 function deadlineTitle(r: DeadlineReminder, N: Dictionary["notifications"], locale: Locale): string {
   const vars = { title: r.title, count: r.daysLeft, day: shortDay(r.dueDate, locale) };
-  if (r.exam) return fmt(r.daysLeft === 1 ? N.msgExamTomorrow : N.msgExamIn, vars);
-  return fmt(r.daysLeft === 1 ? N.msgDueTomorrow : N.msgDueIn, vars);
+  if (r.exam) return r.daysLeft === 1 ? fmt(N.msgExamTomorrow, vars) : plural(locale, N.msgExamIn, r.daysLeft, vars);
+  return r.daysLeft === 1 ? fmt(N.msgDueTomorrow, vars) : plural(locale, N.msgDueIn, r.daysLeft, vars);
 }
 
 export function deadlineMessage(r: DeadlineReminder, dict: Dictionary, locale: Locale): NotificationMessage {
@@ -122,7 +124,7 @@ export function groupedDeadlineMessage(
   return message(
     "deadline",
     locale,
-    fmt(N.msgGroupTitle, { count: reminders.length }),
+    plural(locale, N.msgGroupTitle, reminders.length),
     body,
     "/app",
     `deadlines-${localDate}`,
@@ -139,9 +141,33 @@ export function testMessage(dict: Dictionary, locale: Locale): NotificationMessa
   return message("test", locale, N.msgTestTitle, N.msgTestBody, "/app/settings#notifications", "test");
 }
 
-/** The JSON the service worker reads (public/sw.js). */
+/**
+ * Largest payload sent, in UTF-8 bytes. Push services cap the encrypted
+ * request body at 4096 bytes, and encryption adds an 86-byte header and 17
+ * bytes of tag and delimiter (webpush.ts), so 3,993 is the real ceiling; the
+ * rest is margin.
+ */
+export const PUSH_PAYLOAD_BUDGET = 3_800;
+
+const bytes = (text: string) => Buffer.byteLength(text, "utf8");
+
+/**
+ * The JSON the service worker reads (public/sw.js), always within
+ * PUSH_PAYLOAD_BUDGET. A deep link built from very long page or row ids
+ * could push it over; then the notification opens the app's home ("/app")
+ * instead, and as a last resort the text is shortened. Never throws, so an
+ * oversized message can never count against the device as a rejection.
+ */
 export function pushPayload(m: NotificationMessage): string {
-  return JSON.stringify({ title: m.title, body: m.body, url: m.url, tag: m.tag, lang: m.lang, dir: m.dir });
+  const json = (url: string, title = m.title, body = m.body) =>
+    JSON.stringify({ title, body, url, tag: m.tag.slice(0, 64), lang: m.lang, dir: m.dir });
+  const full = json(m.url);
+  if (bytes(full) <= PUSH_PAYLOAD_BUDGET) return full;
+  const short = json("/app");
+  if (bytes(short) <= PUSH_PAYLOAD_BUDGET) return short;
+  // Titles and bodies are already clipped by character count; only a message
+  // built outside `message()` could still be too long.
+  return json("/app", clip(m.title, 60), clip(m.body, 120));
 }
 
 /** A short, stable, base64url Topic for the push service (<= 32 chars). */

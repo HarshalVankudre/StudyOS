@@ -89,6 +89,16 @@ export function locateQuote(
   quote: string,
   pageSkeleton?: Skeleton,
 ): QuoteMatch | null {
+  const parts = quoteParts(quote);
+  return parts ? locateParts(pageText, parts, pageSkeleton) : null;
+}
+
+/**
+ * A quote reduced to the skeletons of its parts (split at ellipses), or null
+ * when it is too short, too long or too vague to be a meaningful citation.
+ * Computed once per quote, however many pages it is checked against.
+ */
+export function quoteParts(quote: string): string[] | null {
   if (!quote || quote.length > MAX_QUOTE_CHARS * 1.5) return null;
   if (!isSpecificQuote(quote)) return null;
   const parts = quote
@@ -98,7 +108,10 @@ export function locateQuote(
   if (parts.length === 0) return null;
   // Every part of an elided quote must be substantial on its own.
   if (parts.length > 1 && parts.some((part) => part.length < 6)) return null;
+  return parts;
+}
 
+function locateParts(pageText: string, parts: readonly string[], pageSkeleton?: Skeleton): QuoteMatch | null {
   const page = pageSkeleton ?? skeletonOf(pageText);
   // Try occurrences of the first part (a bounded number, so a page that
   // repeats one phrase hundreds of times cannot make this quadratic), so an
@@ -138,10 +151,19 @@ export interface VerifiedQuote {
 }
 
 /**
- * Verify a quote against the pages a section covered. The cited page is
- * tried first, then its neighbours (a passage can run over a page break, and
- * models are sometimes one page off), then the rest of the section. Returns
- * the corrected page and the material's own wording, or null.
+ * Pages of a section checked for a quote without a cited page. Sections are
+ * capped in pages (lib/materials/limits MAX_SECTION_PAGES); this is a second
+ * bound so verification never scales with a page count a file chose.
+ */
+export const MAX_UNCITED_PAGES = 60;
+
+/**
+ * Verify a quote against the pages a section covered. Only the cited page
+ * and its neighbours are tried (a passage can run over a page break, and
+ * models are sometimes one page off); a quote without a usable page number
+ * is looked for in the first MAX_UNCITED_PAGES pages of the section. The
+ * quote is normalised once. Returns the corrected page and the material's
+ * own wording, or null.
  */
 export function verifyQuote(
   pages: readonly string[],
@@ -151,6 +173,8 @@ export function verifyQuote(
   /** Page skeletons by page number, reused across the items of a section. */
   cache: Map<number, Skeleton> = new Map(),
 ): VerifiedQuote | null {
+  const parts = quoteParts(quote);
+  if (!parts) return null;
   const candidates: number[] = [];
   const add = (page: number) => {
     if (page >= range.from && page <= range.to && !candidates.includes(page)) candidates.push(page);
@@ -159,8 +183,10 @@ export function verifyQuote(
     add(citedPage);
     add(citedPage - 1);
     add(citedPage + 1);
+  } else {
+    const last = Math.min(range.to, range.from + MAX_UNCITED_PAGES - 1);
+    for (let page = range.from; page <= last; page += 1) candidates.push(page);
   }
-  for (let page = range.from; page <= range.to; page += 1) add(page);
 
   for (const page of candidates) {
     const text = pages[page - 1] ?? "";
@@ -169,7 +195,7 @@ export function verifyQuote(
       skeleton = skeletonOf(text);
       cache.set(page, skeleton);
     }
-    const match = locateQuote(text, quote, skeleton);
+    const match = locateParts(text, parts, skeleton);
     if (!match) continue;
     const exact = text.slice(match.start, match.end).replace(/\s+/g, " ").trim();
     // An elided quote can span more than an excerpt should: keep the

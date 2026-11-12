@@ -18,7 +18,16 @@
 import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/db";
 import { reportError } from "@/lib/ops/report-error";
+import { applyPatch, diff, type Op } from "./changes";
 import { prepareWorkspaceForSave, repairWorkspace } from "./repair";
+import {
+  appendSave,
+  isSaveId,
+  landedVersion,
+  parseSaveLog,
+  serializeSaveLog,
+  type SaveLog,
+} from "./save-ids";
 import type { Workspace } from "./types";
 
 export const TRASH_RETENTION_DAYS = 30;
@@ -106,6 +115,8 @@ export async function saveNewWorkspace(ws: Workspace): Promise<string> {
 export interface WorkspaceState {
   workspace: Workspace;
   version: number;
+  /** Recent editor saves and the versions they produced (see save-ids.ts). */
+  saves?: SaveLog;
 }
 
 /** Load a workspace and its version, only if the current user owns it. */
@@ -115,11 +126,11 @@ export async function getWorkspaceState(
   const ownerId = await requireUserId();
   const row = await prisma.workspace.findFirst({
     where: { id, ownerId, ...NOT_TRASHED },
-    select: { id: true, name: true, data: true, version: true },
+    select: { id: true, name: true, data: true, version: true, saveIds: true },
   });
   if (!row) return null;
   const workspace = parseStoredWorkspace(row);
-  return workspace ? { workspace, version: row.version } : null;
+  return workspace ? { workspace, version: row.version, saves: parseSaveLog(row.saveIds) } : null;
 }
 
 /** Load a workspace by id, only if it belongs to the current user. */
@@ -149,7 +160,7 @@ export async function listWorkspaces() {
 
 export type SaveWorkspaceResult =
   | { status: "saved"; version: number }
-  | { status: "conflict"; version: number }
+  | { status: "conflict"; version: number; saves?: SaveLog }
   | { status: "not_found" };
 
 /**
@@ -158,6 +169,11 @@ export type SaveWorkspaceResult =
  * save advances `version`, which is also how a concurrent agent task detects
  * that it must not overwrite newer work (see version-service.ts).
  *
+ * `saveId` (from the editor) is recorded with the version this save produces,
+ * and a refused save returns the recent ids, so a tab can recognise a save of
+ * its own that landed without its reply (save-ids.ts). Callers without an id
+ * (older clients during a deploy, server-side writers) save as before.
+ *
  * Throws InvalidWorkspaceError / WorkspaceTooLargeError (repair.ts) when the
  * document cannot be stored.
  */
@@ -165,26 +181,95 @@ export async function saveWorkspace(
   id: string,
   ws: unknown,
   baseVersion: number,
+  saveId?: string,
 ): Promise<SaveWorkspaceResult> {
   const ownerId = await requireUserId();
   const { workspace, data } = prepareWorkspaceForSave(ws, id);
+  const columns = {
+    name: columnText(workspace.name),
+    icon: workspace.icon == null ? null : columnText(workspace.icon),
+    data,
+  };
+  if (isSaveId(saveId)) {
+    // The log is read at `baseVersion` and written back only if the row is
+    // still at it, so the version check keeps the two consistent.
+    const row = await prisma.workspace.findFirst({
+      where: { id, ownerId, ...NOT_TRASHED },
+      select: { version: true, saveIds: true },
+    });
+    if (!row) return { status: "not_found" };
+    const saves = parseSaveLog(row.saveIds);
+    if (row.version !== baseVersion) return { status: "conflict", version: row.version, saves };
+    const updated = await prisma.workspace.updateMany({
+      where: { id, ownerId, version: baseVersion, ...NOT_TRASHED },
+      data: {
+        ...columns,
+        saveIds: serializeSaveLog(appendSave(saves, saveId, baseVersion + 1)),
+        version: { increment: 1 },
+      },
+    });
+    if (updated.count === 1) return { status: "saved", version: baseVersion + 1 };
+  } else {
+    const updated = await prisma.workspace.updateMany({
+      where: { id, ownerId, version: baseVersion, ...NOT_TRASHED },
+      data: { ...columns, version: { increment: 1 } },
+    });
+    if (updated.count === 1) return { status: "saved", version: baseVersion + 1 };
+  }
+
+  const current = await prisma.workspace.findFirst({
+    where: { id, ownerId, ...NOT_TRASHED },
+    select: { version: true, saveIds: true },
+  });
+  if (!current) return { status: "not_found" };
+  return { status: "conflict", version: current.version, saves: parseSaveLog(current.saveIds) };
+}
+
+/**
+ * Save a closing tab's last edits, sent as a patch (changes.ts) because a
+ * request that outlives the page is small: the changes on top of
+ * `baseVersion`, under the tab's save id. Applied exactly when the row is
+ * still at `baseVersion`, and through a strict merge (any overlap refuses)
+ * when it moved on; always through the same save gate as `saveWorkspace`.
+ * A save id the server already holds is not applied again, so the same edits
+ * sent twice (this request and a regular save racing it) land once.
+ */
+export async function saveWorkspaceChanges(
+  id: string,
+  baseVersion: number,
+  ops: Op[],
+  saveId: string,
+): Promise<SaveWorkspaceResult> {
+  const ownerId = await requireUserId();
+  const row = await prisma.workspace.findFirst({
+    where: { id, ownerId, ...NOT_TRASHED },
+    select: { id: true, name: true, data: true, version: true, saveIds: true },
+  });
+  if (!row) return { status: "not_found" };
+  const saves = parseSaveLog(row.saveIds);
+  const landed = landedVersion(saves, saveId);
+  if (landed !== null) return { status: "saved", version: landed };
+  const current = parseStoredWorkspace(row);
+  if (!current) return { status: "not_found" };
+  const merged = applyPatch(current, ops, { mode: "strict" });
+  if (merged.report.conflicts > 0) return { status: "conflict", version: row.version, saves };
+  // Already there (a regular save of the same edits won the race).
+  if (merged.doc === current || diff(current, merged.doc).length === 0) {
+    return { status: "saved", version: row.version };
+  }
+  const { workspace, data } = prepareWorkspaceForSave(merged.doc, id);
   const updated = await prisma.workspace.updateMany({
-    where: { id, ownerId, version: baseVersion, ...NOT_TRASHED },
+    where: { id, ownerId, version: row.version, ...NOT_TRASHED },
     data: {
       name: columnText(workspace.name),
       icon: workspace.icon == null ? null : columnText(workspace.icon),
       data,
+      saveIds: serializeSaveLog(appendSave(saves, saveId, row.version + 1)),
       version: { increment: 1 },
     },
   });
-  if (updated.count === 1) return { status: "saved", version: baseVersion + 1 };
-
-  const current = await prisma.workspace.findFirst({
-    where: { id, ownerId, ...NOT_TRASHED },
-    select: { version: true },
-  });
-  if (!current) return { status: "not_found" };
-  return { status: "conflict", version: current.version };
+  if (updated.count === 1) return { status: "saved", version: row.version + 1 };
+  return { status: "conflict", version: row.version, saves };
 }
 
 export type UpdateWorkspaceResult<T> =

@@ -10,6 +10,7 @@ import "server-only";
 
 import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/db";
+import { userLockKey, withKeyLock } from "@/lib/db-lock";
 import type { AgentStreamEvent } from "@/lib/ai/agent-shared";
 
 /** How long a finished task's status/result remains reconnectable. */
@@ -37,6 +38,35 @@ export async function createTask(input: {
       expiresAt: new Date(Date.now() + TASK_TTL_MS),
     },
     select: { id: true },
+  });
+}
+
+/**
+ * Create a running task unless the user already has `max` live ones, as one
+ * atomic step: the count and the insert run in a transaction holding the
+ * user's agent-task advisory lock (lib/db-lock), so parallel requests cannot
+ * all see room and all start. Returns null when the user is at the cap.
+ */
+export async function createTaskWithinLimit(
+  input: { workspaceId: string; baseVersion: number },
+  max: number,
+): Promise<{ id: string } | null> {
+  const userId = await requireUserId();
+  return withKeyLock(userLockKey("agent-tasks", userId), async (tx) => {
+    const live = await tx.agentTask.count({
+      where: { userId, status: { in: ["running", "finalizing"] }, expiresAt: { gt: new Date() } },
+    });
+    if (live >= max) return null;
+    return tx.agentTask.create({
+      data: {
+        userId,
+        workspaceId: input.workspaceId,
+        baseVersion: input.baseVersion,
+        status: "running",
+        expiresAt: new Date(Date.now() + TASK_TTL_MS),
+      },
+      select: { id: true },
+    });
   });
 }
 

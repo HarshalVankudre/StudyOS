@@ -5,7 +5,7 @@
  * route and by the dialog (to send a notes page as material).
  */
 import type { Block, Page } from "@/lib/workspace/types";
-import { MAX_PAGE_CHARS, TEXT_PAGE_CHARS } from "./limits";
+import { MAX_MATERIAL_PAGES, MAX_PAGE_CHARS, TEXT_PAGE_CHARS } from "./limits";
 
 // Control chars except tab, newline and form feed.
 const CONTROL_CHARS = /[\x00-\x08\x0B\x0E-\x1F\x7F]/g;
@@ -78,9 +78,38 @@ function lastSentenceEnd(text: string, end: number, min: number): number | null 
   return null;
 }
 
-/** Cap each page at MAX_PAGE_CHARS (a stray huge "page" is cut, not dropped). */
-export function capPages(pages: readonly string[]): string[] {
-  return pages.map((page) => (page.length > MAX_PAGE_CHARS ? page.slice(0, MAX_PAGE_CHARS) : page));
+/**
+ * Cap each page at MAX_PAGE_CHARS (a stray huge "page" is cut, not dropped)
+ * and the number of pages at `maxPages` (see packPages).
+ */
+export function capPages(pages: readonly string[], maxPages = MAX_MATERIAL_PAGES): string[] {
+  return packPages(pages, maxPages).map((page) =>
+    page.length > MAX_PAGE_CHARS ? page.slice(0, MAX_PAGE_CHARS) : page,
+  );
+}
+
+const PAGE_JOIN = "\n\n";
+
+/**
+ * At most `maxPages` pages: when a document has more (a .docx of thousands
+ * of one-line pages), consecutive pages are joined into groups of equal
+ * count, so no text is dropped and page order is kept. Linear.
+ */
+export function packPages(pages: readonly string[], maxPages = MAX_MATERIAL_PAGES): string[] {
+  const max = Math.max(1, Math.floor(maxPages));
+  if (pages.length <= max) return [...pages];
+  const group = Math.ceil(pages.length / max);
+  const out: string[] = [];
+  for (let i = 0; i < pages.length; i += group) {
+    out.push(
+      pages
+        .slice(i, i + group)
+        .map((page) => page.trim())
+        .filter(Boolean)
+        .join(PAGE_JOIN),
+    );
+  }
+  return out;
 }
 
 function blockText(block: Block): string | null {

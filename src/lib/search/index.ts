@@ -17,7 +17,8 @@
  */
 import { titleProperty } from "@/lib/workspace/helpers";
 import type { Block, Database, DatabaseRow, Workspace } from "@/lib/workspace/types";
-import { fold, plainText, queryWords, snippetAround } from "./text";
+import { databaseById, findRow, MAX_RELATION_IDS, relationIds } from "@/lib/workspace/row-lookup";
+import { clipText, fold, plainText, queryWords, snippetAround } from "./text";
 
 export type SearchKind = "workspace" | "page" | "row" | "block" | "card" | "question";
 
@@ -146,21 +147,21 @@ function cellText(db: Database, row: DatabaseRow, skipId: string | undefined, ws
       case "select":
       case "status":
       case "multi_select": {
-        const ids = Array.isArray(value) ? value : [value];
+        const ids = Array.isArray(value) ? value.slice(0, MAX_RELATION_IDS) : [value];
         for (const id of ids) {
           const label = prop.options?.find((o) => o.id === id)?.label;
-          if (label) parts.push(label);
+          if (label) parts.push(clipText(label, 300));
         }
         break;
       }
       case "relation": {
-        const target = ws.databases.find((d) => d.id === prop.relationDatabaseId);
+        const target = databaseById(ws, prop.relationDatabaseId);
         if (!target || !Array.isArray(value)) break;
         const tp = titleProperty(target);
-        for (const id of value) {
-          const r = target.rows.find((x) => x.id === id);
+        for (const id of relationIds(value)) {
+          const r = findRow(target, id);
           const label = r && tp ? r.cells[tp.id] : undefined;
-          if (typeof label === "string" && label) parts.push(label);
+          if (typeof label === "string" && label) parts.push(clipText(label, 300));
         }
         break;
       }
@@ -168,10 +169,10 @@ function cellText(db: Database, row: DatabaseRow, skipId: string | undefined, ws
         if (value === true) parts.push(prop.name);
         break;
       default:
-        parts.push(String(value));
+        parts.push(clipText(String(value)));
     }
   }
-  return parts.join(" · ");
+  return clipText(parts.join(" · "));
 }
 
 function label(icon: string | undefined, name: string): string {
@@ -189,7 +190,9 @@ export function buildSearchEntries(ws: Workspace): SearchEntry[] {
   };
   const push = (e: Omit<SearchEntry, "fTitle" | "fBody" | "order" | keyof typeof base>) => {
     if (!e.title && !e.body) return;
-    out.push({ ...base, ...e, order: order++, fTitle: fold(e.title), fBody: fold(e.body) });
+    const title = clipText(e.title);
+    const body = clipText(e.body);
+    out.push({ ...base, ...e, title, body, order: order++, fTitle: fold(title), fBody: fold(body) });
   };
 
   push({ kind: "workspace", title: ws.name, body: "", context: "", icon: ws.icon || undefined });
@@ -211,7 +214,7 @@ export function buildSearchEntries(ws: Workspace): SearchEntry[] {
       } else if (block.type === "media") {
         push({ kind: "block", ...at, title: plainText(block.caption ?? block.alt ?? ""), body: "" });
       } else if (block.type === "react_artifact" || block.type === "grades") {
-        push({ kind: "block", ...at, title: block.title ?? "", body: "" });
+        push({ kind: "block", ...at, title: clipText(block.title ?? ""), body: "" });
       } else if (block.type === "flashcards") {
         const deck = block.title ? `${pageLabel} · ${block.title}` : pageLabel;
         for (const card of block.cards) {

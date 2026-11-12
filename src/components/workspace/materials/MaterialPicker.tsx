@@ -137,7 +137,7 @@ export function MaterialPicker({
                       <span className="block text-xs text-ink-soft">
                         {M.kind[material.kind]} ·{" "}
                         {plural(dict.counts.pages, material.pageCount)}
-                        {material.truncated ? ` · ${t(M.truncatedNote, { count: material.pageCount })}` : ""}
+                        {material.truncated ? ` · ${plural(M.truncatedNote, material.pageCount)}` : ""}
                       </span>
                     </span>
                   </label>

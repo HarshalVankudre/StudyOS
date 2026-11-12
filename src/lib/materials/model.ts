@@ -26,6 +26,9 @@ export function modelComplete(model: string): KitComplete {
       {
         signal: AbortSignal.any([AbortSignal.timeout(Math.max(1, timeoutMs)), signal]),
         // Careful reading, not deep reasoning: keeps a section fast and cheap.
+        // `effort` is the setting Claude models read; `reasoning` is the
+        // OpenRouter equivalent (ignored on Claude).
+        effort: "low",
         reasoning: { effort: "low" },
         temperature: 0.3,
       },

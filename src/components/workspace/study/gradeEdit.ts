@@ -26,12 +26,20 @@ export function findCard(workspace: Workspace, ref: CardRef): Flashcard | undefi
  *    document it runs on, so a grade given on another device (or an edit by
  *    the AI agent) in the meantime is built upon, not overwritten;
  *  - it is idempotent: `at` (the moment of the answer) becomes the card's
- *    `lastReviewedAt`, so running it again on a document that already holds
- *    this answer (a save whose reply was lost) changes nothing.
+ *    `lastReviewedAt`, and a grade at or before the card's last review is
+ *    not applied again. So running it again on a document that already holds
+ *    this answer (a save whose reply was lost) changes nothing, even when the
+ *    card was graded once more after it ("again", then "good" ten minutes
+ *    later): the check is monotonic, not "is it the latest one".
+ *
+ * A grade older than the card's last review (the same card graded on two
+ * devices, the older one arriving later) is not applied either: reviews are
+ * only ever applied in time order, and the card keeps the most recent one.
  */
 export function applyGrade(draft: Workspace, ref: CardRef, grade: Grade, at: Date): void {
   const card = findCard(draft, ref);
   if (!card) return;
-  if (card.lastReviewedAt === at.toISOString()) return;
+  const last = card.lastReviewedAt ? Date.parse(card.lastReviewedAt) : NaN;
+  if (Number.isFinite(last) && last >= at.getTime()) return;
   assignSchedule(card, reviewCard(card, grade, at));
 }

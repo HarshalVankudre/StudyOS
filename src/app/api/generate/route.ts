@@ -1,3 +1,4 @@
+import { rejectCrossSite } from "@/lib/http/same-origin";
 import { auth } from "@clerk/nextjs/server";
 import { z } from "zod";
 import {
@@ -31,13 +32,13 @@ import {
   settleCreditHold,
   usageToCredits,
 } from "@/lib/credits";
-import { MIN_GENERATION_BALANCE } from "@/lib/credits-info";
+import { buildCreditCost } from "@/lib/credits-info";
 import {
   checkUsageLimit,
-  isUsageLimitReached,
+  claimOutcomeSlot,
   MAX_WORKSPACES_PER_USER,
   recordFunnelEvent,
-  recordUsageEvent,
+  releaseOutcomeSlot,
   workspaceLimitReached,
 } from "@/lib/usage-limits";
 import { getLocale } from "@/lib/i18n/server";
@@ -102,6 +103,8 @@ async function metered<T>(
 }
 
 export async function POST(request: Request) {
+  const crossSite = rejectCrossSite(request);
+  if (crossSite) return crossSite;
   const requestStartedAt = Date.now();
   const locale = await getLocale();
   const T = getDictionary(locale);
@@ -176,21 +179,28 @@ export async function POST(request: Request) {
       let started = false;
       // This build's credits, reserved before any model work (see below).
       let hold: CreditHold | null = null;
+      // The pre-claimed failed-build event; kept only if the build fails.
+      let failureSlot: string | null = null;
+      let failed = false;
       try {
         const { prompt, answers } = parsed.data;
 
-        // A build starts only with about one build's worth of credits: a
-        // run is charged at most the remaining balance, so a near-empty
-        // account would otherwise get a full build almost free.
+        // What a build costs on the model that will run it (typical and at
+        // most, from its token rates). A build starts only with about one
+        // typical build's worth of credits: a run is charged at most the
+        // remaining balance, so a near-empty account would otherwise get a
+        // full build almost free.
+        const model = modelForPlan(await getUserPlan());
+        const cost = buildCreditCost(model);
         const balance = await getCreditBalance(userId);
-        if (balance < MIN_GENERATION_BALANCE) {
+        if (balance < cost.typical) {
           send({
             type: "error",
             code: "out_of_credits",
             message:
               balance <= 0
                 ? T.credits.outGenerate
-                : fmt(T.credits.belowGenerateMinimum, { min: MIN_GENERATION_BALANCE }),
+                : fmt(T.credits.belowGenerateMinimum, { min: cost.typical }),
           });
           finish();
           return;
@@ -207,8 +217,13 @@ export async function POST(request: Request) {
         }
 
         // Failed builds are never charged, so they are bounded separately:
-        // after a few in a day, new builds wait (see USAGE_LIMITS).
-        if (await isUsageLimitReached(userId, "generate_failed")) {
+        // after a few in a day, new builds wait (see USAGE_LIMITS). The
+        // failure is claimed up front, atomically: a build in flight counts
+        // as a possible failure, so parallel builds cannot all start past the
+        // quota. The claim is withdrawn below unless the build fails.
+        const claim = await claimOutcomeSlot(userId, "generate_failed");
+        failureSlot = claim.slot;
+        if (!claim.allowed) {
           send({
             type: "error",
             code: "too_many_failures",
@@ -226,19 +241,21 @@ export async function POST(request: Request) {
           return;
         }
 
-        // Reserve the build's credits before any model work, so parallel
-        // builds cannot all start on the same balance. Settled to the real
-        // cost once the work is done; given back when it is free (a failure).
+        // Reserve up to the most a build can cost (at least the typical
+        // cost) before any model work, so parallel builds cannot all start on
+        // the same balance and a large build is covered whenever the balance
+        // is. Settled to the real cost once the work is done; given back when
+        // it is free (a failure).
         hold = await reserveCredits(userId, {
-          estimate: MIN_GENERATION_BALANCE,
-          min: MIN_GENERATION_BALANCE,
+          estimate: cost.max,
+          min: cost.typical,
           reason: "generate",
         });
         if (!hold) {
           send({
             type: "error",
             code: "out_of_credits",
-            message: fmt(T.credits.belowGenerateMinimum, { min: MIN_GENERATION_BALANCE }),
+            message: fmt(T.credits.belowGenerateMinimum, { min: cost.typical }),
           });
           finish();
           return;
@@ -247,7 +264,6 @@ export async function POST(request: Request) {
         // Only now, past every gate, do any work on the request's text.
         const sourceText = normalizeSourceText(parsed.data.sourceText);
         const preferences = formatPreferences(answers);
-        const model = modelForPlan(await getUserPlan());
         const clock = studentClock(
           resolveTimeZone([
             parsed.data.timeZone,
@@ -377,7 +393,7 @@ export async function POST(request: Request) {
         reportError(error, { source: "api", route: "/api/generate", method: "POST", userId });
         // Nothing usable was delivered, so nothing is charged; the failure
         // counts against the small failed-generation quota instead.
-        if (started) await recordUsageEvent(userId, "generate_failed");
+        if (started) failed = true;
         send({
           type: "error",
           code: "generation_failed",
@@ -391,6 +407,7 @@ export async function POST(request: Request) {
         // Any outcome not settled above (a failure, an unexpected error) is
         // free: the held credits go back. A no-op after a settle.
         if (hold) await releaseCreditHold(hold).catch(() => false);
+        if (!failed) await releaseOutcomeSlot(failureSlot);
         unregister();
         request.signal.removeEventListener("abort", cancel);
       }

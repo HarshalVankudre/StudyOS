@@ -16,6 +16,7 @@ import { dueReviews, needsCatchUp, planCatchUp, postponeCard } from "@/lib/study
 import { deckFileName, toAnkiText, toQuizletText } from "@/lib/study/transfer";
 import { StudySession, type ReviewItem, type StudyMode } from "./StudySession";
 import { useWorkspace } from "./WorkspaceContext";
+import { DraftInput } from "./editor/DraftInput";
 import { CardEditor } from "./study/CardEditor";
 import { CatchUpBanner } from "./study/CatchUpBanner";
 import { applyGrade } from "./study/gradeEdit";
@@ -125,12 +126,12 @@ export function FlashcardsBlock({
       {/* Header */}
       <div className="flex flex-wrap items-center gap-3 border-b border-line px-3 py-3 sm:px-4">
         <Layers className="size-5 shrink-0 text-lime-deep" aria-hidden />
-        <input
+        <DraftInput
           dir="auto"
           value={block.title ?? ""}
-          onChange={(e) =>
+          onCommit={(title) =>
             mutateBlock((b) => {
-              b.title = e.target.value;
+              b.title = title;
             })
           }
           aria-label={S.deckTitlePlaceholder}
@@ -151,7 +152,7 @@ export function FlashcardsBlock({
       )}
 
       {/* Actions */}
-      <div className="flex flex-col gap-2 px-3 py-3 sm:px-4">
+      <div data-print="hide" className="flex flex-col gap-2 px-3 py-3 sm:px-4">
         <div className="flex flex-wrap items-center gap-2">
           {stats.due > 0 ? (
             <button

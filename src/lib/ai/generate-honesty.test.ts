@@ -203,9 +203,12 @@ describe("syllabus grading weights and exam dates", () => {
       due: row.cells["a-due"],
     }));
     expect(cells).toEqual([
-      { name: "Problem sets", weight: 30, due: undefined },
       { name: "Midterm", weight: 25, due: "2027-01-21" },
       { name: "Final exam", weight: 45, due: undefined },
+    ]);
+    // "Problem sets 30%" is shared by many items: a grading category, not a row.
+    expect(assignments.grading?.categories).toEqual([
+      expect.objectContaining({ name: "Problem sets", weight: 30 }),
     ]);
   });
 

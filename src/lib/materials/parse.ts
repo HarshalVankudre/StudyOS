@@ -7,6 +7,7 @@
 import { z } from "zod";
 import { extractJson } from "@/lib/ai/generate";
 import type { QuizQuestionKind } from "@/lib/workspace/types";
+import { stripImages, stripLinks } from "./markdown-strip";
 import { MAX_QUOTE_CHARS } from "./quote";
 
 const MAX_TEXT = 600;
@@ -16,16 +17,22 @@ const MAX_POINT = 400;
 /**
  * Generated text is rendered as Markdown. An image there would make the
  * reader's browser fetch a URL the model chose, a channel a hostile document
- * could use to leak data, so images (Markdown or HTML) are removed. Bounded
- * quantifiers keep this linear; the reply itself is capped by max_tokens.
+ * could use to leak data, so images (Markdown or HTML) are removed from
+ * every field, and links from every field a person reads (quotes keep their
+ * wording: they must match the material). Linear scanners, no backtracking
+ * patterns (./markdown-strip); the reply itself is capped by max_tokens.
  */
-export function stripImages(s: string): string {
-  return s
-    .replace(/!\[[^\]\n]{0,300}\]\([^)\n]{0,2000}\)/g, "")
-    .replace(/<img\b[^>\n]{0,2000}>?/gi, "");
-}
+export { stripImages, stripLinks };
 
 const text = (max: number) =>
+  z
+    .string()
+    .max(20_000)
+    .transform((s) => stripLinks(s).replace(/\s+/g, " ").trim())
+    .pipe(z.string().min(1).max(max));
+
+/** A quote: images removed, wording otherwise kept for verification. */
+const quoteText = (max: number) =>
   z
     .string()
     .max(20_000)
@@ -52,13 +59,40 @@ const noteSchema = z.object({
   heading: text(MAX_HEADING),
   page: pageNumber,
   points: z.array(z.unknown()).max(12),
+  terms: z.array(z.unknown()).max(8).optional().catch(undefined),
+  connection: z.unknown().optional(),
 });
+
+/** Model text for a note bullet: links and images out, whitespace collapsed. */
+function noteText(value: unknown): string {
+  return typeof value === "string" ? stripLinks(value.slice(0, 4_000)).replace(/\s+/g, " ").trim() : "";
+}
+
+function clipPoint(point: string): string {
+  return point.length > MAX_POINT ? `${point.slice(0, MAX_POINT - 1)}…` : point;
+}
+
+/**
+ * A note's key terms as bullets, "**term**: meaning" (the term bolded, its own
+ * Markdown emphasis removed so the bold cannot break).
+ */
+function termPoints(terms: unknown[] | undefined): string[] {
+  const out: string[] = [];
+  for (const item of terms ?? []) {
+    if (!item || typeof item !== "object") continue;
+    const record = item as Record<string, unknown>;
+    const term = noteText(record.term).replace(/[*_`]/g, "").slice(0, 80).trim();
+    const meaning = noteText(record.meaning ?? record.definition);
+    if (term && meaning) out.push(clipPoint(`**${term}**: ${meaning}`));
+  }
+  return out;
+}
 
 const cardSchema = z.object({
   front: text(MAX_TEXT),
   back: text(MAX_TEXT),
   page: pageNumber,
-  quote: text(MAX_QUOTE_CHARS * 1.5),
+  quote: quoteText(MAX_QUOTE_CHARS * 1.5),
 });
 
 const common = {
@@ -66,7 +100,7 @@ const common = {
   explanation: text(MAX_TEXT).optional().catch(undefined),
   topic: text(80).optional().catch(undefined),
   page: pageNumber,
-  quote: text(MAX_QUOTE_CHARS * 1.5),
+  quote: quoteText(MAX_QUOTE_CHARS * 1.5),
 };
 
 const mcqSchema = z.object({
@@ -202,10 +236,13 @@ export function parseSectionReply(
       malformed += 1;
       continue;
     }
-    const points = parsed.data.points
-      .map((p) => (typeof p === "string" ? stripImages(p.slice(0, 4_000)).replace(/\s+/g, " ").trim() : ""))
-      .filter((p) => p.length > 0)
-      .map((p) => (p.length > MAX_POINT ? `${p.slice(0, MAX_POINT - 1)}…` : p));
+    const connection = noteText(parsed.data.connection);
+    const points = [
+      ...parsed.data.points.map(noteText).filter((p) => p.length > 0).map(clipPoint),
+      ...termPoints(parsed.data.terms),
+      // How this topic links to another: the "how ideas connect" of study notes.
+      ...(connection ? [clipPoint(`↔ ${connection}`)] : []),
+    ];
     if (points.length === 0) {
       malformed += 1;
       continue;

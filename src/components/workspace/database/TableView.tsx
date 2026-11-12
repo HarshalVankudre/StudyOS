@@ -19,15 +19,15 @@ const ROW_BUTTON =
  * its own box instead.
  */
 const MIN_WIDTH: Record<DatabaseProperty["type"], string> = {
-  text: "min-w-40",
-  url: "min-w-40",
+  text: "min-w-36",
+  url: "min-w-36",
   number: "min-w-20",
   checkbox: "w-12",
-  date: "min-w-36",
-  select: "min-w-28",
-  status: "min-w-32",
-  multi_select: "min-w-40",
-  relation: "min-w-40",
+  date: "min-w-32",
+  select: "min-w-24",
+  status: "min-w-28",
+  multi_select: "min-w-36",
+  relation: "min-w-36",
 };
 
 /**
@@ -66,7 +66,7 @@ export function TableView({ db, view, rows, actions, onOpen, onAdd, empty }: Vie
       v.sorts = next.length ? next : undefined;
     });
 
-  const widthOf = (p: DatabaseProperty) => (p.id === stickyId ? "min-w-52" : MIN_WIDTH[p.type]);
+  const widthOf = (p: DatabaseProperty) => (p.id === stickyId ? "min-w-48" : MIN_WIDTH[p.type]);
   // The title column's trailing edge, so it reads as pinned over the scroll.
   const stickyEdge = "shadow-[inset_-1px_0_0_var(--line)] rtl:shadow-[inset_1px_0_0_var(--line)]";
 

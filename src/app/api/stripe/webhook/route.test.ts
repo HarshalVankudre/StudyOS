@@ -270,7 +270,7 @@ describe("duplicate subscriptions", () => {
       expect.objectContaining({ payment_intent: second.paymentIntent, reason: "duplicate" }),
     ]);
     expect(proGrants()).toHaveLength(1);
-    expect(h.db.state.billingEvents).toEqual([
+    expect(h.db.state.billingEvents.filter((e) => e.kind !== "pro_month")).toEqual([
       expect.objectContaining({ kind: "duplicate_subscription", stripeObjectId: second.subscription.id }),
     ]);
   });
@@ -298,11 +298,11 @@ describe("credit packs", () => {
 
 describe("refunds and disputes", () => {
   it("claws back a fully refunded pack, never below zero", async () => {
-    const { session, chargeId, paymentIntent, amount } = await buyPack();
+    const { session, chargeId, paymentIntent } = await buyPack();
     await send("checkout.session.completed", session);
     // The user spends most of it first.
     h.db.state.accounts.get(USER)!.balance = 250;
-    const charge = { id: chargeId, payment_intent: paymentIntent, amount, amount_refunded: amount, customer: session.customer };
+    const charge = h.stripe.refundCharge(chargeId);
     await send("charge.refunded", charge);
     await send("charge.refunded", charge); // retry
     expect(h.db.balance(USER)).toBe(0);
@@ -312,18 +312,17 @@ describe("refunds and disputes", () => {
   });
 
   it("claws back partial refunds proportionally and cumulatively", async () => {
-    const { session, chargeId, paymentIntent, amount } = await buyPack();
+    const { session, chargeId, amount } = await buyPack();
     await send("checkout.session.completed", session);
-    const base = { id: chargeId, payment_intent: paymentIntent, amount, customer: session.customer };
-    await send("charge.refunded", { ...base, amount_refunded: amount / 2 });
+    await send("charge.refunded", h.stripe.refundCharge(chargeId, amount / 2));
     expect(h.db.balance(USER)).toBe(FREE_SIGNUP_CREDITS + 500);
-    await send("charge.refunded", { ...base, amount_refunded: amount });
+    await send("charge.refunded", h.stripe.refundCharge(chargeId, amount / 2));
     expect(h.db.balance(USER)).toBe(FREE_SIGNUP_CREDITS);
   });
 
   it("a pack refunded in full before the grant landed adds nothing", async () => {
-    const { session, chargeId, paymentIntent, amount } = await buyPack();
-    await send("charge.refunded", { id: chargeId, payment_intent: paymentIntent, amount, amount_refunded: amount, customer: session.customer });
+    const { session, chargeId } = await buyPack();
+    await send("charge.refunded", h.stripe.refundCharge(chargeId));
     await send("checkout.session.completed", session); // delayed delivery
     await send("checkout.session.completed", session); // retry
     expect(h.db.balance(USER)).toBe(FREE_SIGNUP_CREDITS);
@@ -343,14 +342,14 @@ describe("refunds and disputes", () => {
   });
 
   it("only records subscription refunds (no clawback of monthly credits)", async () => {
-    const { session, invoice, paymentIntent } = await subscribe();
+    const { session, invoice, chargeId } = await subscribe();
     await send("checkout.session.completed", session);
     await send("invoice.paid", invoice);
     const before = h.db.balance(USER);
-    await send("charge.refunded", { id: "ch_s", payment_intent: paymentIntent, amount: 800, amount_refunded: 800, customer: session.customer });
+    await send("charge.refunded", h.stripe.refundCharge(chargeId!));
     expect(h.db.balance(USER)).toBe(before);
-    expect(h.db.state.billingEvents).toEqual([
-      expect.objectContaining({ kind: "refund", userId: USER, detail: "subscription_or_other" }),
+    expect(h.db.state.billingEvents.filter((e) => e.kind === "refund")).toEqual([
+      expect.objectContaining({ kind: "refund", userId: USER, detail: "subscription_or_other; status succeeded" }),
     ]);
   });
 });

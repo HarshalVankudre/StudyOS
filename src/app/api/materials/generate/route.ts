@@ -1,3 +1,4 @@
+import { rejectCrossSite } from "@/lib/http/same-origin";
 import { auth } from "@clerk/nextjs/server";
 import { z } from "zod";
 import { modelForPlan } from "@/lib/ai/plans";
@@ -28,9 +29,9 @@ import type { KitEvent } from "@/lib/materials/types";
 import { reportError } from "@/lib/ops/report-error";
 import {
   checkUsageLimit,
-  isUsageLimitReached,
+  claimOutcomeSlot,
   recordFunnelEvent,
-  recordUsageEvent,
+  releaseOutcomeSlot,
 } from "@/lib/usage-limits";
 
 export const runtime = "nodejs";
@@ -78,6 +79,8 @@ const NO_USAGE: TokenUsage = { promptTokens: 0, completionTokens: 0 };
  * bounded by a small daily quota (study_kit_failed) instead.
  */
 export async function POST(request: Request) {
+  const crossSite = rejectCrossSite(request);
+  if (crossSite) return crossSite;
   const requestStartedAt = Date.now();
   const locale = await getLocale();
   const T = getDictionary(locale).materials;
@@ -118,6 +121,9 @@ export async function POST(request: Request) {
       // Set once every gate passed and model work began: only such a run
       // counts against the failed-run quota.
       let started = false;
+      // The failed-run event claimed before the run; kept only if it fails.
+      let failureSlot: string | null = null;
+      let failed = false;
 
       const send = (event: KitEvent) => {
         if (closed || signal.aborted) return;
@@ -167,7 +173,12 @@ export async function POST(request: Request) {
           fail("out_of_credits", fmt(T.errors.outOfCredits, { estimate: minBalance }));
         if ((await getCreditBalance(userId)) < minBalance) return outOfCredits();
         // Failed runs are never charged, so they are bounded separately.
-        if (await isUsageLimitReached(userId, "study_kit_failed")) {
+        // Claimed up front and atomically (a run in flight counts as a
+        // possible failure), so parallel runs cannot all start past the
+        // quota; withdrawn in `finally` unless the run fails.
+        const claim = await claimOutcomeSlot(userId, "study_kit_failed");
+        failureSlot = claim.slot;
+        if (!claim.allowed) {
           return fail("too_many_failures", T.errors.tooManyFailures);
         }
         if (!(await checkUsageLimit(userId, "study_kit")).allowed) {
@@ -249,12 +260,13 @@ export async function POST(request: Request) {
         }
         // Nothing usable was delivered, so nothing is charged (the hold goes
         // back below); the failure counts against the small daily quota.
-        if (started) await recordUsageEvent(userId, "study_kit_failed");
+        if (started) failed = true;
         fail("generation_failed", T.errors.failedNoCharge);
       } finally {
         // Any outcome not settled above is free: the held credits go back.
         // A no-op after a settle.
         if (hold) await releaseCreditHold(hold).catch(() => false);
+        if (!failed) await releaseOutcomeSlot(failureSlot);
         release();
         unregister();
         request.signal.removeEventListener("abort", cancel);

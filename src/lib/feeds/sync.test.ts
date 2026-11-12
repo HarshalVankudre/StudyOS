@@ -6,7 +6,7 @@ import { safeParseWorkspace } from "@/lib/workspace/schema";
 import type { Database, DatabaseRow, Workspace } from "@/lib/workspace/types";
 import { courseCode, detectMapping, matchCourse, type FeedMapping } from "./mapping";
 import { readFeed, type FeedEvent, type FeedSnapshot } from "./normalize";
-import { applyFeedEvents, classifyEvents, isDefaultSelected, type ApplyOptions } from "./sync";
+import { applyFeedEvents, classifyEvents, isDefaultSelected, pendingUpdates, rowsMissingFromFile, type ApplyOptions } from "./sync";
 
 const NOW = Date.parse("2026-11-12T12:00:00Z");
 const TODAY = "2026-11-12";
@@ -299,6 +299,64 @@ describe("re-sync", () => {
     expect(rowByKey(ws, "event-assignment-99881")!.source!.feed).toBe(FEED);
   });
 
+  it("re-importing a file in which only a date changed offers that change and applies it when ticked", () => {
+    const ws = workspace(assignments());
+    applyFeedEvents(ws, canvas.events, opts(mapping, { feedId: "file", selected: defaults(canvas.events) }));
+    const moved = edit(canvas.events, "event-assignment-99881", { when: { at: Date.parse("2026-11-19T04:59:00Z") } });
+
+    const pending = pendingUpdates(ws, "db-assign", moved, mapping, TZ);
+    expect([...pending.keys()]).toEqual(["event-assignment-99881"]);
+    expect(pending.get("event-assignment-99881")).toEqual({ fields: ["due"], due: { from: "2026-11-13", to: "2026-11-18" } });
+    // Nothing new: the preview's status alone would say "already in table".
+    expect(classifyEvents(ws, "db-assign", moved, mapping, TZ).get("event-assignment-99881")).toBe("inTable");
+
+    // Left unticked, the row keeps its date.
+    const skipped = applyFeedEvents(ws, moved, opts(mapping, { feedId: "file", selected: new Set() }));
+    expect(skipped.changes).toEqual([]);
+    expect(rowByKey(ws, "event-assignment-99881")!.cells["a-due"]).toBe("2026-11-13");
+
+    // Ticked, it follows the calendar, with no new event in the file.
+    const applied = applyFeedEvents(ws, moved, opts(mapping, { feedId: "file", selected: new Set(pending.keys()) }));
+    expect(applied.changes).toEqual([
+      { kind: "updated", key: "event-assignment-99881", title: "Essay 2: Argument Analysis", fields: ["due"] },
+    ]);
+    expect(rowByKey(ws, "event-assignment-99881")!.cells["a-due"]).toBe("2026-11-18");
+    expect(pendingUpdates(ws, "db-assign", moved, mapping, TZ).size).toBe(0);
+  });
+
+  it("does not offer a change to a field the student edited", () => {
+    const ws = imported();
+    rowByKey(ws, "event-assignment-99881")!.cells["a-due"] = "2026-11-15";
+    const moved = edit(canvas.events, "event-assignment-99881", { when: { at: Date.parse("2026-11-19T04:59:00Z") } });
+    expect(pendingUpdates(ws, "db-assign", moved, mapping, TZ).size).toBe(0);
+  });
+
+  it("an uploaded file never flags rows missing from it (a file may be partial), and counts them for the preview", () => {
+    const ws = workspace(assignments());
+    applyFeedEvents(ws, canvas.events, opts(mapping, { feedId: "file", selected: defaults(canvas.events) }));
+    const partial = canvas.events.filter((e) => e.key !== "event-assignment-99950");
+    const result = applyFeedEvents(ws, partial, opts(mapping, { feedId: "file", selected: new Set() }));
+    expect(result.changes).toEqual([]);
+    expect(rowByKey(ws, "event-assignment-99950")!.source!.missingSince).toBeUndefined();
+    expect(rowsMissingFromFile(ws, "db-assign", partial, mapping, TODAY)).toBe(1);
+    expect(rowsMissingFromFile(ws, "db-assign", canvas.events, mapping, TODAY)).toBe(0);
+    // A different calendar file says nothing about these rows.
+    const other: FeedEvent = { key: "x@holidays", title: "Thanksgiving Day", when: { date: "2026-11-26" }, role: "event" };
+    expect(rowsMissingFromFile(ws, "db-assign", [other], mapping, TODAY)).toBe(0);
+  });
+
+  it("pre-selects coursework only: a multi-day reading week is not a deadline", () => {
+    const week: FeedEvent = { key: "rw", title: "Reading week - no lectures", when: { date: "2026-11-30" }, course: "MATH 221", role: "event", days: 5 };
+    const dentist: FeedEvent = { key: "dn", title: "Dentist", when: { at: Date.parse("2026-11-20T15:00:00Z") }, role: "event" };
+    expect(isDefaultSelected(week, TODAY, TZ)).toBe(false);
+    expect(isDefaultSelected(dentist, TODAY, TZ)).toBe(false);
+    // A connected feed does not add them on its own either.
+    const ws = imported();
+    const result = sync(ws, [...canvas.events, week, dentist]);
+    expect(result.changes).toEqual([]);
+    expect(result.considered).toEqual(["rw", "dn"]);
+  });
+
   it("repeating events are only added when the student follows them", () => {
     const google = read("google.ics");
     const ws = workspace(assignments());
@@ -385,6 +443,43 @@ describe("course as a relation to a Courses database", () => {
     expect(courses.rows.map((r) => r.cells["c-name"])).toEqual(["Intro to Programming", "ENG 102", "MATH 201"]);
     expect(safeParseWorkspace(ws).success).toBe(true);
   });
+
+  it("matches courses against a large Courses table without rebuilding its labels per event", () => {
+    const courses: Database = {
+      id: "db-courses",
+      name: "Courses",
+      properties: [{ id: "c-name", name: "Course", type: "text" }],
+      rows: Array.from({ length: 20_000 }, (_, i) => ({ id: `c${i}`, cells: { "c-name": `Course ${i}` } })),
+      views: [],
+    };
+    courses.rows.push({ id: "cs", cells: { "c-name": "CS 101" } });
+    const db: Database = {
+      id: "db-assign",
+      name: "Assignments",
+      properties: [
+        { id: "n", name: "Name", type: "text" },
+        { id: "d", name: "Due date", type: "date" },
+        { id: "c", name: "Class", type: "relation", relationDatabaseId: "db-courses" },
+      ],
+      rows: [],
+      views: [],
+    };
+    const ws = workspace(db, [courses]);
+    const events: FeedEvent[] = Array.from({ length: 400 }, (_, i) => ({
+      key: `e${i}`,
+      title: `Essay ${i}`,
+      when: { date: "2026-12-01" },
+      course: "CS 101",
+      role: "deadline",
+    }));
+    const t0 = performance.now();
+    applyFeedEvents(ws, events, opts(detectMapping(db), { selected: new Set(events.map((e) => e.key)) }));
+    const ms = performance.now() - t0;
+    expect(db.rows).toHaveLength(400);
+    expect(db.rows.every((r) => JSON.stringify(r.cells.c) === '["cs"]')).toBe(true);
+    // Was 400 label rebuilds over 20,000 rows; now one. Generous bound.
+    expect(ms).toBeLessThan(3_000);
+  }, 60_000);
 });
 
 describe("model compatibility", () => {

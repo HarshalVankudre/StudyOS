@@ -183,6 +183,87 @@ describe("Import deadlines", () => {
     expect(latest.databases[0].rows.every((r) => r.source?.feed === "file")).toBe(true);
   });
 
+  describe("re-importing a file", () => {
+    const vevent = (uid: string, summary: string, dates: string) =>
+      `BEGIN:VEVENT\r\nUID:${uid}\r\nSUMMARY:${summary}\r\n${dates}DTSTAMP:20261112T081500Z\r\nEND:VEVENT\r\n`;
+    const cal = (...events: string[]) =>
+      `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:icalendar-ruby\r\nX-WR-CALNAME:QA Calendar\r\n${events.join("")}END:VCALENDAR\r\n`;
+    const hw = (day: string) => vevent("event-assignment-4011", "Homework 11 [ENG 102-01 FA26]", `DTSTART:${day}T225900Z\r\n`);
+    const week = vevent(
+      "event-calendar-event-7002",
+      "Reading week - no lectures [ENG 102-01 FA26]",
+      "DTSTART;VALUE=DATE:20261130\r\nDTEND;VALUE=DATE:20261205\r\n",
+    );
+    const ps = vevent("event-assignment-3005", "Problem Set 5 [ENG 102-01 FA26]", "DTSTART:20261117T225900Z\r\n");
+
+    async function upload(user: ReturnType<typeof userEvent.setup>, container: HTMLElement, text: string) {
+      const dialog = await openDialog(user);
+      const input = container.ownerDocument.querySelector<HTMLInputElement>('input[type="file"]')!;
+      await user.upload(input, new File([text], "calendar.ics", { type: "text/calendar" }));
+      await within(dialog).findByText(/Found \d+ events? in QA Calendar/);
+      return dialog;
+    }
+
+    it("offers a changed date even when nothing is new, and applies it", async () => {
+      const user = userEvent.setup();
+      const { container } = renderWith(assignments());
+      // First import: Homework 11 on Nov 27, Problem Set 5, and the reading week is left out.
+      let dialog = await upload(user, container, cal(ps, hw("20261127"), week));
+      expect(within(dialog).getByRole("checkbox", { name: /Homework 11/ })).toBeChecked();
+      expect(within(dialog).getByRole("checkbox", { name: /Reading week/ })).not.toBeChecked();
+      await user.click(within(dialog).getByRole("button", { name: "Import 2" }));
+      await within(dialog).findByText(F.doneTitle);
+      expect(latest.databases[0].rows.find((r) => r.cells.name === "Homework 11")!.cells.due).toBe("2026-11-27");
+      await user.click(within(dialog).getAllByRole("button", { name: F.close })[0]);
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+      // Second file: only the date moved.
+      dialog = await upload(user, container, cal(ps, hw("20261203"), week));
+      const changed = within(dialog).getByRole("region", { name: /Changed in your calendar/ });
+      const box = within(changed).getByRole("checkbox", { name: /Homework 11/ });
+      expect(box).toBeChecked();
+      expect(box).toBeEnabled();
+      expect(within(changed).getByText("Date changed: Fri, Nov 27 → Thu, Dec 3")).toBeInTheDocument();
+      expect(within(dialog).getByRole("checkbox", { name: /Problem Set 5/ })).toBeDisabled();
+      await user.click(within(dialog).getByRole("button", { name: "Update 1" }));
+      await within(dialog).findByText("Updated 1 deadline in Assignments.");
+      expect(latest.databases[0].rows.find((r) => r.cells.name === "Homework 11")!.cells.due).toBe("2026-12-03");
+      expect(latest.databases[0].rows).toHaveLength(2);
+    });
+
+    it("keeps a changed date when the student unticks it, and says a file never flags missing rows", async () => {
+      const user = userEvent.setup();
+      const { container } = renderWith(assignments());
+      let dialog = await upload(user, container, cal(ps, hw("20261127")));
+      await user.click(within(dialog).getByRole("button", { name: "Import 2" }));
+      await within(dialog).findByText(F.doneTitle);
+      await user.click(within(dialog).getAllByRole("button", { name: F.close })[0]);
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+      dialog = await upload(user, container, cal(hw("20261203")));
+      expect(within(dialog).getByText(/1 upcoming deadline from an earlier file isn’t in this one\./)).toHaveTextContent(F.fileSnapshot);
+      await user.click(within(dialog).getByRole("checkbox", { name: /Homework 11/ }));
+      expect(within(dialog).getByRole("button", { name: F.nothingSelected })).toBeDisabled();
+      expect(latest.databases[0].rows.find((r) => r.cells.name === "Homework 11")!.cells.due).toBe("2026-11-27");
+      expect(latest.databases[0].rows.every((r) => !r.source?.missingSince)).toBe(true);
+    });
+
+    it("groups what does not look like coursework, unticked, and warns about a general calendar", async () => {
+      const user = userEvent.setup();
+      const { container } = renderWith(assignments());
+      const holidays = ["Thanksgiving Day", "Christmas Day", "New Year's Day", "Boxing Day", "Diwali", "Veterans Day"].map((name, i) =>
+        vevent(`h${i}@holidays`, name, `DTSTART;VALUE=DATE:202612${String(i + 10)}\r\nDTEND;VALUE=DATE:202612${String(i + 11)}\r\n`),
+      );
+      const dialog = await upload(user, container, cal(...holidays));
+      expect(within(dialog).getByText(F.generalCalendar)).toBeInTheDocument();
+      const boxes = within(dialog).getAllByRole("checkbox");
+      expect(boxes).toHaveLength(6);
+      for (const b of boxes) expect(b).not.toBeChecked();
+      expect(within(dialog).getByText(`${F.groups.other} · 6`)).toBeInTheDocument();
+      expect(within(dialog).getByRole("button", { name: F.nothingSelected })).toBeDisabled();
+    });
+  });
+
   it("shows a connected calendar's last sync, and disconnects only after confirming", async () => {
     actions.listFeedsAction.mockResolvedValue([
       feedInfo({
@@ -229,5 +310,33 @@ describe("Import deadlines", () => {
 
     await user.click(within(dialog).getByRole("button", { name: "Delete “Cancelled lab”" }));
     expect(latest.databases[0].rows.map((r) => r.id)).toEqual(["r1"]);
+  });
+});
+
+describe("Import deadlines when calendar links are switched off (no FEED_URL_KEY)", () => {
+  it("explains it is a one-time import, never connects, and still imports the chosen events", async () => {
+    const read = readFeed(canvasText);
+    if (!read.ok) throw new Error("fixture");
+    actions.previewFeedAction.mockResolvedValue({
+      ok: true,
+      feed: read.feed,
+      label: "canvas.university.edu",
+      connectedFeedId: null,
+      canConnect: false,
+    });
+    const user = userEvent.setup();
+    renderWith(assignments());
+    const dialog = await openDialog(user);
+    await user.type(within(dialog).getByLabelText(F.linkLabel), LINK);
+    await user.click(within(dialog).getByRole("button", { name: F.preview }));
+    await within(dialog).findByText(F.linksOffNote);
+    expect(within(dialog).queryByRole("checkbox", { name: F.keepInSync })).toBeNull();
+    const importButton = within(dialog).getAllByRole("button").find((b) => /^Import \d+$/.test(b.textContent ?? ""));
+    expect(importButton).toBeDefined();
+    await user.click(importButton!);
+    await within(dialog).findByText(F.doneTitle);
+    expect(actions.connectFeedAction).not.toHaveBeenCalled();
+    expect(within(dialog).queryByText(F.doneSynced)).toBeNull();
+    expect(latest.databases[0].rows.length).toBeGreaterThan(0);
   });
 });

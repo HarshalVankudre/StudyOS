@@ -41,6 +41,7 @@ import { useEditorLocation } from "./useEditorLocation";
 import { focusedFieldKey, isTextEntry, useWorkspaceSync } from "./useWorkspaceSync";
 import type { MergeNotice, Notice, PendingField, UpdateOptions } from "./workspace-sync";
 import { PendingFieldsContext } from "./editor/pendingFields";
+import { DraftInput } from "./editor/DraftInput";
 
 const TOAST_MS = 8000;
 
@@ -56,7 +57,7 @@ export function WorkspaceEditor({
   initialVersion?: number;
   initialCredits?: number;
 }) {
-  const { dict, t, dir } = useI18n();
+  const { dict, t, dir, plural } = useI18n();
   const S = dict.safety;
 
   // AI agent chat panel. Once opened it stays mounted (hidden when closed) so
@@ -75,23 +76,23 @@ export function WorkspaceEditor({
       switch (removal.kind) {
         case "page":
           return many
-            ? t(S.removedPages, { count: removal.count })
+            ? plural(S.removedPages, removal.count)
             : t(S.removedPage, { name: removal.name || dict.editor.untitled });
         case "database":
           return S.removedDatabase;
         case "block":
-          return many ? t(S.removedBlocks, { count: removal.count }) : S.removedBlock;
+          return many ? plural(S.removedBlocks, removal.count) : S.removedBlock;
         case "column":
           return S.removedColumn;
         case "row":
-          return many ? t(S.removedRows, { count: removal.count }) : S.removedRow;
+          return many ? plural(S.removedRows, removal.count) : S.removedRow;
         case "columnData":
           return S.removedColumnData;
         case "card":
-          return many ? t(S.removedCards, { count: removal.count }) : S.removedCard;
+          return many ? plural(S.removedCards, removal.count) : S.removedCard;
       }
     },
-    [S, dict.editor.untitled, t],
+    [S, dict.editor.untitled, plural, t],
   );
 
   // Declared before use by the toast callbacks via a ref (the engine is
@@ -345,24 +346,25 @@ export function WorkspaceEditor({
             </button>
           </div>
           <div className="flex items-center gap-2 px-3 pb-2 pt-1">
-            <input
+            {/* Buffered: one write per typing burst, not per key. */}
+            <DraftInput
               value={workspace.icon ?? ""}
-              onChange={(e) =>
+              onCommit={(icon) =>
                 update((d) => {
-                  d.icon = e.target.value;
+                  d.icon = icon;
                 })
               }
               aria-label={dict.editor.workspaceIcon}
               maxLength={8}
               className="h-8 w-8 rounded-md bg-transparent text-center text-xl outline-none hover:bg-hover focus:bg-card focus:ring-1 focus:ring-ink/20"
             />
-            <input
+            <DraftInput
               value={workspace.name}
               dir="auto"
               aria-label={workspace.name}
-              onChange={(e) =>
+              onCommit={(name) =>
                 update((d) => {
-                  d.name = e.target.value;
+                  d.name = name;
                 })
               }
               className="w-full truncate rounded-md px-1 py-0.5 font-display text-sm font-bold text-ink outline-none hover:bg-hover focus:bg-card focus:ring-1 focus:ring-ink/20"
@@ -510,6 +512,7 @@ export function WorkspaceEditor({
 
           {conflict && (
             <ConflictBanner
+              discards={conflict.discards}
               onKeepMine={() => sync.resolveConflict("mine")}
               onUseLatest={() => sync.resolveConflict("theirs")}
             />
@@ -701,13 +704,16 @@ function HistoryButton({
 
 /** Last resort: only shown if merging with a newer version failed unexpectedly. */
 function ConflictBanner({
+  discards,
   onKeepMine,
   onUseLatest,
 }: {
+  /** Changes made elsewhere that "Keep my version" replaces (Undo restores them). */
+  discards: number;
   onKeepMine: () => void;
   onUseLatest: () => void;
 }) {
-  const { dict } = useI18n();
+  const { dict, plural } = useI18n();
   const S = dict.safety;
   return (
     <div
@@ -716,6 +722,11 @@ function ConflictBanner({
     >
       <p className="font-semibold">{S.conflictTitle}</p>
       <p className="mt-0.5 text-ink-soft">{S.conflictBody}</p>
+      {discards > 0 && (
+        <p className="mt-0.5 text-ink-soft">
+          {plural(S.conflictDiscards, discards, { count: discards })}
+        </p>
+      )}
       <div className="mt-2.5 flex flex-wrap items-center gap-2">
         <button
           type="button"
@@ -753,12 +764,14 @@ function MergeBanner({
 }) {
   const { dict, t } = useI18n();
   const S = dict.safety;
-  const { keptBoth, restored, keptDeleted, overwritten } = merge.report;
+  const { keptBoth, restored, keptDeleted, overwritten, skipped, repaired } = merge.report;
   const lines = [
     keptBoth > 0 && t(S.mergeKeptBoth, { count: keptBoth }),
     restored > 0 && t(S.mergeRestored, { count: restored }),
     keptDeleted > 0 && t(S.mergeKeptDeleted, { count: keptDeleted }),
     overwritten.length > 0 && t(S.mergeOverwrote, { count: overwritten.length }),
+    skipped > 0 && t(S.mergeSkipped, { count: skipped }),
+    repaired > 0 && t(S.mergeRepaired, { count: repaired }),
   ].filter((line): line is string => Boolean(line));
   return (
     <div

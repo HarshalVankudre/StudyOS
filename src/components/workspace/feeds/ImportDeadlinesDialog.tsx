@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, CalendarCheck, Link2, Loader2, Upload } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CalendarCheck, ChevronDown, Info, Link2, Loader2, Upload } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import {
   connectFeedAction,
@@ -12,7 +12,17 @@ import {
 import { useI18n } from "@/lib/i18n/client";
 import { detectMapping, reconcileMapping, type FeedMapping } from "@/lib/feeds/mapping";
 import { eventDay, readFeed, type FeedEvent, type FeedSnapshot } from "@/lib/feeds/normalize";
-import { applyFeedEvents, classifyEvents, FILE_FEED, isDefaultSelected, type EventStatus } from "@/lib/feeds/sync";
+import { looksLikeCoursework, looksLikeGeneralCalendar } from "@/lib/feeds/coursework";
+import {
+  applyFeedEvents,
+  classifyEvents,
+  FILE_FEED,
+  isDefaultSelected,
+  pendingUpdates,
+  rowsMissingFromFile,
+  type EventStatus,
+  type PendingUpdate,
+} from "@/lib/feeds/sync";
 import { MAX_ICS_FILE_BYTES, type FeedErrorCode, type FeedInfo } from "@/lib/feeds/types";
 import { normalizeFeedUrl } from "@/lib/feeds/url";
 import type { Database } from "@/lib/workspace/types";
@@ -25,7 +35,9 @@ import { MappingEditor } from "./MappingEditor";
 
 const GROUP_LIMIT = 150;
 
-type Source = { kind: "link"; url: string; label: string; connectedFeedId: string | null } | { kind: "file"; name: string };
+type Source =
+  | { kind: "link"; url: string; label: string; connectedFeedId: string | null; canConnect: boolean }
+  | { kind: "file"; name: string };
 type Step = "start" | "loading" | "preview" | "done";
 
 const PRIMARY =
@@ -37,6 +49,7 @@ const STATUS_STYLE: Record<Exclude<EventStatus, "new">, string> = {
   inTable: "bg-hover text-ink-soft ring-line-strong",
   echo: "bg-sky-500/10 text-sky-700 ring-sky-500/30 dark:text-sky-300",
 };
+const CHANGED_STYLE = "bg-amber-500/10 text-amber-800 ring-amber-500/30 dark:text-amber-300";
 
 interface SeriesGroup {
   series: string;
@@ -52,7 +65,7 @@ interface SeriesGroup {
  * link can stay connected and keeps the table in sync.
  */
 export function ImportDeadlinesDialog({ db, onClose }: { db: Database; onClose: () => void }) {
-  const { dict, t, locale } = useI18n();
+  const { dict, t, locale, plural } = useI18n();
   const F = dict.feeds;
   const { workspace, update } = useWorkspace();
   const [feeds, setFeeds] = useState<FeedInfo[]>([]);
@@ -66,7 +79,7 @@ export function ImportDeadlinesDialog({ db, onClose }: { db: Database; onClose: 
   const [mapping, setMapping] = useState<FeedMapping>(() => detectMapping(db));
   const [keepSynced, setKeepSynced] = useState(true);
   const [working, setWorking] = useState(false);
-  const [done, setDone] = useState<{ added: number; synced: boolean } | null>(null);
+  const [done, setDone] = useState<{ added: number; updated: number; synced: boolean } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const linkInput = useRef<HTMLInputElement>(null);
 
@@ -90,14 +103,28 @@ export function ImportDeadlinesDialog({ db, onClose }: { db: Database; onClose: 
     [workspace, db.id, events, mapping, timeZone],
   );
 
+  // Rows already in the table whose event moved or was renamed at the source.
+  const updates = useMemo(
+    () => pendingUpdates(workspace, db.id, events, mapping, timeZone),
+    [workspace, db.id, events, mapping, timeZone],
+  );
+  const generalCalendar = useMemo(() => looksLikeGeneralCalendar(events), [events]);
+  const missingFromFile = useMemo(
+    () => (source?.kind === "file" ? rowsMissingFromFile(workspace, db.id, events, mapping, today) : 0),
+    [source, workspace, db.id, events, mapping, today],
+  );
+
   const groups = useMemo(() => {
+    const changed: FeedEvent[] = [];
     const upcoming: FeedEvent[] = [];
+    const other: FeedEvent[] = [];
     const earlier: FeedEvent[] = [];
     const openings: FeedEvent[] = [];
     const series = new Map<string, SeriesGroup>();
     for (const e of events) {
       const day = eventDay(e.when, timeZone);
-      if (e.series) {
+      if (updates.has(e.key)) changed.push(e);
+      else if (e.series) {
         const g = series.get(e.series);
         if (!g) series.set(e.series, { series: e.series, title: e.title, next: e, count: 1 });
         else {
@@ -105,11 +132,12 @@ export function ImportDeadlinesDialog({ db, onClose }: { db: Database; onClose: 
           if (eventDay(g.next.when, timeZone) < today && day >= today) g.next = e;
         }
       } else if (e.role === "opening") openings.push(e);
-      else if (day >= today) upcoming.push(e);
-      else earlier.push(e);
+      else if (day < today) earlier.push(e);
+      else if (looksLikeCoursework(e)) upcoming.push(e);
+      else other.push(e);
     }
-    return { upcoming, earlier, openings, series: [...series.values()] };
-  }, [events, timeZone, today]);
+    return { changed, upcoming, other, earlier, openings, series: [...series.values()] };
+  }, [events, timeZone, today, updates]);
 
   const startPreview = (snap: FeedSnapshot, src: Source, savedMapping?: Partial<FeedMapping> | null) => {
     setSnapshot(snap);
@@ -117,8 +145,14 @@ export function ImportDeadlinesDialog({ db, onClose }: { db: Database; onClose: 
     const nextMapping = reconcileMapping(db, savedMapping ?? undefined);
     setMapping(nextMapping);
     const status = classifyEvents(workspace, db.id, snap.events, nextMapping, timeZone);
+    const changed = pendingUpdates(workspace, db.id, snap.events, nextMapping, timeZone);
+    // New upcoming coursework, and every change to a row already in the table.
     setSelected(
-      new Set(snap.events.filter((e) => isDefaultSelected(e, today, timeZone) && status.get(e.key) === "new").map((e) => e.key)),
+      new Set(
+        snap.events
+          .filter((e) => changed.has(e.key) || (isDefaultSelected(e, today, timeZone) && status.get(e.key) === "new"))
+          .map((e) => e.key),
+      ),
     );
     setFollowed(new Set());
     setError(null);
@@ -144,7 +178,13 @@ export function ImportDeadlinesDialog({ db, onClose }: { db: Database; onClose: 
       const connected = feeds.find((f) => f.id === result.connectedFeedId);
       startPreview(
         result.feed,
-        { kind: "link", url: normalized.url, label: result.label, connectedFeedId: result.connectedFeedId },
+        {
+          kind: "link",
+          url: normalized.url,
+          label: result.label,
+          connectedFeedId: result.connectedFeedId,
+          canConnect: result.canConnect !== false,
+        },
         connected?.mapping,
       );
     } catch {
@@ -186,8 +226,13 @@ export function ImportDeadlinesDialog({ db, onClose }: { db: Database; onClose: 
     () => events.filter((e) => e.series && followed.has(e.series) && eventDay(e.when, timeZone) >= today).map((e) => e.key),
     [events, followed, timeZone, today],
   );
-  const importCount = [...selected].filter((k) => statuses.get(k) === "new").length + followedKeys.length;
-  const willConnect = source?.kind === "link" && keepSynced;
+  const isNew = (key: string) => !updates.has(key) && statuses.get(key) === "new";
+  const selectable = (key: string) => updates.has(key) || statuses.get(key) === "new";
+  const importCount = [...selected].filter(isNew).length + followedKeys.length;
+  const updateCount = [...selected].filter((k) => updates.has(k)).length;
+  // A link is kept in sync only when this server can store it (FEED_URL_KEY).
+  const syncLink = source?.kind === "link" && (source.connectedFeedId !== null || source.canConnect) && keepSynced;
+  const willConnect = syncLink;
 
   const doImport = async () => {
     if (!snapshot || !source) return;
@@ -195,7 +240,7 @@ export function ImportDeadlinesDialog({ db, onClose }: { db: Database; onClose: 
     setError(null);
     try {
       let feedId = FILE_FEED;
-      if (source.kind === "link" && keepSynced) {
+      if (source.kind === "link" && syncLink) {
         if (source.connectedFeedId) feedId = source.connectedFeedId;
         else {
           const connected = await connectFeedAction({
@@ -240,7 +285,11 @@ export function ImportDeadlinesDialog({ db, onClose }: { db: Database; onClose: 
         }).catch(() => null);
         if (info) setFeeds((list) => list.map((f) => (f.id === info.id ? info : f)));
       }
-      setDone({ added: dry.changes.filter((c) => c.kind === "added").length, synced: feedId !== FILE_FEED });
+      setDone({
+        added: dry.changes.filter((c) => c.kind === "added").length,
+        updated: dry.changes.filter((c) => c.kind === "updated").length,
+        synced: feedId !== FILE_FEED,
+      });
       setLink("");
       setSource(null);
       setStep("done");
@@ -254,8 +303,19 @@ export function ImportDeadlinesDialog({ db, onClose }: { db: Database; onClose: 
   const dateLabel = (e: FeedEvent) =>
     formatDay(eventDay(e.when, timeZone), locale, { weekday: "short", month: "short", day: "numeric" });
 
+  const dayLabel = (day: string) => formatDay(day, locale, { weekday: "short", month: "short", day: "numeric" });
+
+  const changeText = (u: PendingUpdate) => {
+    const parts: string[] = [];
+    if (u.due) parts.push(t(F.dateChanged, { from: u.due.from ? dayLabel(u.due.from) : F.noDate, to: dayLabel(u.due.to) }));
+    if (u.title) parts.push(t(F.titleChanged, { from: u.title.from || dict.db.untitled }));
+    if (parts.length === 0) parts.push(F.detailsChanged);
+    return parts.join(" · ");
+  };
+
   const eventRow = (e: FeedEvent) => {
-    const status = statuses.get(e.key) ?? "new";
+    const update = updates.get(e.key);
+    const status: EventStatus = update ? "new" : (statuses.get(e.key) ?? "new");
     const disabled = status !== "new";
     return (
       <li key={e.key}>
@@ -278,8 +338,17 @@ export function ImportDeadlinesDialog({ db, onClose }: { db: Database; onClose: 
                   {e.course}
                 </span>
               )}
+              {(e.days ?? 1) > 1 && <span>{plural(F.spansDays, e.days ?? 1)}</span>}
             </span>
+            {update && (
+              <span className="mt-0.5 block text-xs font-medium text-amber-800 dark:text-amber-300">{changeText(update)}</span>
+            )}
           </span>
+          {update && (
+            <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${CHANGED_STYLE}`}>
+              {F.statusChanged}
+            </span>
+          )}
           {status !== "new" && (
             <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${STATUS_STYLE[status]}`}>
               {status === "echo" ? F.statusEcho : F.statusInTable}
@@ -290,48 +359,80 @@ export function ImportDeadlinesDialog({ db, onClose }: { db: Database; onClose: 
     );
   };
 
-  const eventGroup = (id: string, title: string, list: FeedEvent[], bulk = false) =>
+  const bulkButtons = (list: FeedEvent[]) => (
+    <span className="ms-auto flex gap-1">
+      <button
+        type="button"
+        className="min-h-9 rounded-md px-2 text-xs font-semibold text-ink-soft hover:bg-hover hover:text-ink"
+        onClick={() =>
+          setSelected((s) => {
+            const next = new Set(s);
+            for (const e of list) if (selectable(e.key)) next.add(e.key);
+            return next;
+          })
+        }
+      >
+        {F.selectAll}
+      </button>
+      <button
+        type="button"
+        className="min-h-9 rounded-md px-2 text-xs font-semibold text-ink-soft hover:bg-hover hover:text-ink"
+        onClick={() =>
+          setSelected((s) => {
+            const next = new Set(s);
+            for (const e of list) next.delete(e.key);
+            return next;
+          })
+        }
+      >
+        {F.selectNone}
+      </button>
+    </span>
+  );
+
+  const eventList = (list: FeedEvent[]) => (
+    <>
+      <ul className="divide-y divide-line rounded-lg border border-line">{list.slice(0, GROUP_LIMIT).map(eventRow)}</ul>
+      {list.length > GROUP_LIMIT && <p className="text-xs text-ink-soft">{t(F.more, { count: list.length - GROUP_LIMIT })}</p>}
+    </>
+  );
+
+  const eventGroup = (id: string, title: string, list: FeedEvent[], bulk = false, hint?: string) =>
     list.length > 0 && (
       <section aria-labelledby={id} className="flex flex-col gap-1">
         <div className="flex flex-wrap items-center gap-2">
           <h4 id={id} className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
             {title} · {list.length}
           </h4>
-          {bulk && (
-            <span className="ms-auto flex gap-1">
-              <button
-                type="button"
-                className="min-h-9 rounded-md px-2 text-xs font-semibold text-ink-soft hover:bg-hover hover:text-ink"
-                onClick={() =>
-                  setSelected((s) => {
-                    const next = new Set(s);
-                    for (const e of list) if (statuses.get(e.key) === "new") next.add(e.key);
-                    return next;
-                  })
-                }
-              >
-                {F.selectAll}
-              </button>
-              <button
-                type="button"
-                className="min-h-9 rounded-md px-2 text-xs font-semibold text-ink-soft hover:bg-hover hover:text-ink"
-                onClick={() =>
-                  setSelected((s) => {
-                    const next = new Set(s);
-                    for (const e of list) next.delete(e.key);
-                    return next;
-                  })
-                }
-              >
-                {F.selectNone}
-              </button>
-            </span>
-          )}
+          {bulk && bulkButtons(list)}
         </div>
-        <ul className="divide-y divide-line rounded-lg border border-line">{list.slice(0, GROUP_LIMIT).map(eventRow)}</ul>
-        {list.length > GROUP_LIMIT && <p className="text-xs text-ink-soft">{t(F.more, { count: list.length - GROUP_LIMIT })}</p>}
+        {hint && <p className="text-xs text-ink-soft">{hint}</p>}
+        {eventList(list)}
       </section>
     );
+
+  /** Calendar entries that do not look like coursework: grouped, folded, never ticked for the student. */
+  const otherGroup = (list: FeedEvent[]) => {
+    if (list.length === 0) return null;
+    const ticked = list.filter((e) => selected.has(e.key)).length;
+    return (
+      <details className="group flex flex-col gap-1 rounded-lg border border-line" open={ticked > 0 || undefined}>
+        <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 px-3 py-2 [&::-webkit-details-marker]:hidden">
+          <ChevronDown className="size-4 shrink-0 text-ink-faint transition group-open:rotate-180" aria-hidden />
+          <span className="min-w-0 flex-1">
+            <span id="feed-other" className="block text-xs font-semibold uppercase tracking-wide text-ink-faint">
+              {F.groups.other} · {list.length}
+            </span>
+            <span className="block text-xs text-ink-soft">{F.otherHint}</span>
+          </span>
+        </summary>
+        <section aria-labelledby="feed-other" className="flex flex-col gap-1 px-3 pb-3">
+          <div className="flex">{bulkButtons(list)}</div>
+          {eventList(list)}
+        </section>
+      </details>
+    );
+  };
 
   const sourceName = source?.kind === "link" ? source.label : source?.name ?? "";
 
@@ -430,15 +531,34 @@ export function ImportDeadlinesDialog({ db, onClose }: { db: Database; onClose: 
             <>
               <div className="flex flex-col gap-1">
                 <p className="text-sm font-semibold text-ink">
-                  {t(F.foundEvents, { count: events.length, source: snapshot.name || sourceName })}
+                  {plural(F.foundEvents, events.length, { source: snapshot.name || sourceName })}
                   <span className="ms-2 rounded-full bg-hover px-2 py-0.5 text-[11px] font-semibold text-ink-soft">
                     {F.platform[snapshot.platform]}
                   </span>
                 </p>
                 {events.length === 0 && <p className="text-sm text-ink-soft">{F.emptyFeed}</p>}
-                {snapshot.echoes > 0 && <p className="text-xs text-ink-soft">{t(F.echoesSkipped, { count: snapshot.echoes })}</p>}
+                {snapshot.echoes > 0 && <p className="text-xs text-ink-soft">{plural(F.echoesSkipped, snapshot.echoes)}</p>}
                 {snapshot.warnings.includes("unsupported_recurrence") && <p className="text-xs text-ink-soft">{F.repeatNote}</p>}
               </div>
+
+              {generalCalendar && (
+                <p
+                  role="note"
+                  className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-900 dark:text-amber-200"
+                >
+                  <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
+                  <span>{F.generalCalendar}</span>
+                </p>
+              )}
+              {source?.kind === "file" && (
+                <p role="note" className="flex items-start gap-2 text-xs text-ink-soft">
+                  <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+                  <span>
+                    {missingFromFile > 0 ? `${plural(F.fileMissing, missingFromFile)} ` : ""}
+                    {F.fileSnapshot}
+                  </span>
+                </p>
+              )}
 
               <section aria-labelledby="feed-columns" className="flex flex-col gap-2 rounded-lg border border-line bg-surface p-3">
                 <div>
@@ -450,7 +570,9 @@ export function ImportDeadlinesDialog({ db, onClose }: { db: Database; onClose: 
                 <MappingEditor db={db} mapping={mapping} onChange={setMapping} />
               </section>
 
+              {eventGroup("feed-changed", F.groups.changed, groups.changed, true, F.changedHint)}
               {eventGroup("feed-upcoming", F.groups.upcoming, groups.upcoming, true)}
+              {otherGroup(groups.other)}
               {groups.series.length > 0 && (
                 <section aria-labelledby="feed-series" className="flex flex-col gap-1">
                   <h4 id="feed-series" className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
@@ -472,7 +594,7 @@ export function ImportDeadlinesDialog({ db, onClose }: { db: Database; onClose: 
                               {g.title || dict.db.untitled}
                             </span>
                             <span className="text-xs text-ink-soft">
-                              {t(F.repeats, { count: g.count })} · {dateLabel(g.next)}
+                              {plural(F.repeats, g.count)} · {dateLabel(g.next)}
                             </span>
                           </span>
                         </label>
@@ -484,7 +606,12 @@ export function ImportDeadlinesDialog({ db, onClose }: { db: Database; onClose: 
               {eventGroup("feed-earlier", F.groups.earlier, groups.earlier, true)}
               {eventGroup("feed-openings", F.groups.openings, groups.openings, true)}
 
-              {source?.kind === "link" && !source.connectedFeedId && (
+              {source?.kind === "link" && !source.connectedFeedId && !source.canConnect && (
+                <p role="note" className="rounded-lg border border-line bg-surface p-3 text-sm text-ink-soft">
+                  {F.linksOffNote}
+                </p>
+              )}
+              {source?.kind === "link" && !source.connectedFeedId && source.canConnect && (
                 <label className="flex min-h-11 cursor-pointer items-start gap-3 rounded-lg border border-line p-3 text-sm text-ink">
                   <input
                     type="checkbox"
@@ -507,9 +634,14 @@ export function ImportDeadlinesDialog({ db, onClose }: { db: Database; onClose: 
             <div role="status" className="flex flex-col items-center gap-2 py-6 text-center">
               <CalendarCheck className="size-8 text-lime" aria-hidden />
               <p className="font-display text-base font-bold text-ink">{F.doneTitle}</p>
-              <p className="text-sm text-ink-soft">{t(F.doneAdded, { count: done.added, table: db.name || dict.db.untitled })}</p>
+              {(done.added > 0 || done.updated === 0) && (
+                <p className="text-sm text-ink-soft">{t(F.doneAdded, { count: done.added, table: db.name || dict.db.untitled })}</p>
+              )}
+              {done.updated > 0 && (
+                <p className="text-sm text-ink-soft">{plural(F.doneUpdated, done.updated, { table: db.name || dict.db.untitled })}</p>
+              )}
               {done.synced && <p className="text-sm text-ink-soft">{F.doneSynced}</p>}
-              {done.added > 0 && <p className="text-xs text-ink-faint">{F.doneUndo}</p>}
+              {done.added + done.updated > 0 && <p className="text-xs text-ink-faint">{F.doneUndo}</p>}
             </div>
           )}
         </div>
@@ -524,11 +656,20 @@ export function ImportDeadlinesDialog({ db, onClose }: { db: Database; onClose: 
               <button
                 type="button"
                 className={PRIMARY}
-                disabled={working || (importCount === 0 && !willConnect) || !mapping.title}
+                disabled={working || (importCount === 0 && updateCount === 0 && !willConnect) || !mapping.title}
                 onClick={() => void doImport()}
               >
                 {working && <Loader2 className="size-4 animate-spin" aria-hidden />}
-                {importCount > 0 ? t(F.importButton, { count: importCount }) : willConnect ? F.connectOnly : F.nothingSelected}
+                {importCount > 0 || updateCount > 0
+                  ? [
+                      importCount > 0 ? t(F.importButton, { count: importCount }) : "",
+                      updateCount > 0 ? t(F.updateButton, { count: updateCount }) : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")
+                  : willConnect
+                    ? F.connectOnly
+                    : F.nothingSelected}
               </button>
             </>
           )}

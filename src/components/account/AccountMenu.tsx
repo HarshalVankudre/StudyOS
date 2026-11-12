@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useClerk, useUser } from "@clerk/nextjs";
+import { useSignOutWithCleanup } from "@/components/account/SignOutButton";
 import { useEffect, useRef, useState } from "react";
 import { getAccountSummaryAction } from "@/app/app/account-actions";
 import { useI18n } from "@/lib/i18n/client";
@@ -26,7 +27,9 @@ export function AccountMenu({
   variant?: "sidebar" | "header";
 }) {
   const { user } = useUser();
-  const { openUserProfile, signOut } = useClerk();
+  const { openUserProfile } = useClerk();
+  // Turns this device's notifications off first (shared devices).
+  const { signOut } = useSignOutWithCleanup("/");
   const { dict, t, locale, dir, plural } = useI18n();
   const [open, setOpen] = useState(false);
   const [summary, setSummary] = useState<AccountSummary | null>(null);
@@ -136,7 +139,7 @@ export function AccountMenu({
           icon="⎋"
           label={dict.account.signOut}
           danger
-          onClick={() => signOut({ redirectUrl: "/" })}
+          onClick={() => void signOut()}
         />
       </div>
     </div>

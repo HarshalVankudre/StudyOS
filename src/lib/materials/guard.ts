@@ -55,18 +55,24 @@ export const allowMaterialRead = createMemoryRateLimiter({ limit: 120, windowMs:
 /** Deleting materials and cancelling runs. */
 export const allowMaterialWrite = createMemoryRateLimiter({ limit: 60, windowMs: 60_000 });
 
-type HeavyKind = "extract" | "kit";
+type HeavyKind = "extract" | "kit" | "material";
 
 const HEAVY_LIMITS: Record<HeavyKind, { perUser: number; perInstance: number }> = {
-  // PDF parsing is CPU and memory bound: few at a time.
-  extract: { perUser: 2, perInstance: 4 },
+  // PDF parsing is CPU and memory bound. One per student: the extraction
+  // pool (lib/import/extract) also allows one per account across the
+  // syllabus and materials routes, so one account cannot hold every process.
+  extract: { perUser: 1, perInstance: 4 },
   // A run holds one material in memory and up to 5 model calls in flight.
   kit: { perUser: 2, perInstance: 12 },
+  // Adding a material (upload or paste): reading the body, paginating and
+  // storing. Bounds parallel adds, whose storage checks run under a lock.
+  material: { perUser: 2, perInstance: 16 },
 };
 
 const running: Record<HeavyKind, { total: number; byUser: Map<string, number> }> = {
   extract: { total: 0, byUser: new Map() },
   kit: { total: 0, byUser: new Map() },
+  material: { total: 0, byUser: new Map() },
 };
 
 /**

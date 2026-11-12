@@ -9,7 +9,7 @@ describe("extractSyllabusFacts", () => {
     expect(facts.assessments).toEqual([
       { name: "Midterm", weight: 25 },
       { name: "Final", weight: 35 },
-      { name: "Homework", weight: 40 },
+      { name: "Homework", weight: 40, group: true },
     ]);
   });
 
@@ -28,10 +28,10 @@ describe("extractSyllabusFacts", () => {
     ].join("\n");
     const facts = extractSyllabusFacts(text, TODAY);
     expect(facts.assessments).toEqual([
-      { course: "CS 201 Data Structures", name: "Problem sets", weight: 30 },
+      { course: "CS 201 Data Structures", name: "Problem sets", weight: 30, group: true },
       { course: "CS 201 Data Structures", name: "Midterm exam", weight: 30 },
       { course: "CS 201 Data Structures", name: "Final exam", weight: 40 },
-      { course: "MATH 240 Linear Algebra", name: "Quizzes", weight: 20 },
+      { course: "MATH 240 Linear Algebra", name: "Quizzes", weight: 20, group: true },
       { course: "MATH 240 Linear Algebra", name: "Final", weight: 80 },
     ]);
   });
@@ -110,8 +110,8 @@ const LINES: Array<{
     name: "en: inline breakdown with dates in brackets",
     text: "Grade breakdown: Weekly quizzes 15%, Homework 25%, Midterm 1 (Oct 8) 15%, Midterm 2 (Nov 19) 15%, Final 30%",
     expected: [
-      { name: "Weekly quizzes", weight: 15 },
-      { name: "Homework", weight: 25 },
+      { name: "Weekly quizzes", weight: 15, group: true },
+      { name: "Homework", weight: 25, group: true },
       { name: "Midterm 1", weight: 15, date: "2026-10-08" },
       { name: "Midterm 2", weight: 15, date: "2026-11-19" },
       { name: "Final", weight: 30 },
@@ -164,7 +164,7 @@ const LINES: Array<{
     grading: true,
     expected: [
       { name: "Examen parcial", weight: 30 },
-      { name: "Prácticas de laboratorio", weight: 20 },
+      { name: "Prácticas de laboratorio", weight: 20, group: true },
       { name: "Participación", weight: 7.5 },
     ],
   },
@@ -270,7 +270,7 @@ describe("extractSyllabusFacts on realistic lines", () => {
     ].join("\n");
     const facts = extractSyllabusFacts(text, TODAY, "en");
     expect(facts.assessments).toEqual([
-      { course: "ECON 201 Intermediate Microeconomics (Fall 2026)", name: "Problem sets", weight: 20 },
+      { course: "ECON 201 Intermediate Microeconomics (Fall 2026)", name: "Problem sets", weight: 20, group: true },
       {
         course: "ECON 201 Intermediate Microeconomics (Fall 2026)",
         name: "Midterm exam",
@@ -289,6 +289,51 @@ describe("extractSyllabusFacts on realistic lines", () => {
       { course: "ECON 201 Intermediate Microeconomics (Fall 2026)", name: "Problem Set 5", date: "2026-11-17" },
       { course: "MATH 221 Calculus II", name: "Final exam", date: "2026-12-14" },
     ]);
+  });
+});
+
+describe("extractSyllabusFacts: categories versus single items", () => {
+  it("tells a category weight from a single item's, with counts and drops", () => {
+    const text = [
+      "Grading",
+      "10 problem sets 20% (lowest one dropped)",
+      "Weekly homework 30%",
+      "Midterm 20%",
+      "Final exam 30%",
+    ].join("\n");
+    expect(extractSyllabusFacts(text, TODAY, "en").assessments).toEqual([
+      { name: "Problem sets", weight: 20, group: true, count: 10, dropLowest: 1 },
+      { name: "Weekly homework", weight: 30, group: true },
+      { name: "Midterm", weight: 20 },
+      { name: "Final exam", weight: 30 },
+    ]);
+  });
+
+  it("reads 'best 8 of 10' and 'each' with a count", () => {
+    const facts = extractSyllabusFacts("Grading: Quizzes 10% (best 8 of 10 count), Two midterms 20% each, Final 50%", TODAY, "en");
+    expect(facts.assessments).toEqual([
+      { name: "Quizzes", weight: 10, group: true, count: 10, dropLowest: 2 },
+      { name: "Midterms", weight: 40, group: true, count: 2 },
+      { name: "Final", weight: 50 },
+    ]);
+  });
+
+  it("works in German and Spanish", () => {
+    const de = extractSyllabusFacts("Bewertung\nÜbungsblätter 30% (das schlechteste Blatt wird gestrichen)\nKlausur 70%", TODAY, "de");
+    expect(de.assessments).toEqual([
+      { name: "Übungsblätter", weight: 30, group: true, dropLowest: 1 },
+      { name: "Klausur", weight: 70 },
+    ]);
+    const es = extractSyllabusFacts("Evaluación: Tareas 25%, Examen parcial 25%, Examen final 50%", TODAY, "es");
+    expect(es.assessments[0]).toEqual({ name: "Tareas", weight: 25, group: true });
+    expect(es.assessments[1]).toEqual({ name: "Examen parcial", weight: 25 });
+  });
+
+  it("marks categories for the model in the prompt block", () => {
+    const block = syllabusFactsBlock({ assessments: [{ name: "Problem sets", weight: 20, group: true, count: 10 }] });
+    expect(block).toContain('"category":true');
+    expect(block).toContain('"items":10');
+    expect(block).toMatch(/grading\.categories/);
   });
 });
 

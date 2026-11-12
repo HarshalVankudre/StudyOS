@@ -25,12 +25,14 @@
  */
 import "server-only";
 
-import { lookup as dnsLookup } from "node:dns/promises";
 import https from "node:https";
 import type { IncomingMessage } from "node:http";
 import net from "node:net";
 import zlib from "node:zlib";
 import { isDeniedIp } from "@/lib/net/controlled-fetch";
+import { pinnedLookup, systemResolve, type PinnedLookup, type ResolvedAddress } from "@/lib/net/pinned-lookup";
+
+export type { ResolvedAddress } from "@/lib/net/pinned-lookup";
 
 export const FEED_FETCH_LIMITS = {
   maxBytes: 3_000_000,
@@ -58,11 +60,6 @@ export class FeedFetchError extends Error {
   }
 }
 
-export interface ResolvedAddress {
-  address: string;
-  family: number;
-}
-
 export interface FeedFetchOptions {
   maxBytes?: number;
   timeoutMs?: number;
@@ -85,9 +82,6 @@ export interface FeedFetchResult {
   /** Host of the final hop (after redirects). */
   finalHost: string;
 }
-
-const defaultResolve = async (hostname: string): Promise<ResolvedAddress[]> =>
-  dnsLookup(hostname, { all: true, verbatim: true });
 
 function stripBrackets(host: string): string {
   return host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
@@ -112,38 +106,6 @@ function checkHop(raw: string, allowedPorts: number[], allowed: (ip: string) => 
   return url;
 }
 
-type LookupCallback = (err: NodeJS.ErrnoException | null, address: string | ResolvedAddress[], family?: number) => void;
-
-/**
- * A `lookup` for the socket that resolves, rejects the host if ANY answer is
- * denied, and hands exactly the checked answers to the connection.
- */
-function pinnedLookup(resolve: FeedFetchOptions["resolve"] & {}, allowed: (ip: string) => boolean) {
-  return (hostname: string, options: { family?: number; all?: boolean } | number, callback: LookupCallback) => {
-    const opts = typeof options === "number" ? { family: options } : (options ?? {});
-    resolve(hostname).then(
-      (answers) => {
-        if (!answers.length) {
-          callback(Object.assign(new Error("no address"), { code: "ENOTFOUND" }), "");
-          return;
-        }
-        if (answers.some((a) => !allowed(a.address))) {
-          callback(new FeedFetchError("blocked_address") as NodeJS.ErrnoException, "");
-          return;
-        }
-        const usable = opts.family ? answers.filter((a) => a.family === opts.family) : answers;
-        if (!usable.length) {
-          callback(Object.assign(new Error("no address"), { code: "ENOTFOUND" }), "");
-          return;
-        }
-        if (opts.all) callback(null, usable);
-        else callback(null, usable[0].address, usable[0].family);
-      },
-      () => callback(Object.assign(new Error("lookup failed"), { code: "ENOTFOUND" }), ""),
-    );
-  };
-}
-
 function mapNetworkError(error: unknown): FeedFetchError {
   if (error instanceof FeedFetchError) return error;
   const code = (error as NodeJS.ErrnoException | null)?.code ?? "";
@@ -159,7 +121,7 @@ interface Hop {
   body: Buffer | null;
 }
 
-function requestOnce(url: URL, opts: Required<Pick<FeedFetchOptions, "maxBytes">> & FeedFetchOptions, signal: AbortSignal, lookup: ReturnType<typeof pinnedLookup>): Promise<Hop> {
+function requestOnce(url: URL, opts: Required<Pick<FeedFetchOptions, "maxBytes">> & FeedFetchOptions, signal: AbortSignal, lookup: PinnedLookup): Promise<Hop> {
   return new Promise<Hop>((resolvePromise, reject) => {
     let settled = false;
     const fail = (error: unknown) => {
@@ -267,7 +229,7 @@ export async function fetchFeed(rawUrl: string, options: FeedFetchOptions = {}):
   const maxRedirects = options.maxRedirects ?? FEED_FETCH_LIMITS.maxRedirects;
   const allowedPorts = options.allowedPorts ?? [443];
   const allowed = options.isAllowedAddress ?? ((ip: string) => !isDeniedIp(ip));
-  const lookup = pinnedLookup(options.resolve ?? defaultResolve, allowed);
+  const lookup = pinnedLookup(options.resolve ?? systemResolve, allowed, () => new FeedFetchError("blocked_address"));
 
   const timeout = new AbortController();
   const timer = setTimeout(() => timeout.abort(new FeedFetchError("timeout")), timeoutMs);

@@ -1,12 +1,20 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   annualCheckoutConfigured,
+  clearProPriceCache,
   DEFAULT_PRO_MONTHLY_USD,
+  formatPrice,
   formatUsd,
+  getProPricing,
   parseUsd,
+  PRICE_CACHE_MS,
   proPricing,
+  type StripePriceLike,
 } from "./plan-pricing";
 import { isAnnualBillingAvailable } from "./stripe";
+
+const report = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/ops/report-error", () => ({ reportError: report }));
 
 const BILLING = { STRIPE_SECRET_KEY: "sk_test", STRIPE_PRICE_PRO: "price_m" };
 
@@ -77,5 +85,106 @@ describe("formatUsd", () => {
     expect(formatUsd(5, "en")).toBe("$5");
     expect(formatUsd(4.17, "en")).toBe("$4.17");
     expect(formatUsd(5, "de")).toMatch(/^5\s\$$/);
+  });
+});
+
+describe("round 2, finding 7: Stripe is the source of truth for the displayed price", () => {
+  const ON = { ...BILLING, STRIPE_PRICE_PRO_ANNUAL: "price_y", STUDYOS_PRO_MONTHLY_PRICE: "9", STUDYOS_PRO_ANNUAL_PRICE: "90" };
+  const price = (over: Partial<StripePriceLike> = {}): StripePriceLike => ({
+    id: "price_m",
+    active: true,
+    type: "recurring",
+    billing_scheme: "per_unit",
+    currency: "usd",
+    unit_amount: 500,
+    recurring: { interval: "month", interval_count: 1 },
+    ...over,
+  });
+  const yearly = (over: Partial<StripePriceLike> = {}) =>
+    price({ id: "price_y", unit_amount: 4800, recurring: { interval: "year", interval_count: 1 }, ...over });
+  const fetcher = (prices: Record<string, StripePriceLike | Error>) =>
+    vi.fn(async (id: string) => {
+      const p = prices[id];
+      if (!p || p instanceof Error) throw p ?? new Error("missing");
+      return p;
+    });
+
+  beforeEach(() => {
+    clearProPriceCache();
+    report.mockReset();
+  });
+
+  it("shows and offers what the Stripe prices charge, ignoring the configured amounts", async () => {
+    const out = await getProPricing({ env: ON, fetchPrice: fetcher({ price_m: price(), price_y: yearly() }) });
+    expect(out).toEqual({
+      monthly: { amount: 5, currency: "USD" },
+      annual: { total: { amount: 48, currency: "USD" }, perMonth: { amount: 4, currency: "USD" }, savingsPercent: 20 },
+      offered: { month: true, year: true },
+      source: "stripe",
+    });
+  });
+
+  it("shows the currency Stripe charges in, zero-decimal currencies included", async () => {
+    const eur = await getProPricing({ env: BILLING, fetchPrice: fetcher({ price_m: price({ currency: "eur", unit_amount: 499 }) }) });
+    expect(eur.monthly).toEqual({ amount: 4.99, currency: "EUR" });
+    clearProPriceCache();
+    const jpy = await getProPricing({ env: BILLING, fetchPrice: fetcher({ price_m: price({ currency: "jpy", unit_amount: 800 }) }) });
+    expect(jpy.monthly).toEqual({ amount: 800, currency: "JPY" });
+    expect(formatPrice(800, "JPY", "en")).toBe("¥800");
+    expect(formatPrice(4.99, "EUR", "de")).toMatch(/^4,99\s€$/);
+  });
+
+  it("does not offer annual when its Stripe price is not a yearly price, and says so once", async () => {
+    const fetchPrice = fetcher({ price_m: price(), price_y: yearly({ recurring: { interval: "month", interval_count: 1 } }) });
+    const out = await getProPricing({ env: ON, fetchPrice });
+    expect(out.annual).toBeNull();
+    expect(out.offered).toEqual({ month: true, year: false });
+    await getProPricing({ env: ON, fetchPrice });
+    expect(report).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers nothing when the monthly Stripe price is wrong (e.g. it bills every 3 months)", async () => {
+    const out = await getProPricing({
+      env: BILLING,
+      fetchPrice: fetcher({ price_m: price({ recurring: { interval: "month", interval_count: 3 } }) }),
+    });
+    expect(out).toMatchObject({ offered: { month: false, year: false }, source: "configured" });
+  });
+
+  it("caches Stripe's answer, keeps the last one when Stripe fails, and retries soon", async () => {
+    const fetchPrice = fetcher({ price_m: price() });
+    await getProPricing({ env: BILLING, fetchPrice, now: 0 });
+    await getProPricing({ env: BILLING, fetchPrice, now: PRICE_CACHE_MS - 1 });
+    expect(fetchPrice).toHaveBeenCalledTimes(1);
+    fetchPrice.mockRejectedValueOnce(new Error("Stripe down"));
+    const stale = await getProPricing({ env: BILLING, fetchPrice, now: PRICE_CACHE_MS + 1 });
+    expect(stale).toMatchObject({ monthly: { amount: 5, currency: "USD" }, offered: { month: true }, source: "stripe" });
+    await getProPricing({ env: BILLING, fetchPrice, now: PRICE_CACHE_MS + 2 });
+    expect(fetchPrice).toHaveBeenCalledTimes(2); // the failure is retried after a minute, not on every view
+  });
+
+  it("with Stripe unreachable and nothing cached, shows the configured price and sells nothing", async () => {
+    const out = await getProPricing({ env: ON, fetchPrice: fetcher({ price_m: new Error("down") }) });
+    expect(out).toEqual({
+      monthly: { amount: 9, currency: "USD" },
+      annual: null,
+      offered: { month: false, year: false },
+      source: "configured",
+    });
+  });
+
+  it("with billing off, the configured price is shown and Stripe is never asked", async () => {
+    const fetchPrice = fetcher({});
+    const out = await getProPricing({ env: { STUDYOS_PRO_MONTHLY_PRICE: "7" }, fetchPrice });
+    expect(out.monthly).toEqual({ amount: 7, currency: "USD" });
+    expect(fetchPrice).not.toHaveBeenCalled();
+  });
+
+  it("no saving is claimed across two currencies", async () => {
+    const out = await getProPricing({
+      env: ON,
+      fetchPrice: fetcher({ price_m: price(), price_y: yearly({ currency: "eur" }) }),
+    });
+    expect(out.annual?.savingsPercent).toBe(0);
   });
 });

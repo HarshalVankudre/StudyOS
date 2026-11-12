@@ -2,9 +2,12 @@ import type { Instrumentation } from "next";
 
 /**
  * Runs once when a server instance starts (never during `next build`).
- * Logs the configuration summary and, in production, exits when a required
- * environment variable is missing instead of silently serving template
- * workspaces.
+ * Logs the configuration summary and, in production, exits when something the
+ * app cannot run without at all is missing (database, Clerk auth keys, the AI
+ * key of a configured model) instead of silently serving template workspaces.
+ * A missing OPTIONAL secret (FEED_URL_KEY, CLERK_WEBHOOK_SIGNING_SECRET, an
+ * assets bucket that does not match the build, ...) never stops the server:
+ * its feature switches off and the summary ends with a WARNINGS block.
  *
  * This is the second line of defence. Next runs register() only after the
  * standalone server is already listening, so on its own a broken revision

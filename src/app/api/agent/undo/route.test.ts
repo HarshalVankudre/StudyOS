@@ -43,6 +43,28 @@ describe("POST /api/agent/undo", () => {
     expect(m.report).not.toHaveBeenCalled();
   });
 
+  it("refuses a cross-site request before doing anything (CSRF)", async () => {
+    const cross = (headers: Record<string, string>) =>
+      new Request("http://localhost/api/agent/undo", {
+        method: "POST",
+        headers: { host: "localhost", ...headers },
+        body: JSON.stringify({ changeId: "chg_1" }),
+      });
+    for (const headers of <Record<string, string>[]>[
+      { origin: "https://evil.example" },
+      { "sec-fetch-site": "cross-site" },
+      { origin: "http://localhost", "sec-fetch-site": "same-site" },
+    ]) {
+      const res = await POST(cross(headers));
+      expect(res.status).toBe(403);
+    }
+    expect(m.auth).not.toHaveBeenCalled();
+    expect(m.undo).not.toHaveBeenCalled();
+    m.undo.mockResolvedValue({ workspace: { id: "ws1" }, version: 5, changeId: "undo_1" });
+    const ok = await POST(cross({ origin: "http://localhost", "sec-fetch-site": "same-origin" }));
+    expect(ok.status).toBe(200);
+  });
+
   it("returns the restored workspace on success", async () => {
     m.undo.mockResolvedValue({ workspace: { id: "ws1" }, version: 5, changeId: "undo_1" });
     const res = await POST(request());

@@ -15,14 +15,20 @@ import {
   InvalidWorkspaceError,
   WorkspaceTooLargeError,
 } from "@/lib/workspace/repair";
-import { sampleWorkspace } from "@/lib/workspace/sample";
+import { prisma } from "@/lib/db";
+import { studentClock } from "@/lib/ai/student-clock";
+import { buildSampleWorkspace } from "@/lib/workspace/sample";
 import type { Workspace } from "@/lib/workspace/types";
+import type { SaveLog } from "@/lib/workspace/save-ids";
 
 /** Outcome of an autosave. Never throws for expected outcomes. */
 export type SaveWorkspaceActionResult =
   | { status: "saved"; version: number }
-  /** Someone (another tab, the AI agent) saved a newer version first. */
-  | { status: "conflict"; version: number }
+  /**
+   * Someone (another tab, the AI agent) saved a newer version first. `saves`
+   * lists recent editor saves, so the tab can see if one of its own landed.
+   */
+  | { status: "conflict"; version: number; saves?: SaveLog }
   /** The workspace no longer exists or was moved to the trash. */
   | { status: "not_found" }
   | { status: "too_large" }
@@ -32,17 +38,19 @@ export type SaveWorkspaceActionResult =
  * Save edits to a workspace (called by the editor's autosave). The document
  * is validated (and repaired where safe) on the server before it is written,
  * and only written if `baseVersion` is still the latest saved version.
+ * `saveId` (optional, from the editor) is recorded with the new version.
  */
 export async function saveWorkspaceAction(
   id: string,
   ws: Workspace,
   baseVersion: number,
+  saveId?: string,
 ): Promise<SaveWorkspaceActionResult> {
   if (typeof id !== "string" || !Number.isInteger(baseVersion)) {
     return { status: "invalid" };
   }
   try {
-    return await store.saveWorkspace(id, ws, baseVersion);
+    return await store.saveWorkspace(id, ws, baseVersion, saveId);
   } catch (error) {
     if (error instanceof WorkspaceTooLargeError) return { status: "too_large" };
     if (error instanceof InvalidWorkspaceError) return { status: "invalid" };
@@ -120,12 +128,28 @@ export async function duplicateWorkspaceAction(
     : { ok: false, code: "not_found", message: dict.safety.actionFailed };
 }
 
+/**
+ * The student's local day, in the time zone the Today plan recorded on their
+ * first visit (UTC when there is none yet), so the demo's dates sit around
+ * their today and nothing in it starts out overdue.
+ */
+async function studentToday(userId: string | null): Promise<string> {
+  try {
+    const config = userId
+      ? await prisma.dailyStudyAgentConfig.findUnique({ where: { userId }, select: { timeZone: true } })
+      : null;
+    return studentClock(config?.timeZone).date;
+  } catch {
+    return studentClock().date;
+  }
+}
+
 /** Save the built-in sample workspace and open it. */
 export async function loadDemoAction(): Promise<void> {
   const { userId } = await auth();
   // The demo button only shows on an empty home page; an account at the
   // workspace cap (reachable only by posting the action directly) gets none.
   if (userId && (await workspaceLimitReached(userId))) redirect("/app");
-  const id = await store.saveNewWorkspace(sampleWorkspace);
+  const id = await store.saveNewWorkspace(buildSampleWorkspace(await studentToday(userId)));
   redirect(`/app/${id}`);
 }

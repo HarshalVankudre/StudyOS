@@ -2,15 +2,17 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth, currentUser } from "@clerk/nextjs/server";
-import { SignOutButton } from "@clerk/nextjs";
 import { isPro } from "@/lib/billing";
 import {
   CREDIT_PACK_PRICE_USD,
   CREDIT_PACK_SIZE,
+  FREE_MONTHLY_CREDITS,
+  PRO_MONTHLY_CREDITS,
   getCreditBalance,
 } from "@/lib/credits";
 import { getI18n } from "@/lib/i18n/server";
 import { DeleteAccountButton } from "@/components/account/DeleteAccountButton";
+import { SignOutButton } from "@/components/account/SignOutButton";
 import { DownloadDataButton } from "@/components/account/DownloadDataButton";
 import { CalendarSubscribe } from "@/components/account/CalendarSubscribe";
 import { ManageAccountButton } from "@/components/account/ManageAccountButton";
@@ -160,7 +162,11 @@ export default async function SettingsPage() {
               {plural(dict.counts.credits, credits)}
             </span>
           </div>
-          <p className="mt-3 text-sm text-ink-soft">{S.creditsDesc}</p>
+          <p className="mt-3 text-sm text-ink-soft">
+            {pro
+              ? t(S.creditsDescPro, { monthly: PRO_MONTHLY_CREDITS.toLocaleString(locale) })
+              : t(S.creditsDescFree, { monthly: FREE_MONTHLY_CREDITS.toLocaleString(locale) })}
+          </p>
           <div className="mt-5 flex flex-wrap gap-3">
             <form action={buyCreditsAction}>
               <button
@@ -229,11 +235,10 @@ export default async function SettingsPage() {
 
         {/* Sign out */}
         <div className="mt-8 text-center">
-          <SignOutButton redirectUrl="/">
-            <button className="text-sm font-medium text-ink-soft transition hover:text-rose-600">
-              {S.signOut}
-            </button>
-          </SignOutButton>
+          <SignOutButton
+            label={S.signOut}
+            className="text-sm font-medium text-ink-soft transition hover:text-rose-600"
+          />
         </div>
       </main>
     </div>

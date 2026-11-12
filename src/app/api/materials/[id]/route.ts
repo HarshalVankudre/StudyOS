@@ -1,3 +1,4 @@
+import { rejectCrossSite } from "@/lib/http/same-origin";
 import { auth } from "@clerk/nextjs/server";
 import { allowMaterialRead, allowMaterialWrite } from "@/lib/materials/guard";
 import { deleteMaterial, getMaterial } from "@/lib/materials/store";
@@ -44,7 +45,9 @@ export async function GET(request: Request, { params }: Props) {
   return Response.json(body, { headers: { "Cache-Control": "private, no-store" } });
 }
 
-export async function DELETE(_request: Request, { params }: Props) {
+export async function DELETE(request: Request, { params }: Props) {
+  const crossSite = rejectCrossSite(request);
+  if (crossSite) return crossSite;
   const { userId } = await auth();
   if (!userId) return Response.json({ code: "not_authenticated" }, { status: 401 });
   if (!allowMaterialWrite(userId)) return Response.json({ code: "rate_limited" }, { status: 429 });

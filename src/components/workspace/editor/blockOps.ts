@@ -453,14 +453,17 @@ export function normalizeSearch(s: string): string {
 
 /**
  * Filter and rank insert items by `query`: label prefix first, then keyword
- * prefix, then substring matches; ties keep menu order.
+ * prefix, then substring matches, then (for a query of several words, like
+ * "study kit" or "quiz page") items where every word starts a word of the
+ * label or keywords; ties keep menu order.
  */
 export function filterInsertItems<T extends Pick<InsertItem, "label" | "keywords">>(
   items: readonly T[],
   query: string,
 ): T[] {
-  const q = normalizeSearch(query);
+  const q = normalizeSearch(query).replace(/\s+/g, " ");
   if (!q) return [...items];
+  const tokens = q.split(" ");
   const scored: { item: T; score: number; order: number }[] = [];
   items.forEach((item, order) => {
     const label = normalizeSearch(item.label);
@@ -470,6 +473,10 @@ export function filterInsertItems<T extends Pick<InsertItem, "label" | "keywords
     else if (keywords.some((k) => k.startsWith(q))) score = 1;
     else if (label.includes(q)) score = 2;
     else if (keywords.some((k) => k.includes(q))) score = 3;
+    else if (tokens.length > 1) {
+      const words = [label, ...keywords].flatMap((s) => s.split(/[\s\-–—:·.,/()]+/u)).filter(Boolean);
+      if (tokens.every((t) => words.some((w) => w.startsWith(t)))) score = 4;
+    }
     if (score >= 0) scored.push({ item, score, order });
   });
   scored.sort((a, b) => a.score - b.score || a.order - b.order);

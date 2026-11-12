@@ -4,7 +4,7 @@
  *  - General: AppShell (⌘/Ctrl+K, ?), WorkspaceEditor (undo/redo).
  *  - Editing: BlockText.handleKeyDown + PageView's editor (Enter, Shift+Enter,
  *    Backspace/Delete at the edges, ⌘/Ctrl+Shift+↑/↓, ↑/↓ at the edges, Esc,
- *    "/" insert menu) and the page title (Enter).
+ *    ⌘/Ctrl+/ block options, "/" insert menu) and the page title (Enter).
  *  - Markdown: SHORTCUTS in editor/blockOps.ts.
  *  - Study: StudySession (Space/Enter to flip, 1-4 to grade).
  */
@@ -43,6 +43,7 @@ export const SHORTCUT_GROUPS: { group: GroupKey; items: ShortcutDef[] }[] = [
       { item: "moveBlock", keys: [["Mod", "Shift", "↑"], ["Mod", "Shift", "↓"]] },
       { item: "navigate", keys: [["↑"], ["↓"]] },
       { item: "leaveBlock", keys: [["Esc"]] },
+      { item: "blockOptions", keys: [["Mod", "/"]] },
       { item: "titleEnter", keys: [["Enter"]] },
     ],
   },

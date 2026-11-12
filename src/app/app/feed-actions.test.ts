@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const m = vi.hoisted(() => ({
   userId: "user_1" as string | null,
@@ -34,6 +34,9 @@ vi.mock("@/lib/db", () => ({
     },
     usageEvent: { count: m.usageCount, create: m.usageCreate },
     subscription: { findUnique: m.subFindUnique },
+    // Usage limits count and record under an advisory lock in a transaction.
+    $transaction: async (fn: (tx: unknown) => unknown) =>
+      fn({ $queryRaw: async () => [], usageEvent: { count: m.usageCount, create: m.usageCreate } }),
   },
 }));
 vi.mock("@/lib/ops/report-error", () => ({ reportError: m.reportError }));
@@ -79,6 +82,7 @@ beforeEach(() => {
   m.feedCount.mockResolvedValue(0);
   m.fetchFeed.mockResolvedValue({ status: 200, contentType: "text/calendar", text: canvas, finalHost: "canvas.university.edu" });
 });
+afterEach(() => vi.unstubAllEnvs());
 
 describe("previewFeedAction", () => {
   it("fetches a webcal link over https and returns events, never the link", async () => {
@@ -164,6 +168,25 @@ describe("connectFeedAction", () => {
     });
     expect(result).toEqual({ ok: false, error: "already_connected" });
     expect(m.feedCreate).not.toHaveBeenCalled();
+  });
+
+  it("without FEED_URL_KEY in production: preview still works once, connecting is refused, nothing is stored", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("FEED_URL_KEY", "");
+    const preview = await previewFeedAction("ws1", SECRET);
+    expect(preview).toMatchObject({ ok: true, canConnect: false });
+    const result = await connectFeedAction({
+      workspaceId: "ws1",
+      databaseId: "db-assign",
+      url: SECRET,
+      platform: "canvas",
+      mapping: {},
+      series: [],
+    });
+    expect(result).toEqual({ ok: false, error: "links_unavailable" });
+    expect(m.feedCreate).not.toHaveBeenCalled();
+    vi.stubEnv("FEED_URL_KEY", "a-real-key");
+    expect(await previewFeedAction("ws1", SECRET)).toMatchObject({ ok: true, canConnect: true });
   });
 });
 

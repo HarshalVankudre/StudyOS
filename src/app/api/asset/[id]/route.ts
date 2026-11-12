@@ -2,6 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import { createAssetService } from "@/lib/assets/service";
 import { gcsAssetStore } from "@/lib/assets/storage";
 import { prismaAssetRepo } from "@/lib/assets/repo";
+import { remoteAssetImagesAvailable } from "@/lib/ops/env";
 
 export const runtime = "nodejs";
 
@@ -15,6 +16,10 @@ const assets = createAssetService({ store: gcsAssetStore(), repo: prismaAssetRep
 export async function GET(_request: Request, { params }: Props) {
   const { userId } = await auth();
   if (!userId) return new Response("Unauthorized", { status: 401 });
+
+  // A build whose image CSP does not allow the bucket in use serves no asset
+  // images (the browser would block them); the startup log says so.
+  if (!remoteAssetImagesAvailable()) return new Response("Not found", { status: 404 });
 
   const { id } = await params;
   const url = await assets.signedUrlForAsset(id, userId);

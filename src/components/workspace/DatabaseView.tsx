@@ -52,14 +52,46 @@ function writeTableChoice(viewId: string, table: boolean) {
  * toolbar, the active view (table, board, calendar, list or gallery) and a
  * row detail sheet. Sort and filter rules live in lib/workspace/view-logic.
  */
-export function DatabaseView({ databaseId, viewId }: { databaseId: string; viewId: string }) {
+export function DatabaseView({
+  databaseId,
+  viewId,
+  pageId,
+}: {
+  databaseId: string;
+  viewId: string;
+  /** The page the view sits on: a database named like its title shows no name label. */
+  pageId?: string;
+}) {
   const { workspace } = useWorkspace();
   const database = workspace.databases.find((d) => d.id === databaseId);
   if (!database || database.views.length === 0) return null;
-  return <DatabaseBody database={database} initialViewId={viewId} />;
+  const pageTitle = pageId ? workspace.pages.find((p) => p.id === pageId)?.title : undefined;
+  const repeatsTitle = pageTitle !== undefined && sameName(database.name, pageTitle);
+  return <DatabaseBody database={database} initialViewId={viewId} showName={!repeatsTitle} />;
 }
 
-function DatabaseBody({ database, initialViewId }: { database: Database; initialViewId: string }) {
+/** Names compared the way a reader sees them: case, spacing and emoji aside. */
+export function sameName(a: string, b: string): boolean {
+  const norm = (s: string) =>
+    s
+      .normalize("NFKC")
+      .replace(/[\p{Extended_Pictographic}️‍]/gu, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLocaleLowerCase();
+  const left = norm(a);
+  return left !== "" && left === norm(b);
+}
+
+function DatabaseBody({
+  database,
+  initialViewId,
+  showName,
+}: {
+  database: Database;
+  initialViewId: string;
+  showName: boolean;
+}) {
   const { workspace } = useWorkspace();
   const { dict } = useI18n();
   const actions = useDbActions(database.id);
@@ -69,6 +101,7 @@ function DatabaseBody({ database, initialViewId }: { database: Database; initial
   const deferredSearch = useDeferredValue(search);
   const [openRowId, setOpenRowId] = useState<string | null>(null);
   const sectionRef = useRef<HTMLElement>(null);
+  const [editingName, setEditingName] = useState(false);
 
   // A deep link (?db=&row=) to one of this database's rows: bring the
   // database into view and open the row's detail sheet.
@@ -182,30 +215,39 @@ function DatabaseBody({ database, initialViewId }: { database: Database; initial
   return (
     <section ref={sectionRef} className="my-4 min-w-0">
       <div className="mb-2 flex flex-wrap items-center gap-x-3 border-b border-line">
-        <div className="flex min-w-0 items-center gap-1.5 pb-2 text-sm font-medium text-ink-soft">
-          <input
-            value={database.icon ?? ""}
-            onChange={(e) =>
-              actions.withDb((db) => {
-                db.icon = e.target.value;
-              })
-            }
-            aria-label={dict.db.databaseIcon}
-            maxLength={8}
-            className="h-8 w-8 rounded bg-transparent text-center outline-none hover:bg-hover focus:bg-card focus:ring-1 focus:ring-ink/20"
-          />
-          <input
-            value={database.name}
-            onChange={(e) =>
-              actions.withDb((db) => {
-                db.name = e.target.value;
-              })
-            }
-            dir="auto"
-            aria-label={dict.db.nameAria}
-            className="h-8 w-40 min-w-0 rounded bg-transparent px-1 text-sm font-medium text-ink-soft outline-none hover:bg-hover focus:bg-card focus:ring-1 focus:ring-ink/20"
-          />
-        </div>
+        {/* Shown unless it would repeat the page title right above (then it
+            can still be renamed under "Customize fields & views"). */}
+        {(showName || editingName) && (
+          <div
+            className="flex min-w-0 items-center gap-1.5 pb-2 text-sm font-medium text-ink-soft"
+            // Typing a name equal to the title must not pull the field away.
+            onFocus={() => setEditingName(true)}
+            onBlur={() => setEditingName(false)}
+          >
+            <input
+              value={database.icon ?? ""}
+              onChange={(e) =>
+                actions.withDb((db) => {
+                  db.icon = e.target.value;
+                })
+              }
+              aria-label={dict.db.databaseIcon}
+              maxLength={8}
+              className="h-8 w-8 rounded bg-transparent text-center outline-none hover:bg-hover focus:bg-card focus:ring-1 focus:ring-ink/20"
+            />
+            <input
+              value={database.name}
+              onChange={(e) =>
+                actions.withDb((db) => {
+                  db.name = e.target.value;
+                })
+              }
+              dir="auto"
+              aria-label={dict.db.nameAria}
+              className="h-8 w-40 min-w-0 rounded bg-transparent px-1 text-sm font-medium text-ink-soft outline-none hover:bg-hover focus:bg-card focus:ring-1 focus:ring-ink/20"
+            />
+          </div>
+        )}
         <div className="-mb-px flex min-w-0 max-w-full items-center gap-0.5 overflow-x-auto" role="group" aria-label={dict.dbSettings.views}>
           {database.views.map((v) => {
             const Icon = VIEW_ICON[v.type] ?? Table2;
@@ -240,7 +282,7 @@ function DatabaseBody({ database, initialViewId }: { database: Database; initial
       <DatabaseSettings database={database} activeViewId={view.id} setActiveViewId={switchView} />
 
       {phoneList && today && (
-        <div className="mb-2 flex items-center justify-between gap-2 text-xs text-ink-faint">
+        <div data-print="hide" className="mb-2 flex items-center justify-between gap-2 text-xs text-ink-faint">
           <span>{showAsList ? dict.dbViews.shownAsList : null}</span>
           <button
             type="button"

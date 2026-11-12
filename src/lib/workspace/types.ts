@@ -181,6 +181,47 @@ export interface Database {
   properties: DatabaseProperty[];
   rows: DatabaseRow[];
   views: DatabaseView[];
+  /**
+   * How the courses in this list of graded work are graded, when part of a
+   * grade is shared by many items ("Problem sets 20%"). Read by every grades
+   * block over this database; see src/lib/grades.
+   */
+  grading?: GradingScheme;
+}
+
+/**
+ * A weighted part of a course grade that many items share ("Problem sets
+ * 20%", "Weekly homework 30%, lowest two dropped"). Its items are ordinary
+ * rows without a weight of their own; the category's score is the average of
+ * its scored items.
+ */
+export interface GradeCategory {
+  id: string;
+  /**
+   * The course it belongs to, as the grades block keys courses: a select
+   * option id or related row id of the course column, "text:<name>" for a
+   * text column, "*" when the list has no course column, "" for rows with no
+   * course.
+   */
+  course: string;
+  name: string;
+  /** Percent of the course grade. */
+  weight: number;
+  /** The lowest N scores in the category do not count. */
+  dropLowest?: number;
+  /** How many items the category will have in all, when known; absent = the items listed. */
+  expectedCount?: number;
+}
+
+export interface GradingScheme {
+  categories: GradeCategory[];
+  /**
+   * Rows placed by hand (row id -> category id), overriding the automatic
+   * match by type and title; "" = the row counts in no category.
+   */
+  assign?: Record<string, string>;
+  /** Weighted rows that look like categories but the student kept as rows. */
+  keptRows?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -206,6 +247,12 @@ export type BlockType =
 interface BaseBlock {
   id: string;
   type: BlockType;
+  /**
+   * Text blocks only: set when the sync engine kept this block as the second
+   * version of the block with this id (that paragraph was changed in two
+   * places at once). The editor marks it and offers to use it or discard it.
+   */
+  keptFrom?: string;
 }
 
 export interface HeadingBlock extends BaseBlock {

@@ -42,6 +42,7 @@ export function AddRowButton({ onClick, label, className = "" }: { onClick: () =
   return (
     <button
       type="button"
+      data-print="hide"
       onClick={onClick}
       className={`min-h-10 w-full px-3 py-2 text-start text-sm text-ink-faint transition hover:bg-hover hover:text-ink-soft ${className}`}
     >

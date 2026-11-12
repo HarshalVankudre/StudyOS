@@ -310,6 +310,31 @@ body {
   [role="dialog"] {
     display: none !important;
   }
+  /* Editing controls inside pages: block handles, "+ Add block", database
+     toolbars, study and grade buttons, icon-only buttons (open, delete,
+     settings) and toggles that are off (inactive view tabs). Content that
+     happens to be a button opts back in with data-print="keep". */
+  main [data-print="hide"],
+  main details,
+  main input[type="search"],
+  main button[aria-pressed="false"]:not([data-print="keep"]),
+  main button[aria-label]:has(> svg):not([data-print="keep"]):not([aria-pressed="true"]),
+  main [data-testid="grades-course"] button:not([data-print="keep"]) {
+    display: none !important;
+  }
+  /* Form fields read as plain text on paper. */
+  main select,
+  main input[type="date"],
+  main input[type="number"] {
+    appearance: none !important;
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+  main input[type="date"]::-webkit-calendar-picker-indicator,
+  main input[type="number"]::-webkit-inner-spin-button {
+    display: none;
+  }
   /* The editor is a fixed-height scrolling frame on screen; let it flow onto pages. */
   .h-\[100dvh\],
   main,

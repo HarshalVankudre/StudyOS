@@ -215,7 +215,13 @@ export type PushOutcome =
   /** Rejected for this subscription (other 4xx, e.g. VAPID key mismatch). */
   | { kind: "rejected"; status: number }
   /** Push service trouble or network failure: worth trying another time. */
-  | { kind: "retry"; status: number | null };
+  | { kind: "retry"; status: number | null }
+  /**
+   * The message itself is too big (refused before sending, or 413 from the
+   * push service). Says nothing about the subscription: never count it
+   * against the device.
+   */
+  | { kind: "too_large"; status: number | null };
 
 export interface SendOptions {
   /** Seconds the push service may hold the message for an offline device. */
@@ -237,6 +243,9 @@ export async function sendWebPush(
   vapid: VapidKeys,
   options: SendOptions,
 ): Promise<PushOutcome> {
+  // Checked before the keys: an oversized message is the message's fault,
+  // not the subscription's (see content.ts pushPayload, which never builds one).
+  if (Buffer.byteLength(payload, "utf8") > MAX_PAYLOAD_BYTES) return { kind: "too_large", status: null };
   let body: Buffer;
   let authorization: string;
   try {
@@ -279,6 +288,7 @@ export async function sendWebPush(
 export function classifyStatus(status: number): PushOutcome {
   if (status >= 200 && status < 300) return { kind: "sent", status };
   if (status === 404 || status === 410) return { kind: "gone", status };
+  if (status === 413) return { kind: "too_large", status };
   if (status === 429 || status >= 500) return { kind: "retry", status };
   return { kind: "rejected", status };
 }

@@ -19,27 +19,62 @@ import { buildSearchEntries, searchEntries, type SearchEntry, type SearchResults
 export const MAX_SEARCHED_WORKSPACES = 60;
 /** Cached workspaces across all students on this instance. */
 const CACHE_CAPACITY = 400;
+/**
+ * Estimated memory the cache may hold across all students on this instance.
+ * Entries take a few times the workspace JSON (each text is kept as written
+ * and folded), so a count bound alone let 400 large workspaces reach
+ * gigabytes. The least recently used workspaces are dropped first.
+ */
+export const CACHE_MAX_BYTES = 192 * 1024 * 1024;
+let cacheMaxBytes = CACHE_MAX_BYTES;
 
 interface CacheItem {
   stamp: string;
   entries: SearchEntry[];
+  bytes: number;
 }
 
 const cache = new Map<string, CacheItem>();
+let cachedBytes = 0;
 
-function remember(key: string, item: CacheItem) {
+/** Rough heap size of a workspace's entries: UTF-16 text plus per-object overhead. */
+export function estimateEntryBytes(entries: readonly SearchEntry[]): number {
+  let n = 64;
+  for (const e of entries) {
+    n += 160 + 2 * (e.title.length + e.body.length + e.fTitle.length + e.fBody.length + e.context.length);
+  }
+  return n;
+}
+
+function forget(key: string) {
+  const old = cache.get(key);
+  if (!old) return;
   cache.delete(key);
-  cache.set(key, item);
-  while (cache.size > CACHE_CAPACITY) {
+  cachedBytes -= old.bytes;
+}
+
+function remember(key: string, item: Omit<CacheItem, "bytes">) {
+  forget(key);
+  const bytes = estimateEntryBytes(item.entries);
+  cache.set(key, { ...item, bytes });
+  cachedBytes += bytes;
+  while (cache.size > CACHE_CAPACITY || (cachedBytes > cacheMaxBytes && cache.size > 1)) {
     const oldest = cache.keys().next().value;
-    if (oldest === undefined) break;
-    cache.delete(oldest);
+    if (oldest === undefined || oldest === key) break;
+    forget(oldest);
   }
 }
 
-/** Test hook: forget every cached workspace. */
-export function clearSearchCache() {
+/** Test hook: forget every cached workspace (and optionally set the byte bound). */
+export function clearSearchCache(maxBytes = CACHE_MAX_BYTES) {
   cache.clear();
+  cachedBytes = 0;
+  cacheMaxBytes = maxBytes;
+}
+
+/** Test hook: what the cache holds now. */
+export function searchCacheStats(): { items: number; bytes: number } {
+  return { items: cache.size, bytes: cachedBytes };
 }
 
 /** Search every non-trashed workspace owned by `ownerId`. */
@@ -56,7 +91,9 @@ export async function searchForOwner(ownerId: string, query: string): Promise<Se
   const keyOf = (id: string) => `${ownerId}\u0000${id}`;
 
   const stale = rows.filter((r) => cache.get(keyOf(r.id))?.stamp !== stampOf(r));
-  const fresh = new Set<string>();
+  // Built this query: used directly, so a workspace the byte bound evicted
+  // again at once still counts in these results.
+  const fresh = new Map<string, SearchEntry[]>();
   if (stale.length > 0) {
     const docs = await prisma.workspace.findMany({
       // Owner and trash are checked again: the list above may be a moment old.
@@ -65,19 +102,22 @@ export async function searchForOwner(ownerId: string, query: string): Promise<Se
     });
     for (const doc of docs) {
       const ws = parseStoredWorkspace(doc);
-      fresh.add(doc.id);
-      remember(keyOf(doc.id), {
-        stamp: stampOf(doc),
-        entries: ws ? buildSearchEntries({ ...ws, id: doc.id }) : [],
-      });
+      const built = ws ? buildSearchEntries({ ...ws, id: doc.id }) : [];
+      fresh.set(doc.id, built);
+      remember(keyOf(doc.id), { stamp: stampOf(doc), entries: built });
     }
   }
 
   const entries: SearchEntry[] = [];
   for (const r of rows) {
+    const built = fresh.get(r.id);
+    if (built) {
+      for (const e of built) entries.push(e);
+      continue;
+    }
     const item = cache.get(keyOf(r.id));
     // Skip a workspace that vanished (trashed) between the two reads.
-    if (item && (fresh.has(r.id) || item.stamp === stampOf(r))) entries.push(...item.entries);
+    if (item && item.stamp === stampOf(r)) for (const e of item.entries) entries.push(e);
   }
   return searchEntries(entries, query);
 }

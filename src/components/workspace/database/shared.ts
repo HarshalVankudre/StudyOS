@@ -10,7 +10,7 @@ import type {
   Workspace,
 } from "@/lib/workspace/types";
 import { getOption, titleProperty } from "@/lib/workspace/helpers";
-import { dayKeyOf, type RelationLabeler } from "@/lib/workspace/view-logic";
+import { completionField, dayKeyOf, type RelationLabeler } from "@/lib/workspace/view-logic";
 
 export const VIEW_TYPES: DBView["type"][] = ["table", "board", "calendar", "list", "gallery"];
 
@@ -31,7 +31,7 @@ export const PAGE_SIZE = 100;
 /** Cards rendered per board column before "Show more". */
 export const BOARD_PAGE_SIZE = 50;
 
-/** The view's columns, in its saved order (all properties when it has no list). */
+/** The view's columns, in its saved order (all properties, title / date / status first, when it has no list). */
 export function visibleProps(db: Database, view: DBView): DatabaseProperty[] {
   if (view.visiblePropertyIds) {
     const shown = view.visiblePropertyIds
@@ -39,7 +39,25 @@ export function visibleProps(db: Database, view: DBView): DatabaseProperty[] {
       .filter((p): p is DatabaseProperty => Boolean(p));
     if (shown.length > 0) return shown;
   }
-  return db.properties;
+  return defaultPropertyOrder(db);
+}
+
+/**
+ * Column order for a view that has not chosen its own: the title, then when
+ * it is due and where it stands (the first date and the status field), then
+ * the rest as the database lists them. What a student scans for comes first,
+ * so it is in view without scrolling sideways.
+ */
+export function defaultPropertyOrder(db: Database): DatabaseProperty[] {
+  const title = titleProperty(db);
+  const date = db.properties.find((p) => p.type === "date");
+  const status =
+    completionField(db)?.property ?? db.properties.find((p) => p.type === "status");
+  const front: DatabaseProperty[] = [];
+  for (const p of [title, date, status]) {
+    if (p && !front.includes(p)) front.push(p);
+  }
+  return [...front, ...db.properties.filter((p) => !front.includes(p))];
 }
 
 /** Every property: the visible ones in view order, then the hidden ones. */

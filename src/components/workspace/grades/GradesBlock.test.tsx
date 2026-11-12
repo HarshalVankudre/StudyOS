@@ -7,7 +7,9 @@ import { fmt } from "@/lib/i18n/interpolate";
 
 const h = vi.hoisted(() => ({
   update: vi.fn(),
+  undo: vi.fn(),
   store: { workspace: null as unknown as Workspace, listeners: new Set<() => void>() },
+  history: [] as Workspace[],
 }));
 
 // A tiny store standing in for WorkspaceContext: `update` applies the mutator
@@ -21,13 +23,14 @@ vi.mock("../WorkspaceContext", async () => {
         h.store.listeners.add(force);
         return () => void h.store.listeners.delete(force);
       }, []);
-      return { workspace: h.store.workspace, update: h.update };
+      return { workspace: h.store.workspace, update: h.update, undo: h.undo };
     },
   };
 });
-vi.mock("@/lib/i18n/client", () => ({
-  useI18n: () => ({ dict: en, t: fmt, locale: "en", dir: "ltr" }),
-}));
+vi.mock("@/lib/i18n/client", async () => {
+  const { pluralizer } = await import("@/lib/i18n/plural");
+  return { useI18n: () => ({ dict: en, t: fmt, plural: pluralizer("en"), locale: "en", dir: "ltr" }) };
+});
 
 import { GradesBlock } from "./GradesBlock";
 import { useWorkspace } from "../WorkspaceContext";
@@ -100,10 +103,20 @@ function card(label: string) {
 beforeEach(() => {
   h.store.listeners.clear();
   h.update.mockReset();
+  h.history = [];
   h.update.mockImplementation((mutator: (d: Workspace) => void) => {
     const draft = structuredClone(h.store.workspace);
     mutator(draft);
+    h.history.push(h.store.workspace);
     h.store.workspace = draft;
+    h.store.listeners.forEach((l) => l());
+  });
+  // Workspace undo: the step before the last edit comes back.
+  h.undo.mockReset();
+  h.undo.mockImplementation(() => {
+    const previous = h.history.pop();
+    if (!previous) return;
+    h.store.workspace = previous;
     h.store.listeners.forEach((l) => l());
   });
 });
@@ -343,5 +356,184 @@ describe("GradesBlock: keyboard focus", () => {
     await user.click(screen.getByRole("button", { name: G.editColumns }));
     await user.click(screen.getByRole("button", { name: G.cancel }));
     expect(screen.getByRole("button", { name: G.settings })).toHaveFocus();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Grading categories
+
+/** The QA workspace: category rows ("Problem sets 20%") among real work. */
+function chem(): Database {
+  return {
+    id: "db-a",
+    name: "Graded Work",
+    properties: [
+      { id: "a-name", name: "Assignment", type: "text" },
+      { id: "a-course", name: "Course", type: "select", options: [{ id: "co-chem", label: "CHEM 210" }] },
+      {
+        id: "a-type",
+        name: "Type",
+        type: "select",
+        options: [
+          { id: "ty-ps", label: "Problem set" },
+          { id: "ty-lab", label: "Lab report" },
+          { id: "ty-exam", label: "Exam" },
+          { id: "ty-quiz", label: "Quiz" },
+          { id: "ty-group", label: "Grade group" },
+        ],
+      },
+      {
+        id: "a-status",
+        name: "Status",
+        type: "status",
+        options: [
+          { id: "st-todo", label: "Not started" },
+          { id: "st-done", label: "Done", color: "green" },
+        ],
+      },
+      { id: "a-due", name: "Due", type: "date" },
+      { id: "a-weight", name: "Weight %", type: "number" },
+      { id: "a-score", name: "Score", type: "number" },
+    ],
+    rows: [
+      { id: "g-ps", cells: { "a-name": "Problem sets", "a-course": "co-chem", "a-type": "ty-group", "a-status": "st-todo", "a-weight": 20 } },
+      { id: "g-lab", cells: { "a-name": "Lab reports", "a-course": "co-chem", "a-type": "ty-group", "a-status": "st-todo", "a-weight": 15 } },
+      { id: "mid", cells: { "a-name": "Midterm 2", "a-course": "co-chem", "a-type": "ty-exam", "a-status": "st-todo", "a-weight": 25, "a-due": "2026-12-03" } },
+      { id: "fin", cells: { "a-name": "Final exam", "a-course": "co-chem", "a-type": "ty-exam", "a-status": "st-todo", "a-weight": 40, "a-due": "2026-12-16" } },
+      { id: "ps4", cells: { "a-name": "Problem Set 4", "a-course": "co-chem", "a-type": "ty-ps", "a-status": "st-todo", "a-due": "2026-11-03" } },
+      { id: "ps5", cells: { "a-name": "Problem Set 5", "a-course": "co-chem", "a-type": "ty-ps", "a-status": "st-todo", "a-due": "2026-11-17" } },
+      { id: "lab4", cells: { "a-name": "Lab Report 4", "a-course": "co-chem", "a-type": "ty-lab", "a-status": "st-todo", "a-due": "2026-11-20" } },
+      // Imported from a calendar feed: no type.
+      { id: "feed", cells: { "a-name": "Problem Set 6", "a-course": "co-chem", "a-status": "st-todo", "a-due": "2026-12-01" } },
+      { id: "q1", cells: { "a-name": "Pop quiz", "a-course": "co-chem", "a-type": "ty-quiz", "a-status": "st-todo", "a-due": "2026-11-25" } },
+    ],
+    views: [{ id: "v", name: "All", type: "table" }],
+  };
+}
+const C = G.categories;
+const dbRows = () => h.store.workspace.databases[0].rows;
+const scheme = () => h.store.workspace.databases[0].grading;
+
+describe("GradesBlock: grading categories", () => {
+  it("offers to turn category rows into category weights, and undoes it", async () => {
+    const user = userEvent.setup();
+    setStore(configured, chem());
+    render(<Harness />);
+    const offer = screen.getByTestId("grades-cleanup");
+    expect(offer).toHaveTextContent("“Problem sets”, “Lab reports”");
+    // Before: a share of the grade sits on rows, so real work decides nothing.
+    expect(card("CHEM 210").getByText(/0% of the grade decided/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: G.cleanup.convert }));
+    expect(dbRows().map((r) => r.id)).not.toContain("g-ps");
+    expect(scheme()?.categories.map((c) => [c.name, c.weight])).toEqual([
+      ["Problem sets", 20],
+      ["Lab reports", 15],
+    ]);
+    expect(screen.queryByTestId("grades-cleanup")).not.toBeInTheDocument();
+    expect(screen.getByText(fmt(G.cleanup.done.other, { count: 2 }))).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: G.cleanup.undo }));
+    expect(h.undo).toHaveBeenCalledTimes(1);
+    expect(dbRows().map((r) => r.id)).toContain("g-ps");
+    expect(screen.getByTestId("grades-cleanup")).toBeInTheDocument();
+  });
+
+  it("keeps the rows when the student declines, and keeps working", async () => {
+    const user = userEvent.setup();
+    setStore(configured, chem());
+    render(<Harness />);
+    await user.click(screen.getByRole("button", { name: G.cleanup.keep }));
+    expect(screen.queryByTestId("grades-cleanup")).not.toBeInTheDocument();
+    expect(scheme()?.keptRows).toEqual(["g-ps", "g-lab"]);
+    expect(dbRows()).toHaveLength(9);
+    expect(card("CHEM 210").getByTestId("grades-current")).toHaveTextContent("—");
+  });
+
+  it("a score on one problem set moves the grade, and the row does not jump", async () => {
+    const user = userEvent.setup();
+    setStore(configured, chem());
+    render(<Harness />);
+    await user.click(screen.getByRole("button", { name: G.cleanup.convert }));
+    const c = card("CHEM 210");
+    expect(c.getByTestId("grades-current")).toHaveTextContent("—");
+
+    await user.click(c.getByRole("button", { name: fmt(G.showScores, { count: 7 }) }));
+    const order = () => screen.getAllByLabelText(/^Score for /).map((el) => el.getAttribute("aria-label"));
+    const before = order();
+    await user.type(screen.getByLabelText(fmt(G.scoreAria, { item: "Problem Set 4" })), "85{Enter}");
+    expect(row("ps4").cells["a-score"]).toBe(85);
+    expect(c.getByTestId("grades-current")).toHaveTextContent("85%");
+    // One of three problem sets: a third of 20 %.
+    expect(c.getByText(/7% of the grade decided/)).toBeInTheDocument();
+    const ps = c.getAllByTestId("grades-category")[0];
+    expect(within(ps).getByTestId("grades-category-average")).toHaveTextContent("85%");
+    // The calendar row without a type counts in Problem sets by its title.
+    expect(ps).toHaveTextContent(fmt(C.scored, { scored: 1, count: 3 }));
+    expect(ps).toHaveTextContent(fmt(C.countAssumed, { count: 3 }));
+    expect(order()).toEqual(before);
+  });
+
+  it("shows uncategorised work as not counted, with a one-tap fix", async () => {
+    const user = userEvent.setup();
+    setStore(configured, chem());
+    render(<Harness />);
+    await user.click(screen.getByRole("button", { name: G.cleanup.convert }));
+    const box = within(screen.getByTestId("grades-uncategorized"));
+    expect(box.getByText("Pop quiz")).toBeInTheDocument();
+    expect(box.getByText(fmt(G.notes.uncategorized, { count: 1 }))).toBeInTheDocument();
+
+    await user.click(box.getByRole("button", { name: fmt(C.assignAria, { item: "Pop quiz", category: "Lab reports" }) }));
+    const lab = scheme()!.categories.find((c) => c.name === "Lab reports")!;
+    expect(scheme()?.assign).toEqual({ q1: lab.id });
+    expect(screen.queryByTestId("grades-uncategorized")).not.toBeInTheDocument();
+  });
+
+  it("lets the student say how many items a category will have", async () => {
+    const user = userEvent.setup();
+    setStore(configured, chem());
+    render(<Harness />);
+    await user.click(screen.getByRole("button", { name: G.cleanup.convert }));
+    await user.type(screen.getByLabelText(fmt(C.countAria, { name: "Problem sets" })), "10{Enter}");
+    expect(scheme()?.categories[0].expectedCount).toBe(10);
+    const ps = card("CHEM 210").getAllByTestId("grades-category")[0];
+    expect(ps).toHaveTextContent(fmt(C.scored, { scored: 0, count: 10 }));
+    expect(within(ps).queryByTestId("grades-count-assumed")).not.toBeInTheDocument();
+  });
+
+  it("edits, adds and removes categories", async () => {
+    const user = userEvent.setup();
+    setStore(configured, chem());
+    render(<Harness />);
+    await user.click(screen.getByRole("button", { name: G.cleanup.convert }));
+    await user.click(card("CHEM 210").getByRole("button", { name: C.edit }));
+    const weight = screen.getByLabelText(fmt(C.weightAria, { name: "Problem sets" }));
+    await user.clear(weight);
+    await user.type(weight, "25{Enter}");
+    await user.selectOptions(screen.getByLabelText(fmt(C.dropAria, { name: "Problem sets" })), "1");
+    expect(scheme()?.categories[0]).toMatchObject({ weight: 25, dropLowest: 1 });
+    await user.click(screen.getByRole("button", { name: fmt(C.remove, { name: "Lab reports" }) }));
+    await user.click(screen.getByRole("button", { name: C.add }));
+    expect(scheme()?.categories.map((c) => c.name)).toEqual(["Problem sets", C.newName]);
+  });
+
+  it("names a percentage target as a percentage on the UK scale, and a class with its own threshold", async () => {
+    const user = userEvent.setup();
+    setStore({ ...configured, scale: "uk_degree", targets: { "co-bio": 80 } });
+    render(<Harness />);
+    const bio = card("BIO 101");
+    // 80 % is not what a First needs (70 %): never "First (80%)".
+    expect(bio.getByTestId("grades-outlook")).toHaveTextContent(
+      fmt(G.outlook.needed, {
+        target: fmt(G.targetAside, { percent: "80%", grade: "First" }),
+        average: "73.3%",
+        remaining: "60%",
+      }),
+    );
+    await user.selectOptions(bio.getByLabelText(fmt(G.targetAria, { course: "BIO 101" })), "70");
+    // (70*100 - 40*90) / 60 = 56.7
+    expect(bio.getByTestId("grades-outlook")).toHaveTextContent(
+      fmt(G.outlook.needed, { target: "First (70%)", average: "56.7%", remaining: "60%" }),
+    );
   });
 });

@@ -71,10 +71,13 @@ vi.mock("@/lib/i18n/client", () => ({
         clearFailed: "Could not clear",
         stoppedAtLimit: "Stopped at limit",
       },
-      credits: { amount: "{count} credits", turnCostTitle: "Cost" },
+      credits: { turnCostTitle: "Cost" },
+      counts: { credits: { one: "{count} credit", other: "{count} credits" } },
     },
     t: (template: string, values: Record<string, unknown>) =>
       template.replace(/\{(\w+)\}/g, (_m, key: string) => String(values[key])),
+    plural: (forms: { one: string; other: string }, count: number) =>
+      (count === 1 ? forms.one : forms.other).replace("{count}", String(count)),
   }),
 }));
 
@@ -161,7 +164,7 @@ describe("AgentChat memory", () => {
             { id: "m1", role: "user", content: "add a quiz friday", createdAt: "2026-11-12T00:00:00Z" },
             { id: "m2", role: "assistant", content: "Added the quiz.", changed: true, changeId: "c-old", undo: "unavailable", createdAt: "2026-11-12T00:00:01Z" },
             { id: "m3", role: "user", content: "sort by due date", createdAt: "2026-11-12T00:00:02Z" },
-            { id: "m4", role: "assistant", content: "Sorted.", changed: true, changeId: "c-new", undo: "available", createdAt: "2026-11-12T00:00:03Z" },
+            { id: "m4", role: "assistant", content: "Sorted.", changed: true, changeId: "c-new", undo: "available", creditsCost: 1, createdAt: "2026-11-12T00:00:03Z" },
             { id: "m5", role: "assistant", content: "Renamed.", changed: true, changeId: "c-undone", undo: "undone", creditsCost: 2, createdAt: "2026-11-12T00:00:04Z" },
           ],
         }),
@@ -175,6 +178,8 @@ describe("AgentChat memory", () => {
     expect(screen.queryByTestId("undo-c-undone")).not.toBeInTheDocument();
     expect(screen.getByText("Undone")).toBeInTheDocument();
     expect(screen.getByText("2 credits")).toBeInTheDocument();
+    // A one-credit turn reads "1 credit", never "1 credits".
+    expect(screen.getByText("1 credit")).toBeInTheDocument();
   });
 
   it("re-checks Undo when the workspace is saved again and hides a stale one", async () => {

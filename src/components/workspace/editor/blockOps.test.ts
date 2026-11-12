@@ -14,6 +14,7 @@ import {
   matchMarkdownShortcut,
   moveBlock,
   moveBlockTo,
+  studyKitSlashItems,
   TEXT_KINDS,
   type TextBlock,
 } from "./blockOps";
@@ -151,5 +152,14 @@ describe("insert menu catalogue", () => {
     expect(filterInsertItems(items, "assign")[0].id).toBe("linked:db1");
     expect(filterInsertItems(items, "zzz")).toEqual([]);
     expect(filterInsertItems(items, "")).toHaveLength(items.length);
+  });
+
+  it("matches queries of several words, word by word", () => {
+    const all = [...items, ...studyKitSlashItems(en, true)];
+    expect(filterInsertItems(all, "study kit")[0].id).toBe("study-kit:material");
+    expect(filterInsertItems(all, "study  kit ")[0].id).toBe("study-kit:material");
+    expect(filterInsertItems(all, "quiz page").map((i) => i.id)).toEqual(["study-kit:page-quiz"]);
+    expect(filterInsertItems(all, "linked assign").map((i) => i.id)).toEqual(["linked:db1"]);
+    expect(filterInsertItems(all, "heading zzz")).toEqual([]);
   });
 });

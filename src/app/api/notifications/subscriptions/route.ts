@@ -25,11 +25,14 @@ export async function POST(req: Request) {
   const check = checkSubscription(body?.subscription);
   if (!check.ok) return Response.json({ error: check.reason }, { status: 400 });
   try {
-    await addPushSubscription(userId, check, {
+    const added = await addPushSubscription(userId, check, {
       timeZone: typeof body?.timeZone === "string" ? body.timeZone : undefined,
       locale: typeof body?.locale === "string" ? body.locale : undefined,
       label: deviceLabel(req.headers.get("user-agent")),
     });
+    // Another student's device record: the browser re-subscribes (a fresh
+    // endpoint) and tries again; see addPushSubscription.
+    if (added === "taken") return Response.json({ error: "endpoint_taken" }, { status: 409 });
     const settings = await getNotificationSettings(userId);
     return Response.json({ ok: true, devices: settings.devices, preferences: settings.preferences });
   } catch (error) {

@@ -64,7 +64,7 @@ export function GalleryView({ db, view, rows, actions, onOpen, onAdd, empty }: V
             </li>
           );
         })}
-        <li>
+        <li data-print="hide">
           <button
             type="button"
             onClick={() => onOpen(onAdd())}

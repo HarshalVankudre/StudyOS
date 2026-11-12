@@ -151,7 +151,9 @@ export async function runRetention(now = new Date()): Promise<RetentionResult> {
   });
 
   // Billing jobs Stripe failed part-way and stopped retrying (a refund, a
-  // deleted account's cancellation), abandoned credit holds, rows past their
+  // deleted account's or lost dispute's cancellation), abandoned credit holds
+  // (and settles that failed), the one-off repair of rows the previous code
+  // wrote (result.billing.unsynced; remaining 0 = complete), rows past their
   // paid period. Never stops data retention; failures are retried next run.
   const billing = await runBillingMaintenance(now).catch((error) => {
     reportError(error, { source: "retention", route: "runBillingMaintenance" });

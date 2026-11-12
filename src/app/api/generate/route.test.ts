@@ -16,8 +16,8 @@ const mocks = vi.hoisted(() => ({
   releaseCreditHold: vi.fn(),
   getCreditBalance: vi.fn(),
   checkUsageLimit: vi.fn(),
-  isUsageLimitReached: vi.fn(),
-  recordUsageEvent: vi.fn(),
+  claimOutcomeSlot: vi.fn(),
+  releaseOutcomeSlot: vi.fn(),
   workspaceLimitReached: vi.fn(),
   saveNewWorkspace: vi.fn(),
   normalizeSourceText: vi.fn(),
@@ -51,8 +51,8 @@ vi.mock("@/lib/credits", () => ({
 }));
 vi.mock("@/lib/usage-limits", () => ({
   checkUsageLimit: mocks.checkUsageLimit,
-  isUsageLimitReached: mocks.isUsageLimitReached,
-  recordUsageEvent: mocks.recordUsageEvent,
+  claimOutcomeSlot: mocks.claimOutcomeSlot,
+  releaseOutcomeSlot: mocks.releaseOutcomeSlot,
   workspaceLimitReached: mocks.workspaceLimitReached,
   MAX_WORKSPACES_PER_USER: 200,
   recordFunnelEvent: vi.fn(),
@@ -65,7 +65,8 @@ import { POST as CANCEL } from "./cancel/route";
 import { GenerationCancelledError, GenerationFailedError } from "@/lib/ai/generate";
 import { en } from "@/lib/i18n/dictionaries/en";
 import { fmt } from "@/lib/i18n/interpolate";
-import { MIN_GENERATION_BALANCE } from "@/lib/credits-info";
+import { buildCreditCost, MIN_GENERATION_BALANCE } from "@/lib/credits-info";
+import { modelForPlan } from "@/lib/ai/plans";
 
 const HOLD = { id: "hold-1", userId: "user-1", amount: MIN_GENERATION_BALANCE, reason: "generate" };
 
@@ -98,8 +99,8 @@ beforeEach(() => {
   mocks.auth.mockResolvedValue({ userId: "user-1" });
   mocks.hasCredits.mockResolvedValue(true);
   mocks.checkUsageLimit.mockResolvedValue({ allowed: true, remaining: 5 });
-  mocks.isUsageLimitReached.mockResolvedValue(false);
-  mocks.recordUsageEvent.mockResolvedValue(undefined);
+  mocks.claimOutcomeSlot.mockResolvedValue({ allowed: true, slot: "slot-1" });
+  mocks.releaseOutcomeSlot.mockResolvedValue(undefined);
   mocks.normalizeSourceText.mockImplementation((text: string) => text.trim());
   mocks.workspaceLimitReached.mockResolvedValue(false);
   mocks.getCreditBalance.mockResolvedValue(100);
@@ -127,10 +128,13 @@ describe("POST /api/generate", () => {
     const stream = await events(await POST(request({ prompt: "CS student" })));
     expect(stream.at(-1)).toMatchObject({ type: "complete", workspaceId: "ws-new", credits: 24 });
     expect(mocks.saveNewWorkspace).toHaveBeenCalledOnce();
-    // The build's credits were held before any model call and settled to the real cost.
+    // Up to the most a build can cost on the configured model was held
+    // before any model call (at least the typical cost), and settled to the real cost.
+    const cost = buildCreditCost(modelForPlan("free"));
+    expect(cost.max).toBeGreaterThan(cost.typical);
     expect(mocks.reserveCredits).toHaveBeenCalledWith("user-1", {
-      estimate: MIN_GENERATION_BALANCE,
-      min: MIN_GENERATION_BALANCE,
+      estimate: cost.max,
+      min: cost.typical,
       reason: "generate",
     });
     expect(mocks.reserveCredits.mock.invocationCallOrder[0]).toBeLessThan(
@@ -138,6 +142,11 @@ describe("POST /api/generate", () => {
     );
     expect(mocks.settleCreditHold).toHaveBeenCalledWith(HOLD, 24);
     expect(mocks.chargeCredits).not.toHaveBeenCalled();
+    // The failure slot claimed up front is withdrawn: this build did not fail.
+    expect(mocks.claimOutcomeSlot.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.planWorkspace.mock.invocationCallOrder[0],
+    );
+    expect(mocks.releaseOutcomeSlot).toHaveBeenCalledWith("slot-1");
   });
 
   it("a failed generation is not saved, not charged, and tells the client it can retry", async () => {
@@ -154,8 +163,10 @@ describe("POST /api/generate", () => {
     expect(mocks.chargeCredits).not.toHaveBeenCalled();
     expect(mocks.settleCreditHold).not.toHaveBeenCalled();
     expect(mocks.releaseCreditHold).toHaveBeenCalledWith(HOLD);
-    // …but it counts against the small failed-generation quota.
-    expect(mocks.recordUsageEvent).toHaveBeenCalledWith("user-1", "generate_failed");
+    // …but it counts against the small failed-generation quota: the slot
+    // claimed before the build started is kept.
+    expect(mocks.claimOutcomeSlot).toHaveBeenCalledWith("user-1", "generate_failed");
+    expect(mocks.releaseOutcomeSlot).not.toHaveBeenCalled();
   });
 
   it("out of credits stops before any model call, with a code the client can act on", async () => {
@@ -187,12 +198,12 @@ describe("POST /api/generate", () => {
   });
 
   it("after a few failed builds, new ones wait (and nothing runs or is charged)", async () => {
-    mocks.isUsageLimitReached.mockResolvedValue(true);
+    mocks.claimOutcomeSlot.mockResolvedValue({ allowed: false, slot: null });
     const stream = await events(await POST(request({ prompt: "CS student" })));
     expect(stream).toEqual([
       { type: "error", code: "too_many_failures", message: en.limits.failedGenerations },
     ]);
-    expect(mocks.isUsageLimitReached).toHaveBeenCalledWith("user-1", "generate_failed");
+    expect(mocks.claimOutcomeSlot).toHaveBeenCalledWith("user-1", "generate_failed");
     expect(mocks.planWorkspace).not.toHaveBeenCalled();
     expect(mocks.chargeCredits).not.toHaveBeenCalled();
     expect(mocks.reserveCredits).not.toHaveBeenCalled();
@@ -225,7 +236,8 @@ describe("POST /api/generate", () => {
   it("a cancelled run is not counted as a failure", async () => {
     mocks.generateWorkspace.mockRejectedValue(new GenerationCancelledError());
     await events(await POST(request({ prompt: "CS student" })));
-    expect(mocks.recordUsageEvent).not.toHaveBeenCalled();
+    // The failure slot claimed up front is withdrawn.
+    expect(mocks.releaseOutcomeSlot).toHaveBeenCalledWith("slot-1");
   });
 
   it("refuses at the workspace cap before any model call", async () => {

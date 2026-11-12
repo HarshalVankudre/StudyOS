@@ -53,8 +53,10 @@ describe("windowHistory (what the model sees)", () => {
     ];
     const window = windowHistory(rows, { c2: "undone" });
     expect(window[0]).toEqual({ role: "user", content: "the CHEM110 course" });
-    expect(window[1].content).toContain("[Changed: added row [r_9]");
-    expect(window[2].content).toContain("the student later undid this");
+    // The note travels apart from the reply so the agent loop can fence it as data.
+    expect(window[1].content).toBe("Added the quiz.");
+    expect(window[1].note).toContain("added row [r_9]");
+    expect(window[2].note).toContain("the student later undid this");
   });
 });
 

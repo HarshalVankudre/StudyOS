@@ -17,7 +17,8 @@ const mocks = vi.hoisted(() => ({ rows: [] as Row[], findMany: vi.fn() }));
 vi.mock("@clerk/nextjs/server", () => ({ auth: vi.fn() }));
 vi.mock("@/lib/db", () => ({ prisma: { workspace: { findMany: mocks.findMany } } }));
 
-import { clearSearchCache, searchForOwner } from "./server";
+import { clearSearchCache, estimateEntryBytes, searchCacheStats, searchForOwner } from "./server";
+import { buildSearchEntries } from "./index";
 
 function matches(row: Row, where: Record<string, unknown>): boolean {
   if (where.ownerId !== undefined && row.ownerId !== where.ownerId) return false;
@@ -113,5 +114,31 @@ describe("searchForOwner", () => {
     add("alice", workspace("new", "New", "y"), { at: 5 });
     const r = await searchForOwner("alice", "");
     expect(r.groups[0].hits.map((h) => h.href)).toEqual(["/app/new", "/app/old"]);
+  });
+
+  it("bounds the cache by estimated bytes, not only by count, and still answers in full", async () => {
+    const big = (id: string, word: string): Workspace => ({
+      id,
+      name: id,
+      pages: [
+        {
+          id: `${id}-p`,
+          title: word,
+          blocks: Array.from({ length: 200 }, (_, i) => ({ id: `${id}-${i}`, type: "paragraph" as const, text: `${word} ${"x".repeat(3000)}` })),
+        },
+      ],
+      databases: [],
+    });
+    const one = estimateEntryBytes(buildSearchEntries(big("probe", "probe")));
+    // Room for about three of these workspaces.
+    clearSearchCache(one * 3.5);
+    for (let i = 0; i < 10; i++) add("alice", big(`w${i}`, `topic${i}`), { at: i });
+    const r = await searchForOwner("alice", "topic");
+    // Every workspace answers this query even though most were evicted at once.
+    expect(new Set(r.groups.flatMap((g) => g.hits.map((h) => h.workspaceId))).size).toBeGreaterThan(3);
+    expect(r.total).toBe(10 * 201);
+    const stats = searchCacheStats();
+    expect(stats.bytes).toBeLessThanOrEqual(one * 3.5);
+    expect(stats.items).toBeLessThanOrEqual(3);
   });
 });

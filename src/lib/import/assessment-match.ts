@@ -212,6 +212,76 @@ function kindOf(word: string): string | undefined {
   return KIND_INDEX.get(word);
 }
 
+// ---------------------------------------------------------------------------
+// Categories ("Problem sets 20%") versus single items ("Midterm 20%")
+
+/** Plural or collective forms of kind words (accents removed, lowercase). */
+const PLURAL_KIND_WORDS = new Set([
+  "projects", "proyectos", "projekte", "projets", "progetti", "projetos", "projecten",
+  "papers", "essays", "reports", "informes", "ensayos", "trabajos", "hausarbeiten", "berichte", "aufsatze",
+  "rapports", "relazioni", "saggi", "relatorios", "trabalhos", "verslagen", "werkstukken",
+  "labs", "laboratories", "laboratorios", "practicas", "praktika", "laboratoires", "tps", "practica",
+  "presentations", "talks", "presentaciones", "exposiciones", "referate", "vortrage", "presentazioni",
+  "apresentacoes", "presentaties",
+  "homeworks", "assignments", "problems", "psets", "worksheets", "exercises", "tareas", "entregas",
+  "ejercicios", "aufgaben", "ubungsblatter", "uebungsblaetter", "ubungen", "uebungen", "hausaufgaben", "abgaben",
+  "devoirs", "fiches", "exercices", "tds", "compiti", "esercitazioni", "esercizi", "consegne", "tarefas",
+  "listas", "exercicios", "opdrachten",
+  "quizzes", "quizzess", "kurztests", "controles", "interrogations", "verifiche",
+  "midterms", "parciales", "zwischenprufungen", "partiels", "esoneri",
+  "exams", "examenes", "klausuren", "prufungen", "esami", "exames", "provas", "tentamens",
+  "tests", "pruebas", "toetsen", "testes",
+  "sets", "sheets", "blatter",
+]);
+
+/** Words that say an item repeats ("weekly homework", "all quizzes"). */
+const COLLECTIVE_WORDS = new Set([
+  "weekly", "biweekly", "daily", "regular", "each", "all", "every", "ongoing",
+  "wochentlich", "woechentlich", "regelmassig", "alle", "semanal", "semanales", "todas", "todos", "cada",
+  "hebdomadaire", "hebdomadaires", "tous", "toutes", "settimanale", "settimanali", "tutti", "tutte",
+  "semanais", "wekelijks", "wekelijkse", "alle", "每周", "毎週", "週次", "أسبوعي", "أسبوعية",
+]);
+
+/** Kinds that are usually many items when named without a number ("Homework 30%", "課題"). */
+const REPEATED_KINDS = new Set(["homework", "quiz", "lab"]);
+
+/**
+ * True when a graded name reads as a group of items rather than one item:
+ * "Problem sets", "Weekly homework", "Quizzes", "Übungsblätter", "Tareas",
+ * "課題". A numbered name ("Problem Set 4", "Midterm 2") or a single sitting
+ * ("Midterm", "Final exam", "Final project") is one item.
+ */
+export function looksLikeCategoryName(name: string): boolean {
+  const key = assessmentKey(name);
+  if (key.numbers.length > 0 || key.kinds.size === 0) return false;
+  const words = fold(name.slice(0, 200).replace(BRACKETED, " ")).split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  if (words.some((w) => PLURAL_KIND_WORDS.has(w))) return true;
+  if (words.some((w) => COLLECTIVE_WORDS.has(w)) || [...COLLECTIVE_WORDS].some((w) => CJK_OR_ARABIC.test(w) && name.includes(w))) {
+    return true;
+  }
+  return [...key.kinds].every((k) => REPEATED_KINDS.has(k));
+}
+
+/** Folded content words of a name, for comparing names word by word (crude stems). */
+export function nameStems(name: string): string[] {
+  const words = fold(name.slice(0, 200).replace(BRACKETED, " "))
+    .replace(/(\p{L})(\d)/gu, "$1 $2")
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((w) => w && !/^\d+$/.test(w) && !FILLER.has(w) && !COLLECTIVE_WORDS.has(w));
+  return [...new Set(words.map(stem).filter((w) => w.length >= 2))];
+}
+
+/** Strip common plural endings so "quizzes"/"quiz", "tareas"/"tarea" meet. */
+function stem(word: string): string {
+  if (CJK_OR_ARABIC.test(word)) return word;
+  for (const ending of ["zzes", "ies", "es", "en", "s", "e"]) {
+    if (word.length > ending.length + 2 && word.endsWith(ending)) {
+      return ending === "ies" ? `${word.slice(0, -3)}y` : ending === "zzes" ? word.slice(0, -2) : word.slice(0, -ending.length);
+    }
+  }
+  return word;
+}
+
 /** Deliverables that are often one item: a project's report, a lab's write-up. */
 const RELATED_DELIVERABLES: Array<Set<string>> = [
   new Set(["project", "paper", "presentation"]),

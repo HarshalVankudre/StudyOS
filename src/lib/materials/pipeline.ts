@@ -4,8 +4,12 @@
  *
  * Honest-failure rules, matching workspace generation (lib/ai/generate.ts):
  * - A section gets one retry for a transient failure, an unreadable reply,
- *   or a reply with nothing usable in it. Tokens of a failed attempt are not
- *   reported to the caller's usage meter, so they are never billed.
+ *   or a reply with nothing usable in it. The first FREE_FAILED_ATTEMPTS
+ *   failed attempts of a run are not reported to the caller's usage meter,
+ *   so they are never billed; later ones are reported like any other call,
+ *   so a document built to make most sections fail cannot buy unlimited
+ *   unbilled model work (a run that delivers anything is charged for them,
+ *   still never above the cap shown up front).
  * - A section that still fails is skipped and reported; the run succeeds
  *   with what the other sections made. A run that made nothing usable throws
  *   KitFailedError, and the caller charges nothing.
@@ -16,7 +20,7 @@
  * section of fenced material; see ./prompt.
  */
 import { AiRefusalError } from "@/lib/ai/anthropic";
-import { forwardUsage, withUsageMeter } from "@/lib/ai/usage-meter";
+import { forwardUsage, withUsageMeter, type TokenUsage } from "@/lib/ai/usage-meter";
 import type { QuizQuestion } from "@/lib/workspace/types";
 import { allocateByWeight, balance, dropNearDuplicates, verifyItems, type Verified } from "./assemble";
 import {
@@ -32,6 +36,7 @@ import {
   type ProposedNote,
   type ProposedQuestion,
 } from "./parse";
+import { cleanNotes, noteSectionsFor, notePages } from "./notes";
 import { KIT_SYSTEM_PROMPT, sectionUserPrompt } from "./prompt";
 import type { Skeleton } from "./quote";
 import type { KitCard, KitEvent, KitNoteSection, KitResult, KitStats } from "./types";
@@ -40,7 +45,6 @@ import type { KitCard, KitEvent, KitNoteSection, KitResult, KitStats } from "./t
 const OVERASK = 1.4;
 const MAX_CARDS_PER_SECTION = 18;
 const MAX_QUESTIONS_PER_SECTION = 12;
-const MAX_NOTES_PER_SECTION = 5;
 /** Upper bound for one section call; the run's deadline may cut it shorter. */
 export const SECTION_CALL_TIMEOUT_MS = 150_000;
 /** Do not start an attempt with less time than this left before the deadline. */
@@ -49,6 +53,8 @@ const MIN_ATTEMPT_MS = 30_000;
 const QUESTION_MIX: Record<string, number> = { mcq: 3, true_false: 1, short: 1 };
 /** Sections worked on at once. */
 const DEFAULT_CONCURRENCY = 5;
+/** Failed attempts per run whose model usage is never billed (see above). */
+export const FREE_FAILED_ATTEMPTS = 2;
 
 export type KitComplete = (
   system: string,
@@ -120,6 +126,7 @@ interface SectionOutcome {
   proposed: number;
   unverified: number;
   malformed: number;
+  copiedNotePoints: number;
 }
 
 const EMPTY: SectionOutcome = {
@@ -130,6 +137,7 @@ const EMPTY: SectionOutcome = {
   proposed: 0,
   unverified: 0,
   malformed: 0,
+  copiedNotePoints: 0,
 };
 
 function httpStatusOf(error: unknown): number | undefined {
@@ -171,17 +179,30 @@ export async function runStudyKit(input: KitRunInput): Promise<KitResult> {
   const questionQuotas = sectionQuotas(sections, targets.questions);
   const ask = (quota: number, wanted: number, max: number) =>
     wanted > 0 ? Math.min(max, Math.max(2, Math.ceil(quota * OVERASK) + 1)) : 0;
+  const pageChars = material.pages.map((page) => page.length);
 
   const outcomes: SectionOutcome[] = sections.map(() => EMPTY);
   let cancelledUsage = false;
+  let freeFailures = FREE_FAILED_ATTEMPTS;
+  // Failed attempts past the run's free allowance: reported (billed) once the
+  // run delivers something or is cancelled; a run that fails as a whole is
+  // free and counts against the daily failed-run quota instead.
+  const billableFailures: TokenUsage[] = [];
+  const failedAttempt = (usage: TokenUsage) => {
+    if (freeFailures > 0) freeFailures -= 1;
+    else billableFailures.push(usage);
+  };
+  const reportBillableFailures = () => {
+    for (const usage of billableFailures.splice(0)) forwardUsage(usage);
+  };
 
   const runSection = async (index: number): Promise<SectionOutcome> => {
     const section = sections[index];
     const askCards = ask(cardQuotas[index], targets.cards, MAX_CARDS_PER_SECTION);
     const askQuestions = ask(questionQuotas[index], targets.questions, MAX_QUESTIONS_PER_SECTION);
-    const askNotes = outputs.notes
-      ? Math.min(MAX_NOTES_PER_SECTION, Math.max(1, Math.round(section.chars / 4000)))
-      : 0;
+    // About one note section per topic the pages teach (not per 4,000
+    // characters, which gave an eight-page lecture two sections).
+    const askNotes = outputs.notes ? noteSectionsFor(pageChars, section.from, section.to) : 0;
     const user = sectionUserPrompt({
       title: material.title,
       pages: material.pages,
@@ -190,6 +211,7 @@ export async function runStudyKit(input: KitRunInput): Promise<KitResult> {
       index,
       total: sections.length,
       notes: askNotes,
+      notePages: askNotes > 0 ? notePages(material.pages, section.from, section.to) : [],
       cards: askCards,
       questions: askQuestions,
       language: input.language,
@@ -227,6 +249,7 @@ export async function runStudyKit(input: KitRunInput): Promise<KitResult> {
       }
       if (!metered.result.ok) {
         console.warn(`[StudyOS] study kit section ${index + 1} attempt ${attempt} failed`);
+        failedAttempt(metered.usage);
         if (!isRetryable(metered.result.error)) break;
         continue;
       }
@@ -239,22 +262,29 @@ export async function runStudyKit(input: KitRunInput): Promise<KitResult> {
           questions: askQuestions * 2,
         });
       } catch {
-        continue; // Unreadable reply: one more try, not billed.
+        failedAttempt(metered.usage);
+        continue; // Unreadable reply: one more try.
       }
       const cards = verifyItems(parsed.cards, material.pages, range, cache);
       const questions = verifyItems(parsed.questions, material.pages, range, cache);
-      const usable = cards.kept.length + questions.kept.length + parsed.notes.length;
-      if (usable === 0) continue; // Nothing usable: retry once, not billed.
+      // Study notes, not excerpts: bullets lifted from the material are dropped.
+      const notes = cleanNotes(parsed.notes, material.pages, section);
+      const usable = cards.kept.length + questions.kept.length + notes.notes.length;
+      if (usable === 0) {
+        failedAttempt(metered.usage);
+        continue; // Nothing usable: retry once.
+      }
 
       forwardUsage(metered.usage);
       return {
         ok: true,
-        notes: parsed.notes,
+        notes: notes.notes,
         cards: cards.kept,
         questions: questions.kept,
         proposed: parsed.cards.length + parsed.questions.length,
         unverified: cards.dropped + questions.dropped,
         malformed: parsed.malformed,
+        copiedNotePoints: notes.copied,
       };
     }
     return EMPTY;
@@ -282,11 +312,15 @@ export async function runStudyKit(input: KitRunInput): Promise<KitResult> {
     worker,
   );
   const settled = await Promise.allSettled(workers);
-  if (signal?.aborted || cancelledUsage) throw new KitCancelledError();
+  if (signal?.aborted || cancelledUsage) {
+    reportBillableFailures();
+    throw new KitCancelledError();
+  }
   const crashed = settled.find((s): s is PromiseRejectedResult => s.status === "rejected");
   if (crashed) throw crashed.reason;
 
   if (!outcomes.some((o) => o.ok)) throw new KitFailedError();
+  reportBillableFailures();
   throwIfCancelled();
   emit({ type: "checking" });
 
@@ -355,6 +389,7 @@ export async function runStudyKit(input: KitRunInput): Promise<KitResult> {
     proposed: outcomes.reduce((sum, o) => sum + o.proposed, 0),
     unverified: outcomes.reduce((sum, o) => sum + o.unverified, 0),
     malformed: outcomes.reduce((sum, o) => sum + o.malformed, 0),
+    copiedNotePoints: outcomes.reduce((sum, o) => sum + o.copiedNotePoints, 0),
     duplicates: uniqueCards.dropped + uniqueQuestions.dropped,
     surplus:
       uniqueCards.kept.length - chosenCards.length + (uniqueQuestions.kept.length - chosenQuestions.length),

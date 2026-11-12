@@ -35,7 +35,14 @@ describe("app Content-Security-Policy", () => {
 
   it("does not restrict scripts or styles (Clerk, KaTeX, Mermaid, Next inline scripts)", async () => {
     const csp = (await headersFor("/app"))["content-security-policy"];
-    expect(csp).not.toMatch(/script-src|style-src|default-src|connect-src/);
+    expect(csp).not.toMatch(/script-src|style-src|default-src/);
+  });
+
+  it("limits form targets, workers and the manifest", async () => {
+    const csp = (await headersFor("/app"))["content-security-policy"];
+    expect(csp).toContain("form-action 'self' https://checkout.stripe.com https://billing.stripe.com");
+    expect(csp).toContain("worker-src 'self' blob:");
+    expect(csp).toContain("manifest-src 'self'");
   });
 
   it("limits images to our origin, inline images, Clerk and the assets bucket", async () => {
@@ -50,8 +57,13 @@ describe("app Content-Security-Policy", () => {
     expect(sources).not.toEqual(expect.arrayContaining(["*"]));
     expect(sources).not.toContain("https:");
     expect(sources).not.toContain("http:");
-    // Signed asset URLs (/api/asset/:id redirects there) stay loadable.
-    expect(sources.some((s) => s.startsWith("https://storage.googleapis.com"))).toBe(true);
+    // Without ASSETS_BUCKET at build time no storage host at all (never the
+    // whole storage.googleapis.com host); with it, that bucket's path only
+    // (see csp.test.ts).
+    expect(sources).not.toContain("https://storage.googleapis.com");
+    for (const s of sources.filter((x) => x.includes("storage.googleapis.com"))) {
+      expect(s).toMatch(/^https:\/\/storage\.googleapis\.com\/[a-z0-9._-]+\/$/);
+    }
   });
 
   it.each(["/embed/react", "/embed"])(

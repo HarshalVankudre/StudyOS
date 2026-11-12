@@ -18,7 +18,17 @@
  *                is still read as the course.
  */
 import { dayKeyOf } from "@/lib/workspace/view-logic";
-import { expandCalendar, instantOf, parseIcs, wallDay, type ICalTime, type Occurrence } from "./ical";
+import {
+  ICS_LIMITS,
+  IcsBudgetError,
+  expandCalendar,
+  hashText,
+  instantOf,
+  parseIcs,
+  wallDay,
+  type ICalTime,
+  type Occurrence,
+} from "./ical";
 
 export type FeedPlatform =
   | "canvas"
@@ -47,6 +57,8 @@ export interface FeedEvent {
   /** The repeating event's key when this is one of its occurrences. */
   series?: string;
   completed?: boolean;
+  /** Calendar days the event covers, when more than one ("Reading week"). */
+  days?: number;
 }
 
 export interface FeedSnapshot {
@@ -64,7 +76,9 @@ export interface FeedSnapshot {
   warnings: string[];
 }
 
-export type ReadFeedResult = { ok: true; feed: FeedSnapshot } | { ok: false; error: "not_calendar" | "studyos_feed" };
+export type ReadFeedResult =
+  | { ok: true; feed: FeedSnapshot }
+  | { ok: false; error: "not_calendar" | "studyos_feed" | "too_large" };
 
 export const HISTORY_DAYS = 120;
 export const FUTURE_DAYS = 400;
@@ -93,40 +107,137 @@ export function detectPlatform(prodId: string, uids: string[]): FeedPlatform {
 
 /**
  * Pieces of a feed link that grant access: the link itself (with or without
- * scheme), a long path, and long query values (Moodle authtoken, Canvas and
- * Google tokens). Any text containing one is redacted or dropped.
+ * scheme), a long path, long query values (Moodle authtoken, Canvas and
+ * Google tokens), and the bare token inside a path segment or value
+ * ("user_<token>.ics" → "<token>", "private-<token>" → "<token>"). Any text
+ * containing one is redacted or dropped.
  */
 export function feedSecrets(feedUrl: string | undefined): string[] {
   if (!feedUrl) return [];
   const out = new Set<string>();
+  const addPieces = (value: string) => {
+    for (const piece of value.split(/[._~\-+=]+/)) if (piece.length >= 16) out.add(piece);
+  };
   try {
     const url = new URL(feedUrl);
     out.add(url.href);
     out.add(`${url.host}${url.pathname}`);
     if (url.pathname.length >= 16) out.add(url.pathname);
-    for (const value of url.searchParams.values()) if (value.length >= 12) out.add(value);
-    for (const segment of url.pathname.split("/")) if (segment.length >= 20) out.add(segment);
+    for (const value of url.searchParams.values()) {
+      if (value.length >= 12) out.add(value);
+      addPieces(value);
+    }
+    for (const segment of url.pathname.split("/")) {
+      if (segment.length >= 20) out.add(segment);
+      let decoded = segment;
+      try {
+        decoded = decodeURIComponent(segment);
+      } catch {
+        // keep raw
+      }
+      addPieces(decoded);
+    }
   } catch {
     out.add(feedUrl);
   }
   return [...out].filter((s) => s.length >= 8);
 }
 
-function containsSecret(text: string, secrets: string[]): boolean {
-  if (!text || secrets.length === 0) return false;
-  let decoded = text;
-  try {
-    decoded = decodeURIComponent(text);
-  } catch {
-    // keep raw
+/**
+ * The letters and digits of `text`, lowercased after NFKC folding and with
+ * %xx escapes decoded, plus for each kept character the span of `text` it
+ * came from. Matching secrets on this skeleton defeats case changes,
+ * percent-encoding, full-width digits, and any separator slipped inside a
+ * token (zero-width characters, an escaped comma, spaces, dashes).
+ */
+function skeleton(text: string): { chars: string; from: number[]; to: number[] } {
+  let chars = "";
+  const from: number[] = [];
+  const to: number[] = [];
+  const isHex = (code: number) =>
+    (code >= 48 && code <= 57) || (code >= 65 && code <= 70) || (code >= 97 && code <= 102);
+  let i = 0;
+  while (i < text.length) {
+    let piece: string;
+    let width: number;
+    if (text[i] === "%" && isHex(text.charCodeAt(i + 1)) && isHex(text.charCodeAt(i + 2))) {
+      piece = String.fromCharCode(parseInt(text.slice(i + 1, i + 3), 16));
+      width = 3;
+    } else {
+      const cp = text.codePointAt(i)!;
+      width = cp > 0xffff ? 2 : 1;
+      piece = String.fromCodePoint(cp);
+      if (cp > 0x7f) piece = piece.normalize("NFKC");
+    }
+    for (const c of piece.toLowerCase()) {
+      const code = c.charCodeAt(0);
+      if ((code >= 48 && code <= 57) || (code >= 97 && code <= 122)) {
+        chars += c;
+        from.push(i);
+        to.push(i + width);
+      }
+    }
+    i += width;
   }
-  return secrets.some((s) => text.includes(s) || decoded.includes(s));
+  return { chars, from, to };
 }
 
+/**
+ * Skeleton forms of the secrets, with both halves of long bare tokens (a
+ * half of a random token still narrows it down; halves of a path or host
+ * would only redact ordinary words).
+ */
+function secretSkeletons(secrets: string[]): string[] {
+  const out = new Set<string>();
+  for (const s of secrets) {
+    const k = skeleton(s).chars;
+    if (k.length < 12) continue;
+    out.add(k);
+    if (k.length >= 24 && !/[/.]/.test(s)) {
+      const half = Math.ceil(k.length / 2);
+      out.add(k.slice(0, half));
+      out.add(k.slice(k.length - half));
+    }
+  }
+  return [...out];
+}
+
+function containsSecret(text: string, secrets: string[]): boolean {
+  if (!text || secrets.length === 0) return false;
+  const k = skeleton(text).chars;
+  return secrets.some((s) => k.includes(s));
+}
+
+/** Replace every span of `text` that spells a secret with "…". */
 function redact(text: string, secrets: string[]): string {
-  let out = text;
-  for (const s of secrets) if (out.includes(s)) out = out.split(s).join("…");
-  return out;
+  const sk = skeleton(text);
+  const spans: [number, number][] = [];
+  for (const s of secrets) {
+    for (let at = sk.chars.indexOf(s); at !== -1; at = sk.chars.indexOf(s, at + 1)) {
+      spans.push([sk.from[at], sk.to[at + s.length - 1]]);
+    }
+  }
+  if (spans.length === 0) return text;
+  spans.sort((a, b) => a[0] - b[0]);
+  let out = "";
+  let pos = 0;
+  for (const [start, end] of spans) {
+    if (end <= pos) continue;
+    if (start >= pos) {
+      out += text.slice(pos, start) + "…";
+    }
+    pos = Math.max(pos, end);
+  }
+  return out + text.slice(pos);
+}
+
+/**
+ * A sync key (event UID) that would carry a secret is replaced by a stable
+ * hash of itself, so the token never reaches the workspace document while
+ * the same event still maps to the same row on every sync.
+ */
+function safeUid(uid: string, secrets: string[]): string {
+  return containsSecret(uid, secrets) ? `h-${hashText(uid)}` : uid;
 }
 
 // ---------------------------------------------------------------------------
@@ -249,12 +360,30 @@ function whenOf(time: ICalTime): FeedWhen {
 /**
  * Read a calendar's text into deadline events. `feedUrl` (server only) lets
  * the reader drop anything that would echo the secret link back.
+ *
+ * Reading is synchronous and bounded in time (`ICS_LIMITS.timeBudgetMs`, or
+ * `options.timeBudgetMs`): a calendar that cannot be read within it is
+ * refused as "too_large" rather than returned in part, because a partial
+ * read would make the next sync flag every missing event as gone.
  */
 export function readFeed(
   text: string,
-  options: { now?: number; feedUrl?: string } = {},
+  options: { now?: number; feedUrl?: string; timeBudgetMs?: number } = {},
 ): ReadFeedResult {
-  const cal = parseIcs(text);
+  try {
+    return readFeedWithin(text, options, Date.now() + (options.timeBudgetMs ?? ICS_LIMITS.timeBudgetMs));
+  } catch (error) {
+    if (error instanceof IcsBudgetError) return { ok: false, error: "too_large" };
+    throw error;
+  }
+}
+
+function readFeedWithin(
+  text: string,
+  options: { now?: number; feedUrl?: string },
+  deadline: number,
+): ReadFeedResult {
+  const cal = parseIcs(text, { deadline });
   if (!cal) return { ok: false, error: "not_calendar" };
   if (/\/\/StudyOS\/\//i.test(cal.prodId)) return { ok: false, error: "studyos_feed" };
 
@@ -262,9 +391,9 @@ export function readFeed(
   const windowStart = now - HISTORY_DAYS * DAY_MS;
   const window = { start: windowStart, end: now + FUTURE_DAYS * DAY_MS };
   const platform = detectPlatform(cal.prodId, cal.components.map((c) => c.uid));
-  const { occurrences, warnings } = expandCalendar(cal, window);
+  const { occurrences, warnings } = expandCalendar(cal, window, { deadline });
 
-  const secrets = feedSecrets(options.feedUrl);
+  const secrets = secretSkeletons(feedSecrets(options.feedUrl));
   let feedHost: string | undefined;
   try {
     feedHost = options.feedUrl ? new URL(options.feedUrl).hostname : undefined;
@@ -287,15 +416,26 @@ export function readFeed(
     const title = containsSecret(cleaned.title, secrets) ? redact(cleaned.title, secrets) : cleaned.title;
     const course = cleaned.course && !containsSecret(cleaned.course, secrets) ? cleaned.course : undefined;
     const link = pickLink(occ, platform, feedHost, secrets);
+    // The sync key starts with the UID (the series UID for an occurrence);
+    // a UID carrying the token is swapped for its hash, keeping the rest.
+    let key = occ.key;
+    let series = occ.seriesUid;
+    if (secrets.length > 0) {
+      const uid = occ.seriesUid ?? c.uid;
+      if (uid && key.startsWith(uid)) key = safeUid(uid, secrets) + key.slice(uid.length);
+      key = safeUid(key, secrets);
+      if (series) series = safeUid(series, secrets);
+    }
     events.push({
-      key: occ.key.slice(0, 500),
+      key: key.slice(0, 500),
       title: title.slice(0, 300),
       when: whenOf(occ.start),
       ...(link ? { link } : {}),
       ...(course ? { course } : {}),
       role: cleaned.role,
-      ...(occ.seriesUid ? { series: occ.seriesUid.slice(0, 400) } : {}),
+      ...(series ? { series: series.slice(0, 400) } : {}),
       ...(c.completed ? { completed: true } : {}),
+      ...(c.spanDays && c.spanDays > 1 ? { days: c.spanDays } : {}),
     });
   }
   events.sort((a, b) => sortInstant(a.when) - sortInstant(b.when));

@@ -32,6 +32,11 @@ await build({
   target: "node22",
   outfile: `${outDir}/check-env.cjs`,
   legalComments: "none",
+  // The bucket the image CSP was built for (next.config.ts inlines the same
+  // value into the server), so the check can refuse a mismatched build.
+  define: {
+    "process.env.STUDYOS_BUILD_ASSETS_BUCKET": JSON.stringify(process.env.ASSETS_BUCKET?.trim() ?? ""),
+  },
   logLevel: "warning",
 });
 console.log("built .next/standalone/check-env.cjs");

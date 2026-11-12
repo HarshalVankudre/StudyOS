@@ -57,6 +57,8 @@ export type BlockTextProps = {
   onMove?: (delta: -1 | 1, text: string, caret: number) => void;
   /** Escape: leave the text (the parent usually focuses the block handle). */
   onEscape?: () => void;
+  /** Ctrl/⌘+/: open the block's options menu (its handle is not a Tab stop). */
+  onOptions?: () => void;
   /** A Markdown shortcut was typed. Return true if the block was converted. */
   onShortcut?: (match: ShortcutMatch) => boolean;
   /** Items for the "/" menu (read when it opens). Omit to disable it. */
@@ -83,6 +85,9 @@ function RenderedText({ text }: { text: string }) {
   }
   return <RichText text={text} className="break-words [&_li]:whitespace-pre-line [&_p]:whitespace-pre-line" />;
 }
+
+/** Longest "/query" the menu keeps reading (a few words). */
+const SLASH_QUERY_MAX = 40;
 
 interface SlashState {
   /** Index of the "/" in the text. */
@@ -117,6 +122,7 @@ export function BlockText({
   onNavigate,
   onMove,
   onEscape,
+  onOptions,
   onShortcut,
   getSlashItems,
   onSlashPick,
@@ -178,17 +184,43 @@ export function BlockText({
 
   const slashItems = slash ? filterInsertItems(slash.items, slash.query) : [];
 
-  const closeSlash = () => setSlash(null);
+  // The menu as event handlers must see it, even one that runs before the
+  // next render (a blur caused by a pick).
+  const slashRef = useRef<SlashState | null>(null);
+  const showSlash = (next: SlashState | null) => {
+    slashRef.current = next;
+    setSlash(next);
+  };
+  const closeSlash = () => showSlash(null);
+
+  /** The text without the "/query" the menu was reading. */
+  const withoutQuery = (s: SlashState) => {
+    const text = taRef.current?.value ?? draft;
+    return text.slice(0, s.at) + text.slice(s.at + 1 + s.query.length);
+  };
+
+  /**
+   * Escape or clicking away: close the menu and take back the "/query" it
+   * consumed, so a dismissed command leaves nothing behind in the block.
+   */
+  const dismissSlash = () => {
+    const s = slashRef.current;
+    if (!s) return;
+    const text = withoutQuery(s);
+    showSlash(null);
+    change(text);
+    commitNow();
+    pendingCaret.current = s.at;
+  };
 
   const pickSlash = (item: InsertItem) => {
-    const el = taRef.current;
-    if (!slash || !el) return;
-    const end = slash.at + 1 + slash.query.length;
-    const text = draft.slice(0, slash.at) + draft.slice(end);
-    setSlash(null);
+    const s = slashRef.current;
+    if (!s || !taRef.current) return;
+    const text = withoutQuery(s);
+    showSlash(null);
     markCommitted(text);
-    pendingCaret.current = slash.at;
-    onSlashPick?.(item, text, slash.at);
+    pendingCaret.current = s.at;
+    onSlashPick?.(item, text, s.at);
   };
 
   const handleChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
@@ -210,17 +242,24 @@ export function BlockText({
       if (match && onShortcut(match)) {
         markCommitted(match.rest);
         pendingCaret.current = 0;
-        setSlash(null);
+        closeSlash();
         return;
       }
     }
 
-    // "/" menu: opens on a "/" typed at the start or after a space.
-    let nextSlash = slash;
+    // "/" menu: opens on a "/" typed at the start or after a space. The query
+    // may have several words ("/study kit"): the menu stays open while they
+    // still match something, and closes, leaving the text as written, on a
+    // space after a query that matches nothing, on two spaces, or on a new line.
+    let nextSlash = slashRef.current;
     if (nextSlash) {
       const query = next.slice(nextSlash.at + 1, caret);
       const valid =
-        next[nextSlash.at] === "/" && caret > nextSlash.at && !/\s/.test(query) && query.length <= 30;
+        next[nextSlash.at] === "/" &&
+        caret > nextSlash.at &&
+        !/^\s|\s\s|\n/.test(query) &&
+        query.length <= SLASH_QUERY_MAX &&
+        (!/\s/.test(query) || filterInsertItems(nextSlash.items, query).length > 0);
       nextSlash = valid ? { ...nextSlash, query, active: 0 } : null;
     } else if (
       getSlashItems &&
@@ -237,7 +276,7 @@ export function BlockText({
         items: getSlashItems(),
       };
     }
-    setSlash(nextSlash);
+    showSlash(nextSlash);
     // While the menu is open the "/query" is transient: don't commit it.
     change(next, nextSlash !== null);
   };
@@ -253,7 +292,7 @@ export function BlockText({
         e.preventDefault();
         if (count === 0) return;
         const delta = e.key === "ArrowDown" ? 1 : -1;
-        setSlash({ ...slash, active: (slash.active + delta + count) % count });
+        showSlash({ ...slash, active: (slash.active + delta + count) % count });
         return;
       }
       if ((e.key === "Enter" || e.key === "Tab") && !e.shiftKey) {
@@ -267,8 +306,7 @@ export function BlockText({
       }
       if (e.key === "Escape") {
         e.preventDefault();
-        closeSlash();
-        commitNow();
+        dismissSlash();
         return;
       }
     }
@@ -277,6 +315,14 @@ export function BlockText({
     const text = el.value;
     const collapsed = start === end;
     const mod = e.ctrlKey || e.metaKey;
+
+    if (mod && !e.altKey && e.key === "/" && onOptions) {
+      e.preventDefault();
+      if (slashRef.current) dismissSlash();
+      else commitNow();
+      onOptions();
+      return;
+    }
 
     switch (e.key) {
       case "Enter": {
@@ -368,9 +414,10 @@ export function BlockText({
         onKeyDown={handleKeyDown}
         onFocus={() => setFocused(true)}
         onBlur={() => {
-          commitNow();
+          // Clicking away from an open "/" menu dismisses it like Escape.
+          if (slashRef.current) dismissSlash();
+          else commitNow();
           setFocused(false);
-          setSlash(null);
         }}
         className={cn(
           "block w-full resize-none overflow-hidden bg-transparent p-0 text-inherit outline-none placeholder:text-ink-soft/45",
@@ -400,7 +447,7 @@ export function BlockText({
             activeIndex={slash.active}
             emptyLabel={slashLabels?.empty ?? ""}
             onPick={pickSlash}
-            onActiveChange={(i) => setSlash({ ...slash, active: i })}
+            onActiveChange={(i) => showSlash({ ...slash, active: i })}
           />
         </div>
       )}

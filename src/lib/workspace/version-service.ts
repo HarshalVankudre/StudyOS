@@ -23,7 +23,7 @@ import "server-only";
 import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/db";
 import { applyPatch, diff } from "./changes";
-import { prepareWorkspaceForSave } from "./repair";
+import { keepUnknownFields, prepareWorkspaceForSave } from "./repair";
 import { safeParseWorkspace } from "./schema";
 import { NOT_TRASHED, columnText, parseStoredWorkspace } from "./store";
 import type { Workspace } from "./types";
@@ -107,7 +107,12 @@ export async function applyAgentWorkspaceChange(
   // Untrusted model output: all-or-nothing validation, then the save gate.
   const parsed = safeParseWorkspace(normalized);
   if (!parsed.success) throw new Error("Agent workspace is invalid");
-  const prepared = prepareWorkspaceForSave(normalized, id);
+  // The agent's result went through schema parsing, which drops fields this
+  // version does not know: take them back from what the agent started from.
+  const prepared = prepareWorkspaceForSave(
+    base ? keepUnknownFields(base, structuredClone(normalized)) : normalized,
+    id,
+  );
 
   return prisma.$transaction(async (tx) => {
     const current = await tx.workspace.findFirst({
@@ -117,6 +122,13 @@ export async function applyAgentWorkspaceChange(
     if (!current) throw new WorkspaceNotFoundError("Workspace not found");
 
     let toWrite = prepared;
+    if (!base && current.version === baseVersion) {
+      // No base given: the current row is what the agent started from.
+      toWrite = prepareWorkspaceForSave(
+        keepUnknownFields(parseWorkspace(current.data, id), structuredClone(prepared.workspace)),
+        id,
+      );
+    }
     if (current.version !== baseVersion) {
       if (!base) throw new WorkspaceVersionConflictError("Workspace changed during the task");
       const merged = applyPatch(parseWorkspace(current.data, id), diff(base, prepared.workspace), {

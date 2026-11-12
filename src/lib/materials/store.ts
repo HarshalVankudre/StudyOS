@@ -8,12 +8,14 @@
 import "server-only";
 import { createHash } from "node:crypto";
 import { prisma } from "@/lib/db";
+import { userLockKey, withKeyLock } from "@/lib/db-lock";
 import {
   MAX_MATERIALS_PER_USER,
   MAX_MATERIALS_PER_WORKSPACE,
   MAX_MATERIAL_TITLE,
   MAX_STORED_CHARS_PER_USER,
 } from "./limits";
+import { capPages } from "./pages";
 import type { MaterialKind, MaterialSummary } from "./types";
 
 /** Prisma filter: the material's workspace belongs to the owner and is not trashed. */
@@ -124,51 +126,60 @@ export type CreateMaterialResult =
 /**
  * Store a material. Identical content already in the workspace is reused
  * (sending the same notes page twice does not make a second copy).
+ *
+ * The reuse check, the per-workspace and per-student caps and the insert run
+ * in one transaction holding the student's materials advisory lock
+ * (lib/db-lock), so parallel requests cannot all pass the caps before any of
+ * them inserts. Pages are capped in number (MAX_MATERIAL_PAGES) and length.
  */
 export async function createMaterial(input: NewMaterial): Promise<CreateMaterialResult> {
   if (!(await ownsLiveWorkspace(input.ownerId, input.workspaceId))) {
     return { ok: false, reason: "not_found" };
   }
-  const contentHash = contentHashOf(input.pages);
-  const existing = await prisma.studyMaterial.findFirst({
-    where: { ownerId: input.ownerId, workspaceId: input.workspaceId, contentHash },
-    select: SUMMARY_SELECT,
-  });
-  if (existing) return { ok: true, material: toSummary(existing), reused: true };
-  if ((await countMaterials(input.ownerId, input.workspaceId)) >= MAX_MATERIALS_PER_WORKSPACE) {
-    return { ok: false, reason: "limit" };
-  }
-  const pageChars = input.pages.map((p) => p.length);
+  const pages = capPages(input.pages);
+  const contentHash = contentHashOf(pages);
+  const pageChars = pages.map((p) => p.length);
   const chars = pageChars.reduce((a, b) => a + b, 0);
-  const stored = await prisma.studyMaterial.aggregate({
-    where: { ownerId: input.ownerId },
-    _count: { _all: true },
-    _sum: { charCount: true },
+  return withKeyLock(userLockKey("materials", input.ownerId), async (tx) => {
+    const existing = await tx.studyMaterial.findFirst({
+      where: { ownerId: input.ownerId, workspaceId: input.workspaceId, contentHash },
+      select: SUMMARY_SELECT,
+    });
+    if (existing) return { ok: true, material: toSummary(existing), reused: true } as const;
+    const inWorkspace = await tx.studyMaterial.count({
+      where: { ownerId: input.ownerId, workspaceId: input.workspaceId },
+    });
+    if (inWorkspace >= MAX_MATERIALS_PER_WORKSPACE) return { ok: false, reason: "limit" } as const;
+    const stored = await tx.studyMaterial.aggregate({
+      where: { ownerId: input.ownerId },
+      _count: { _all: true },
+      _sum: { charCount: true },
+    });
+    if (
+      stored._count._all >= MAX_MATERIALS_PER_USER ||
+      (stored._sum.charCount ?? 0) + chars > MAX_STORED_CHARS_PER_USER
+    ) {
+      return { ok: false, reason: "storage" } as const;
+    }
+    const row = await tx.studyMaterial.create({
+      data: {
+        ownerId: input.ownerId,
+        workspaceId: input.workspaceId,
+        title: input.title.slice(0, MAX_MATERIAL_TITLE),
+        kind: input.kind,
+        pages: JSON.stringify(pages),
+        pageChars: JSON.stringify(pageChars),
+        pageCount: pages.length,
+        charCount: chars,
+        sourcePages: input.sourcePages,
+        truncated: input.truncated,
+        contentHash,
+        sourcePageId: input.sourcePageId ?? null,
+      },
+      select: SUMMARY_SELECT,
+    });
+    return { ok: true, material: toSummary(row), reused: false } as const;
   });
-  if (
-    stored._count._all >= MAX_MATERIALS_PER_USER ||
-    (stored._sum.charCount ?? 0) + chars > MAX_STORED_CHARS_PER_USER
-  ) {
-    return { ok: false, reason: "storage" };
-  }
-  const row = await prisma.studyMaterial.create({
-    data: {
-      ownerId: input.ownerId,
-      workspaceId: input.workspaceId,
-      title: input.title.slice(0, MAX_MATERIAL_TITLE),
-      kind: input.kind,
-      pages: JSON.stringify(input.pages),
-      pageChars: JSON.stringify(pageChars),
-      pageCount: input.pages.length,
-      charCount: chars,
-      sourcePages: input.sourcePages,
-      truncated: input.truncated,
-      contentHash,
-      sourcePageId: input.sourcePageId ?? null,
-    },
-    select: SUMMARY_SELECT,
-  });
-  return { ok: true, material: toSummary(row), reused: false };
 }
 
 export interface MaterialWithPages {

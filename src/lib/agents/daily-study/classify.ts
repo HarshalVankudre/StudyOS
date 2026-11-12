@@ -13,6 +13,7 @@ import type {
 } from "@/lib/workspace/types";
 import { titleProperty } from "@/lib/workspace/helpers";
 import { isDayKey } from "@/lib/workspace/view-logic";
+import { findRow } from "@/lib/workspace/row-lookup";
 
 const MAX_TEXT = 180;
 
@@ -233,6 +234,15 @@ function rowTypeLabels(database: Database, row: DatabaseRow): string[] {
     .flatMap((p) => optionLabel(p, row.cells[p.id]));
 }
 
+/** Type labels that name graded work other than an exam (an explicit type wins over the weight). */
+const NON_EXAM_TYPE_WORDS = [
+  ...EFFORT_CLASSES[0].words,
+  ...EFFORT_CLASSES[1].words,
+  "reading", "lectura", "lektüre", "lecture", "lettura", "leitura", "participation", "participación",
+  "mitarbeit", "participazione", "participação", "deelname", "参与", "参加", "مشاركة",
+  "problem set", "pset", "worksheet", "lab report", "portfolio",
+];
+
 /** A weight at or above this (percent) marks a row as a major assessment. */
 export const MAJOR_WEIGHT = 20;
 
@@ -250,11 +260,15 @@ export function classifyExam(
 ): ExamInfo {
   const labels = rowTypeLabels(database, row);
   const byType = labels.some((label) => hasWord(label, EXAM_WORDS));
-  const byTitle = hasWord(title, EXAM_WORDS) && !hasWord(title, NOT_EXAM_WORDS);
+  // A type the student (or the generator) set that names other work
+  // ("Homework", "Essay", "Lab report") wins over the title and the weight:
+  // a 25 % essay is a big essay, not an exam.
+  const otherType = !byType && labels.some((label) => hasWord(label, NON_EXAM_TYPE_WORDS));
+  const byTitle = !otherType && hasWord(title, EXAM_WORDS) && !hasWord(title, NOT_EXAM_WORDS);
   const byDatabase =
     labels.length === 0 && hasWord(database.name, EXAM_WORDS) && !hasWord(title, NOT_EXAM_WORDS);
   const heavy = weight !== null && weight >= MAJOR_WEIGHT;
-  const isExam = byType || byTitle || byDatabase || heavy;
+  const isExam = byType || byTitle || byDatabase || (heavy && !otherType);
   const finalWords = ["final", "finals", "midterm", "midterms", "期末", "期中", "abschlussprüfung", "examen final"];
   return { isExam, major: isExam && (heavy || hasWord(title, finalWords)) };
 }
@@ -269,7 +283,7 @@ export function rowCourse(workspace: Workspace, database: Database, row: Databas
       if (label && cleanText(label)) return cleanText(label);
     } else if (property.type === "relation" && Array.isArray(value) && value[0]) {
       const related = workspace.databases.find((d) => d.id === property.relationDatabaseId);
-      const target = related?.rows.find((r) => r.id === value[0]);
+      const target = related ? findRow(related, value[0]) : undefined;
       const label = related && target ? rowTitle(related, target) : null;
       if (label) return label;
     } else if (property.type === "text" && typeof value === "string" && cleanText(value)) {

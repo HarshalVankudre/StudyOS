@@ -56,7 +56,7 @@ export function StudyKitDialog({
   onCreated: (pageId: string) => void;
 }) {
   const { workspace, update } = useWorkspace();
-  const { dict, t, locale } = useI18n();
+  const { dict, t, locale, plural } = useI18n();
   const M = dict.materials;
 
   const sourcePage =
@@ -379,7 +379,7 @@ export function StudyKitDialog({
                       )}
                     >
                       {section.status === "done" && section.made !== undefined
-                        ? t(M.sectionMade, { count: section.made })
+                        ? plural(M.sectionMade, section.made)
                         : M.sectionStatus[section.status]}
                     </span>
                   </li>
@@ -498,7 +498,7 @@ function KitOptions({
   onLanguage: (value: boolean) => void;
   cost: { estimate: number; max: number };
 }) {
-  const { dict, t } = useI18n();
+  const { dict, t, plural } = useI18n();
   const M = dict.materials;
   const anyOutput = outputs.notes || outputs.flashcards || outputs.quiz;
   const setPage = (key: "from" | "to", raw: string) => {
@@ -569,10 +569,10 @@ function KitOptions({
           </div>
           <p className="text-xs text-ink-soft">
             {outputs.flashcards && outputs.quiz
-              ? t(M.amountBoth, { cards: targets.cards, questions: targets.questions })
+              ? t(M.amountBoth, { cards: plural(dict.counts.flashcards, targets.cards), questions: plural(dict.counts.questions, targets.questions) })
               : outputs.flashcards
-                ? t(M.amountCards, { cards: targets.cards })
-                : t(M.amountQuestions, { questions: targets.questions })}
+                ? t(M.amountCards, { cards: plural(dict.counts.flashcards, targets.cards) })
+                : t(M.amountQuestions, { questions: plural(dict.counts.questions, targets.questions) })}
           </p>
         </fieldset>
       )}
@@ -615,12 +615,10 @@ function KitOptions({
         ) : (
           <>
             <p className="text-ink">
-              {plan.sections.length === 1
-                ? t(M.coverageOne, { from: plan.from, to: plan.to })
-                : t(M.coverage, { from: plan.from, to: plan.to, sections: plan.sections.length })}
+              {plural(M.coverage, plan.sections.length, { from: plan.from, to: plan.to })}
             </p>
             {plan.cutShort && <p className="text-xs text-ink-soft">{t(M.cutShort, { next: plan.to + 1 })}</p>}
-            <p className="font-semibold text-ink">{t(M.cost, { estimate: cost.estimate, max: cost.max })}</p>
+            <p className="font-semibold text-ink">{plural(M.cost, cost.estimate, { max: cost.max })}</p>
             <p className="text-xs text-ink-soft">{M.costNote}</p>
           </>
         )}
@@ -643,7 +641,7 @@ function KitOptions({
 }
 
 function KitDone({ result, credits }: { result: KitResult; credits: number }) {
-  const { dict, t } = useI18n();
+  const { dict, t, plural } = useI18n();
   const M = dict.materials;
   const items = result.cards.length + result.questions.length;
   const ranges = result.stats.failedRanges.map((r) => (r.from === r.to ? `${r.from}` : `${r.from}–${r.to}`)).join(", ");
@@ -655,18 +653,18 @@ function KitDone({ result, credits }: { result: KitResult; credits: number }) {
       </p>
       <p>
         {items > 0
-          ? t(M.doneSummary, { cards: result.cards.length, questions: result.questions.length })
+          ? t(M.doneSummary, { cards: plural(dict.counts.flashcards, result.cards.length), questions: plural(dict.counts.practiceQuestions, result.questions.length) })
           : M.doneNotesOnly}
-        {result.notes.length > 0 && items > 0 ? ` ${t(M.doneNotes, { count: result.notes.length })}` : ""}
+        {result.notes.length > 0 && items > 0 ? ` ${plural(M.doneNotes, result.notes.length)}` : ""}
       </p>
       {items > 0 && <p>{t(M.doneTrust, { title: result.title })}</p>}
       {result.stats.unverified > 0 && (
-        <p className="text-ink-soft">{t(M.doneDropped, { count: result.stats.unverified })}</p>
+        <p className="text-ink-soft">{plural(M.doneDropped, result.stats.unverified)}</p>
       )}
       {result.stats.failedSections > 0 && (
         <p className="text-amber-700 dark:text-amber-400">{t(M.doneFailed, { ranges })}</p>
       )}
-      <p className="text-xs text-ink-soft">{t(M.doneCost, { credits })}</p>
+      <p className="text-xs text-ink-soft">{plural(M.doneCost, credits)}</p>
     </div>
   );
 }

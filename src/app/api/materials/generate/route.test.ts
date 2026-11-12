@@ -12,8 +12,8 @@ const mocks = vi.hoisted(() => ({
   release: vi.fn(),
   getCreditBalance: vi.fn(),
   checkUsageLimit: vi.fn(),
-  failedLimitReached: vi.fn(),
-  recordUsageEvent: vi.fn(),
+  claimFailure: vi.fn(),
+  releaseFailure: vi.fn(),
   complete: vi.fn(),
 }));
 
@@ -36,8 +36,8 @@ vi.mock("@/lib/credits", () => ({
 }));
 vi.mock("@/lib/usage-limits", () => ({
   checkUsageLimit: mocks.checkUsageLimit,
-  isUsageLimitReached: mocks.failedLimitReached,
-  recordUsageEvent: mocks.recordUsageEvent,
+  claimOutcomeSlot: mocks.claimFailure,
+  releaseOutcomeSlot: mocks.releaseFailure,
   recordFunnelEvent: vi.fn(),
 }));
 vi.mock("@/lib/i18n/server", () => ({ getLocale: vi.fn(async () => "en") }));
@@ -86,7 +86,8 @@ beforeEach(() => {
     user === "user-1" && id === "mat-1" && ws === "ws-1" ? MATERIAL : null,
   );
   mocks.checkUsageLimit.mockResolvedValue({ allowed: true, remaining: 5 });
-  mocks.failedLimitReached.mockResolvedValue(false);
+  mocks.claimFailure.mockResolvedValue({ allowed: true, slot: "slot-1" });
+  mocks.releaseFailure.mockResolvedValue(undefined);
   mocks.getCreditBalance.mockResolvedValue(100);
   mocks.reserve.mockImplementation(async (userId: string, o: { estimate: number }) => ({
     id: "hold-1",
@@ -135,16 +136,17 @@ describe("POST /api/materials/generate", () => {
     expect(mocks.settle).not.toHaveBeenCalled();
     // The hold goes back in full; the failure counts against the daily quota.
     expect(mocks.release).toHaveBeenCalledWith(expect.objectContaining({ id: "hold-1" }));
-    expect(mocks.recordUsageEvent).toHaveBeenCalledWith("user-1", "study_kit_failed");
+    expect(mocks.claimFailure).toHaveBeenCalledWith("user-1", "study_kit_failed");
+    expect(mocks.releaseFailure).not.toHaveBeenCalled();
   });
 
   it("pauses new kits after a few failed ones, before any model call or hold", async () => {
-    mocks.failedLimitReached.mockResolvedValue(true);
+    mocks.claimFailure.mockResolvedValue({ allowed: false, slot: null });
     const stream = await events(await POST(request()));
     expect(stream).toEqual([
       { type: "error", code: "too_many_failures", message: en.materials.errors.tooManyFailures },
     ]);
-    expect(mocks.failedLimitReached).toHaveBeenCalledWith("user-1", "study_kit_failed");
+    expect(mocks.claimFailure).toHaveBeenCalledWith("user-1", "study_kit_failed");
     expect(mocks.reserve).not.toHaveBeenCalled();
     expect(mocks.complete).not.toHaveBeenCalled();
   });
@@ -154,7 +156,8 @@ describe("POST /api/materials/generate", () => {
     const stream = await events(await POST(request()));
     expect(stream.at(-1)).toMatchObject({ type: "error", code: "out_of_credits" });
     expect(mocks.complete).not.toHaveBeenCalled();
-    expect(mocks.recordUsageEvent).not.toHaveBeenCalled();
+    // Not a failed run: the failure slot claimed up front is withdrawn.
+    expect(mocks.releaseFailure).toHaveBeenCalledWith("slot-1");
   });
 
   it("stops before any model call without enough credits, or past the rate limit", async () => {
@@ -217,7 +220,8 @@ describe("POST /api/materials/generate", () => {
     expect(mocks.settle).toHaveBeenCalledWith(expect.objectContaining({ id: "hold-1" }), 3, {
       reason: "study_kit_cancelled",
     });
-    expect(mocks.recordUsageEvent).not.toHaveBeenCalled();
+    // Not a failed run: the failure slot claimed up front is withdrawn.
+    expect(mocks.releaseFailure).toHaveBeenCalledWith("slot-1");
   });
 
   it("rejects malformed requests", async () => {

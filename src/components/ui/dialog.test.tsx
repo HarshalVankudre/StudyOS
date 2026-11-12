@@ -124,3 +124,33 @@ describe("DialogContent focus", () => {
     expect(screen.getByRole("dialog", { name: "Session" })).toContainElement(document.activeElement as HTMLElement);
   });
 });
+
+describe("Dialog close button", () => {
+  it("names the close button in the student's language", async () => {
+    const { I18nProvider } = await import("@/lib/i18n/client");
+    const { de } = await import("@/lib/i18n/dictionaries/de");
+    render(
+      <I18nProvider locale="de" dictionary={de}>
+        <Dialog open>
+          <DialogContent>
+            <DialogTitle>Titel</DialogTitle>
+            <DialogDescription>Text</DialogDescription>
+          </DialogContent>
+        </Dialog>
+      </I18nProvider>,
+    );
+    expect(screen.getByRole("button", { name: "Schließen" })).toBeInTheDocument();
+  });
+
+  it("falls back to English outside the app's language provider", () => {
+    render(
+      <Dialog open>
+        <DialogContent>
+          <DialogTitle>Title</DialogTitle>
+          <DialogDescription>Text</DialogDescription>
+        </DialogContent>
+      </Dialog>,
+    );
+    expect(screen.getByRole("button", { name: "Close" })).toBeInTheDocument();
+  });
+});

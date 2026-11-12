@@ -30,6 +30,8 @@ export type FeedErrorCode =
   | "reconnect"
   | "too_many_feeds"
   | "already_connected"
+  // calendar links switched off on this server (no FEED_URL_KEY in production)
+  | "links_unavailable"
   | "failed";
 
 /** What one sync changed, kept for "last synced … what changed". */

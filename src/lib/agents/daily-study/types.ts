@@ -57,6 +57,11 @@ export const planReasonSchema = z.object({
   days: z.number().int().min(-400).max(400).optional(),
   /** Cards ready, for flashcard reasons. */
   count: z.number().int().nonnegative().max(100_000).optional(),
+  /**
+   * Every card the deck has ready today, when the session takes only part of
+   * them (a bounded session: the rest wait for later days).
+   */
+  readyCount: z.number().int().nonnegative().max(100_000).optional(),
   /** The exam this session prepares for (the student's own title). */
   examTitle: z.string().max(180).optional(),
   /** Estimated minutes of work left before the due date. */
@@ -136,6 +141,8 @@ export const examCountdownSchema = z.object({
   id: z.string().min(1).max(400),
   title: z.string().min(1).max(180),
   workspaceName: z.string().max(180),
+  /** The course the exam belongs to, when its row names one (not already in the title). */
+  course: z.string().max(180).optional(),
   date: dayKey,
   days: z.number().int().min(0).max(400),
   major: z.boolean(),
@@ -173,6 +180,8 @@ export const planDetailsSchema = z.object({
   previousDate: dayKey.optional(),
   /** Unfinished items rolled forward from that plan. */
   carried: z.number().int().nonnegative().optional(),
+  /** Fingerprint of the workspaces the plan was built from (planner `planSourcesKey`). */
+  sources: z.string().max(64).optional(),
 });
 export type PlanDetails = z.infer<typeof planDetailsSchema>;
 

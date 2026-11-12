@@ -8,8 +8,10 @@
  * Bundled to .next/standalone/check-env.cjs by scripts/build-env-check.mjs
  * (part of `pnpm build`), whose tiny entry calls runEnvironmentCheck() and
  * sets the exit code. Same rules as validateEnvironmentOnStartup: logs the
- * names-only summary, exits 1 in production when a required variable is
- * missing, unless STUDYOS_ALLOW_INCOMPLETE_ENV=1.
+ * names-only summary (any warnings last, as one block), exits 1 in production
+ * only when a required variable is missing (database, Clerk auth keys, the AI
+ * key of a configured model), unless STUDYOS_ALLOW_INCOMPLETE_ENV=1. Missing
+ * optional secrets switch their feature off and only warn.
  */
 import { MissingEnvironmentError, validateEnvironmentOnStartup } from "./env";
 

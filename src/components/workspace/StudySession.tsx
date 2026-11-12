@@ -124,7 +124,14 @@ export function StudySession({
   );
   const finished = !current;
   const remaining = useMemo(() => new Set(queue.map(keyOf)).size, [queue]);
-  const completed = total - remaining;
+  // Done: graded and not coming back this session. Seen: graded at least once
+  // (a new card graded Good comes back after a short learning step, so most
+  // cards of a new deck stay "remaining" for a while; the counter and the bar
+  // still move with every card the student gets through).
+  const completed = Math.max(0, total - remaining);
+  const seen = Math.min(total, Math.max(results.size, completed));
+  const repeating = Boolean(current && results.has(keyOf(current)));
+  const position = finished ? total : Math.min(seen + (repeating ? 0 : 1), total);
 
   const currentCard = current?.card;
   const preview = useMemo(
@@ -195,7 +202,9 @@ export function StudySession({
     return t(T.intervals[unit], { n });
   };
 
-  const progress = total === 0 ? 100 : Math.round((completed / total) * 100);
+  // A card seen but coming back counts half until it is done.
+  const progress =
+    total === 0 || finished ? 100 : Math.round(((completed + (seen - completed) / 2) / total) * 100);
 
   return (
     <Dialog
@@ -219,8 +228,13 @@ export function StudySession({
             {title}
           </DialogTitle>
           <div className="flex shrink-0 items-center gap-3">
-            <span className="font-mono text-xs text-ink-soft" dir="ltr">
-              {finished ? total : Math.min(completed + 1, total)} / {total}
+            {repeating && !finished && (
+              <span className="rounded-full bg-surface-2 px-2 py-0.5 text-[11px] font-semibold text-ink-soft">
+                {T.repeatCard}
+              </span>
+            )}
+            <span className="font-mono text-xs text-ink-soft" dir="ltr" data-testid="session-counter">
+              {position} / {total}
             </span>
             <button
               onClick={onClose}
@@ -346,7 +360,7 @@ function SessionSummary({
   results: { hard: boolean; card: Flashcard }[];
   onClose: () => void;
 }) {
-  const { dict, t, plural } = useI18n();
+  const { dict, plural } = useI18n();
   const S = dict.study;
   const T = dict.studyTools;
   const today = isoDay(new Date());
@@ -378,7 +392,7 @@ function SessionSummary({
         <SummaryTile label={T.summaryNext} value={nextLabel} small />
       </dl>
       <p className="max-w-sm text-sm text-ink-soft">
-        {practice ? T.scheduleUnchanged : t(T.summaryAnswers, { count: answered })}
+        {practice ? T.scheduleUnchanged : plural(T.summaryAnswers, answered)}
       </p>
       <button
         onClick={onClose}

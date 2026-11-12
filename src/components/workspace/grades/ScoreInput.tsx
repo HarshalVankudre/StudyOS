@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
 import { cn } from "@/lib/utils";
+import { useCommittedDraft } from "../editor/useCommittedDraft";
 
 /**
  * A score box made for thumbs: a decimal keypad on phones, a 44px target,
@@ -9,6 +9,10 @@ import { cn } from "@/lib/utils";
  * so "42/" is never saved half-typed. Escape puts the stored value back.
  * `onCommit` returns false when the text could not be read; the box then
  * shows the stored value again.
+ *
+ * What is typed is registered with the sync engine like any buffered field
+ * (editor/useCommittedDraft): written before the tab is hidden or closed,
+ * before undo and before a merge, and counted by the leave prompt.
  */
 export function ScoreInput({
   value,
@@ -23,14 +27,10 @@ export function ScoreInput({
   placeholder?: string;
   className?: string;
 }) {
-  const [draft, setDraft] = useState<string | null>(null);
-  const shown = draft ?? value;
-
-  const commit = () => {
-    if (draft === null) return;
-    if (draft.trim() !== value.trim()) onCommit(draft);
-    setDraft(null);
-  };
+  // Unchanged (only spaces added) or unreadable: show the stored value again.
+  const { draft, change, commitNow, markCommitted } = useCommittedDraft(value, (text) =>
+    text.trim() === value.trim() ? false : onCommit(text),
+  );
 
   return (
     <input
@@ -40,17 +40,17 @@ export function ScoreInput({
       autoComplete="off"
       aria-label={label}
       placeholder={placeholder}
-      value={shown}
-      onChange={(e) => setDraft(e.target.value)}
+      value={draft}
+      onChange={(e) => change(e.target.value, true)}
       onFocus={(e) => e.currentTarget.select()}
-      onBlur={commit}
+      onBlur={commitNow}
       onKeyDown={(e) => {
         if (e.nativeEvent.isComposing) return;
         if (e.key === "Enter") {
           e.preventDefault();
-          commit();
+          commitNow();
         } else if (e.key === "Escape") {
-          setDraft(null);
+          markCommitted(value);
         }
       }}
       className={cn(

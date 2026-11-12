@@ -1,3 +1,4 @@
+import { rejectCrossSite } from "@/lib/http/same-origin";
 import { auth } from "@clerk/nextjs/server";
 import { z } from "zod";
 import { clearChat, loadChat, loadUndoStates } from "@/lib/ai/agent-history";
@@ -44,6 +45,8 @@ export async function GET(request: Request) {
 
 /** Forget the conversation. The workspace itself is not changed. */
 export async function DELETE(request: Request) {
+  const crossSite = rejectCrossSite(request);
+  if (crossSite) return crossSite;
   const { T, userId, workspaceId } = await context(request);
   if (!userId) return Response.json({ error: T.ai.errors.notAuthenticated }, { status: 401 });
   if (!workspaceId) return Response.json({ error: T.ai.errors.invalidAgentRequest }, { status: 400 });

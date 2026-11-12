@@ -20,6 +20,57 @@ import type {
 } from "@/lib/workspace/types";
 import type { AgentOp } from "./agent-ops";
 
+// ---------------------------------------------------------------------------
+// Data fence
+//
+// Workspace text, tool output and stored change notes can carry text the
+// student never wrote (an imported syllabus, a study material, a calendar
+// feed). Everything of that kind is placed in the prompt inside a fence:
+//
+//   ⟦data <label> <token>⟧
+//   …untrusted text…
+//   ⟦/data <token>⟧
+//
+// The token is random per turn and never appears in stored data, so text
+// inside cannot close the fence early by guessing it. The bracket characters
+// ⟦ ⟧ (and the look-alikes 〚 〛) are removed from the data itself, so the
+// data cannot even print something shaped like a marker. No other Unicode
+// character folds (NFKC) to these brackets, so there is no look-alike to
+// defuse beyond these four. Only the brackets are rewritten: the rest of the
+// text (full-width punctuation in Japanese or Chinese notes, for example)
+// reaches the model unchanged, so edits that copy it back do not alter it.
+
+const FENCE_BRACKETS = /[⟦⟧〚〛]/g;
+
+/** Remove anything shaped like a fence marker from untrusted text. */
+export function defuseFenceText(text: string): string {
+  return text.replace(FENCE_BRACKETS, (c) => (c === "⟦" || c === "〚" ? "[" : "]"));
+}
+
+export interface DataFence {
+  readonly token: string;
+  /** `text` inside a fence labelled `label` (a short ascii word). */
+  wrap(label: string, text: string): string;
+}
+
+function randomToken(): string {
+  const bytes = new Uint8Array(12);
+  globalThis.crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** A fence with a fresh random token (one per agent turn). */
+export function createDataFence(token: string = randomToken()): DataFence {
+  if (!/^[0-9a-z]{8,64}$/i.test(token)) throw new Error("invalid fence token");
+  return {
+    token,
+    wrap(label, text) {
+      const name = label.replace(/[^a-z_]/gi, "").slice(0, 32) || "data";
+      return `⟦data ${name} ${token}⟧\n${defuseFenceText(text)}\n⟦/data ${token}⟧`;
+    },
+  };
+}
+
 const OUTLINE_MAX_CHARS = 12_000;
 const ROWS_PER_DATABASE = 12;
 const FOCUS_MAX_CHARS = 16_000;
@@ -64,10 +115,15 @@ function describeDatabase(db: Database, rowLimit: number): string {
     .join("; ");
   const rows = db.rows.slice(0, rowLimit).map((r) => `[${r.id}] ${rowLabel(db, r)}`);
   const more = db.rows.length > rowLimit ? ` … +${db.rows.length - rowLimit} more (use find_entities / read_area)` : "";
+  // Weights many items share live here, not in rows (see set_grades_block).
+  const grading = db.grading?.categories.length
+    ? [`  grading categories: ${db.grading.categories.map((c) => `[${c.id}] ${clip(c.name, 30)} ${c.weight}% (course ${c.course})`).join("; ")}`]
+    : [];
   return [
     `- [${db.id}] ${db.icon ?? ""} ${clip(db.name, 60)} — ${db.rows.length} row(s)`,
     `  properties: ${props || "none"}`,
     `  views: ${db.views.map(describeView).join("; ") || "none"}`,
+    ...grading,
     `  rows: ${rows.join("; ") || "none"}${more}`,
   ].join("\n");
 }

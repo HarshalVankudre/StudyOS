@@ -7,9 +7,17 @@ const h = vi.hoisted(() => ({
   settleHold: vi.fn(),
   releaseHold: vi.fn(),
 }));
-vi.mock("@/lib/db", () => ({
-  prisma: { usageEvent: { count: h.count, create: h.create } },
-}));
+vi.mock("@/lib/db", () => {
+  const usageEvent = { count: h.count, create: h.create };
+  return {
+    prisma: {
+      usageEvent,
+      subscription: { findUnique: async () => null },
+      // The allowance is claimed under an advisory lock in a transaction.
+      $transaction: async (fn: (tx: unknown) => unknown) => fn({ $queryRaw: async () => [], usageEvent }),
+    },
+  };
+});
 vi.mock("@/lib/credits", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/credits")>()),
   chargeCredits: h.charge,
@@ -77,5 +85,43 @@ describe("agent turn charging policy", () => {
     expect(await settleAgentTurn({ userId: "u", usage: none, model: "x", outcome: "failed" })).toBe(0);
     expect(h.count).not.toHaveBeenCalled();
     expect(h.charge).not.toHaveBeenCalled();
+  });
+});
+
+describe("round 2, finding 8: a turn never costs more than the plan's per-message cap", () => {
+  // ~$0.2 on any model: 67 credits, more than the free cap of 30.
+  const BIG = { promptTokens: 100_000, completionTokens: 50_000, costUsd: 0.2 };
+  const CEILING = { ...HOLD, amount: 30 };
+
+  it("clamps the model charge to the cap (estimates and rounding up cannot push a turn past it)", async () => {
+    expect(
+      await settleAgentTurn({ userId: "u", usage: BIG, model: "m", outcome: "completed", hold: CEILING, capCredits: 30 }),
+    ).toBe(30);
+    expect(h.settleHold).toHaveBeenCalledWith(CEILING, 30, { reason: "agent" });
+  });
+
+  it("counts the turn's sandbox renders toward the cap", async () => {
+    const { createSandboxTool } = await import("./tools/sandbox-tool");
+    const { FakeSandboxRunner } = await import("@/lib/ai/sandbox/runner.fake");
+    const tool = createSandboxTool({
+      runner: new FakeSandboxRunner({ exitCode: 0, logTail: "", artifacts: [{ path: "out/a.png", bytes: new Uint8Array([1]) }] }),
+      createAsset: async (i) => ({ assetId: "a1", mime: i.mime, filename: i.filename }),
+      enabled: true,
+      quota: { reserve: async () => ({ ok: true as const, charge: { settle: async () => {}, release: async () => {} } }) },
+    });
+    const input = { inputs: [], setup: [], run: ["render"], outputs: ["out/a.png"], timeoutSec: 60 };
+    await tool.handler(input, { taskId: "task_9", ownerId: "u" });
+    await tool.handler(input, { taskId: "task_9", ownerId: "u" });
+    // Two renders were charged 2 each: the model may take at most 26 of the 30.
+    expect(
+      await settleAgentTurn({ userId: "u", usage: BIG, model: "m", outcome: "completed", hold: CEILING, capCredits: 30, taskId: "task_9" }),
+    ).toBe(26);
+    expect(h.settleHold).toHaveBeenLastCalledWith(CEILING, 26, { reason: "agent" });
+  });
+
+  it("a turn under the cap is charged its real cost", async () => {
+    expect(
+      await settleAgentTurn({ userId: "u", usage: USAGE, model: "claude-haiku-5-5", outcome: "completed", hold: CEILING, capCredits: 30, taskId: "task_x" }),
+    ).toBe(4);
   });
 });

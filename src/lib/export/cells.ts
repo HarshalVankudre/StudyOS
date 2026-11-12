@@ -4,6 +4,7 @@
  * related rows' titles, checkboxes become TRUE/FALSE.
  */
 import { titleProperty } from "@/lib/workspace/helpers";
+import { findRow } from "@/lib/workspace/row-lookup";
 import type { CellValue, Database, DatabaseProperty, Workspace } from "@/lib/workspace/types";
 
 /** Separator between several values in one cell (multi-select, relation). */
@@ -25,17 +26,19 @@ export function cellText(
       return value === true ? "TRUE" : "FALSE";
     case "select":
     case "status":
-    case "multi_select":
+    case "multi_select": {
+      const labels = new Map((prop.options ?? []).map((o) => [o.id, o.label] as const));
       return ids(value)
-        .map((id) => prop.options?.find((o) => o.id === id)?.label ?? "")
+        .map((id) => labels.get(id) ?? "")
         .filter(Boolean)
         .join(MULTI_SEPARATOR);
+    }
     case "relation": {
       const target = ws.databases.find((d) => d.id === prop.relationDatabaseId);
       const tp = target ? titleProperty(target) : undefined;
       return ids(value)
         .map((id) => {
-          const row = target?.rows.find((r) => r.id === id);
+          const row = target ? findRow(target, id) : undefined;
           const title = row && tp ? row.cells[tp.id] : undefined;
           return typeof title === "string" || typeof title === "number" ? String(title) : "";
         })

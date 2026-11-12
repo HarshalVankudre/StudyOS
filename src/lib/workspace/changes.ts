@@ -26,6 +26,7 @@
  * objects on the changed paths and shares everything else with the input, so
  * many versions of a large workspace cost little memory.
  */
+import { MAX_FLASHCARD_TEXT, MAX_QUIZ_TEXT } from "./schema";
 import { merge3 } from "./text-merge";
 
 /** A step in a path: an object key, or an array item by id. */
@@ -58,8 +59,17 @@ type Obj = Record<string, unknown>;
  *    place are reverted; anything changed since (by anyone) is left alone.
  *  - "strict": server-side merges. Any collision is reported in `conflicts`
  *    and the caller must refuse the merge.
+ *  - "salvage": edits that may already have been applied and then changed
+ *    elsewhere (an old draft whose save may or may not have landed). Nothing
+ *    is overwritten or deleted: a block's different text is kept as a copy,
+ *    missing items are brought back (reported), everything else is skipped
+ *    and counted in `skipped`.
+ *
+ * Only prose (see `proseLimit`) is merged word by word; any other value that
+ * changed on both sides is a single value: the student's wins (rebase,
+ * reported), it is a conflict (strict), or it is left alone (undo, salvage).
  */
-export type ApplyMode = "rebase" | "undo" | "strict";
+export type ApplyMode = "rebase" | "undo" | "strict" | "salvage";
 
 export interface Overwrite {
   path: Path;
@@ -78,18 +88,24 @@ export interface MergeReport {
   keptDeleted: number;
   /** Values changed elsewhere that the student's edit replaced. */
   overwritten: Overwrite[];
-  /** Undo/redo: parts left alone because they changed since. */
+  /**
+   * Parts left alone: undo/redo (changed since), salvage (could not be
+   * matched safely), or a rebase edit with nowhere to go.
+   */
   skipped: number;
+  /** The merged document broke a size limit and was repaired (a deck split). */
+  repaired: number;
   /** Strict mode: collisions that make the merge unsafe. */
   conflicts: number;
 }
 
 export function emptyReport(): MergeReport {
-  return { keptBoth: 0, restored: 0, keptDeleted: 0, overwritten: [], skipped: 0, conflicts: 0 };
+  return { keptBoth: 0, restored: 0, keptDeleted: 0, overwritten: [], skipped: 0, repaired: 0, conflicts: 0 };
 }
 
+/** Anything the student should be told about (a merge or a recovered draft). */
 export function reportHasNews(r: MergeReport): boolean {
-  return r.keptBoth + r.restored + r.keptDeleted + r.overwritten.length > 0;
+  return r.keptBoth + r.restored + r.keptDeleted + r.overwritten.length + r.skipped + r.repaired > 0;
 }
 
 /** Where a missing item can be found (the student's own copy), for restoring it. */
@@ -337,6 +353,63 @@ export function opContainers(op: Op): Array<{ arrayPath: Path; id: string }> {
 }
 
 // ---------------------------------------------------------------------------
+// Prose fields: the only strings merged word by word
+// ---------------------------------------------------------------------------
+
+/** Keys of prose (merged as text) wherever they appear, with their length limit. */
+const PROSE_KEYS: Record<string, number> = {
+  title: Infinity,
+  name: Infinity,
+  description: Infinity,
+  label: Infinity,
+  caption: Infinity,
+  alt: Infinity,
+};
+/** Prose keys of particular items (the parent list's key), with their limit. */
+const PROSE_IN: Record<string, Record<string, number>> = {
+  blocks: { text: Infinity },
+  cards: { front: MAX_FLASHCARD_TEXT, back: MAX_FLASHCARD_TEXT },
+  questions: {
+    prompt: MAX_QUIZ_TEXT,
+    explanation: MAX_QUIZ_TEXT,
+    answerText: MAX_QUIZ_TEXT,
+    topic: 200,
+  },
+};
+
+/**
+ * Is the string at `path` prose (block text, a title or name, a card side,
+ * quiz text, a text-typed database cell)? Then two edits to it are merged
+ * word by word, up to the returned length limit. Everything else (dates,
+ * links, ids, icons, option choices, code) is a single value: merging
+ * "2026-11-20" with "2026-12-12" token by token would invent a date nobody
+ * chose. Null for those.
+ */
+export function proseLimit(root: unknown, path: Path): number | null {
+  const key = path[path.length - 1];
+  if (typeof key !== "string") return null;
+  const listKey = path.length >= 3 ? path[path.length - 3] : null;
+  // A database cell: prose only when its column is a text column.
+  if (path.length >= 6 && path[path.length - 2] === "cells" && path[path.length - 4] === "rows") {
+    const dbPath = path.slice(0, path.length - 4);
+    const db = getAt(root, dbPath);
+    const props = isPlainObject(db) && Array.isArray(db.properties) ? db.properties : [];
+    const prop = props.find((p) => isIdItem(p) && p.id === key) as { type?: unknown } | undefined;
+    return prop?.type === "text" ? Infinity : null;
+  }
+  if (typeof listKey === "string" && PROSE_IN[listKey]?.[key] !== undefined) {
+    return PROSE_IN[listKey][key];
+  }
+  if (PROSE_KEYS[key] !== undefined) {
+    // A grades block's title is capped by the schema.
+    const container = getAt(root, path.slice(0, -1));
+    if (key === "title" && isPlainObject(container) && container.type === "grades") return 200;
+    return PROSE_KEYS[key];
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // applyPatch
 // ---------------------------------------------------------------------------
 
@@ -350,6 +423,8 @@ const TEXT_BLOCK_TYPES = new Set([
   "callout",
 ]);
 
+const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
 function randomId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `id-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
@@ -360,6 +435,8 @@ class Applier {
   /** Blocks whose student version was kept as a copy: later edits to them are in the copy. */
   private forked = new Set<string>();
   root: Obj;
+  /** The document before this apply (the other writer's version, when merging). */
+  readonly start: Obj;
   report: MergeReport;
 
   constructor(
@@ -367,6 +444,7 @@ class Applier {
     private opts: ApplyOptions,
   ) {
     this.root = doc;
+    this.start = doc;
     this.report = opts.report ?? emptyReport();
   }
 
@@ -405,6 +483,10 @@ class Applier {
 
   apply(ops: readonly Op[]): void {
     for (const op of ops) {
+      if (op.path.some((seg) => typeof seg === "string" && UNSAFE_KEYS.has(seg))) {
+        this.miss(); // never step onto an object's prototype
+        continue;
+      }
       if (this.isForked(op.path)) continue;
       switch (op.op) {
         case "set":
@@ -442,7 +524,8 @@ class Applier {
       const arrayPath = path.slice(0, i);
       const arr = getAt(this.root, arrayPath);
       if (Array.isArray(arr) && arr.some((x) => isIdItem(x) && x.id === seg.id)) continue;
-      if (this.opts.mode !== "rebase" || !Array.isArray(arr)) return false;
+      const mayRestore = this.opts.mode === "rebase" || this.opts.mode === "salvage";
+      if (!mayRestore || !Array.isArray(arr)) return false;
       const found = this.opts.lookup?.(arrayPath, seg.id);
       if (!found) return false;
       const target = this.writable(arrayPath) as unknown[];
@@ -467,11 +550,28 @@ class Applier {
     }
     const current = container[key];
     if (deepEqual(current, op.after)) return;
+    if (this.opts.mode === "salvage") {
+      this.salvageSet(op, containerPath, key);
+      return;
+    }
     if (deepEqual(current, op.before)) {
       this.write(containerPath, key, op.after);
       return;
     }
     this.collide(op, containerPath, key, current);
+  }
+
+  /**
+   * Salvage: the value may have been saved already and changed since, so it
+   * is never written over. A block's text is kept as a copy; anything else is
+   * left as it is and counted.
+   */
+  private salvageSet(op: Extract<Op, { op: "set" }>, containerPath: Path, key: string): void {
+    const blockList = containerPath.length >= 2 ? containerPath[containerPath.length - 2] : null;
+    if (blockList === "blocks" && key === "text" && typeof op.after === "string" && op.after.trim()) {
+      if (this.keepBothBlocks(containerPath)) return;
+    }
+    this.report.skipped += 1;
   }
 
   private write(containerPath: Path, key: string, value: unknown): void {
@@ -496,9 +596,11 @@ class Applier {
     const { mode } = this.opts;
     const texts =
       typeof op.before === "string" && typeof op.after === "string" && typeof current === "string";
-    if (texts) {
+    const limit = texts ? proseLimit(this.root, op.path) : null;
+    if (limit !== null) {
       const merged = merge3(op.before as string, op.after as string, current as string);
-      if (merged.ok) {
+      // A merge longer than the field allows is not a clean merge either.
+      if (merged.ok && merged.text.length <= limit) {
         this.write(containerPath, key, merged.text);
         return;
       }
@@ -520,21 +622,55 @@ class Applier {
     this.report.overwritten.push({ path: op.path, theirs: current, mine: op.after });
   }
 
-  /** Insert the student's version of a block as a new block right after theirs. */
+  /**
+   * A block's text changed on both sides and cannot be merged: keep both.
+   * Rebase: the student's version stays where it is (what they are typing,
+   * under their cursor) and the other version is inserted right after it.
+   * Salvage: the saved version stays and the old draft's text is the copy.
+   * The copy carries `keptFrom` (the block it was kept next to), so every
+   * device shows it marked, with a way to use it or discard it.
+   */
   private keepBothBlocks(blockPath: Path): boolean {
     const last = blockPath[blockPath.length - 1];
     if (typeof last === "string") return false;
     const arrayPath = blockPath.slice(0, -1);
     const mine = this.opts.lookup?.(arrayPath, last.id)?.item;
-    if (!mine) return false;
     const theirs = getAt(this.root, blockPath);
+    if (!mine || !isPlainObject(theirs)) return false;
     // Only text blocks are worth duplicating; anything else keeps the student's value.
     if (!TEXT_BLOCK_TYPES.has(String(mine.type))) return false;
-    if (isPlainObject(theirs) && typeof mine.text === "string" && mine.text === theirs.text) return false;
+    if (typeof mine.text === "string" && mine.text === theirs.text) return false;
     const arr = this.writable(arrayPath) as unknown[];
-    const copy = { ...mine, id: (this.opts.newId ?? randomId)() };
-    insertAt(arr, copy, [last.id, null], true);
+    const i = arr.findIndex((x) => isIdItem(x) && x.id === last.id);
+    if (i < 0) return false;
+    const newId = (this.opts.newId ?? randomId)();
+    if (this.opts.mode === "salvage") {
+      arr.splice(i + 1, 0, { ...mine, id: newId, keptFrom: last.id });
+    } else {
+      arr.splice(i, 1, mine, { ...theirs, id: newId, keptFrom: last.id });
+    }
     this.forked.add(pathKey(blockPath));
+    this.report.keptBoth += 1;
+    return true;
+  }
+
+  /**
+   * Rebase: the student brings back a text block (an undone deletion) that
+   * another writer had brought back too, with other text. Both texts stay:
+   * the other writer's block where it is, the student's as a marked copy
+   * right after it (one tap to use it or discard it).
+   */
+  private keepInsertedCopy(op: Extract<Op, { op: "ins" }>, existing: IdItem): boolean {
+    const mine = op.item as Obj;
+    const theirs = existing as Obj;
+    if (op.path[op.path.length - 1] !== "blocks") return false;
+    if (!TEXT_BLOCK_TYPES.has(String(mine.type)) || typeof mine.text !== "string" || !mine.text.trim()) return false;
+    if (mine.text === theirs.text) return false;
+    const arr = this.writable(op.path) as unknown[];
+    const i = arr.findIndex((x) => isIdItem(x) && x.id === existing.id);
+    if (i < 0) return false;
+    const newId = (this.opts.newId ?? randomId)();
+    arr.splice(i + 1, 0, { ...mine, id: newId, keptFrom: existing.id });
     this.report.keptBoth += 1;
     return true;
   }
@@ -549,15 +685,31 @@ class Applier {
       this.miss();
       return;
     }
-    if (arr.some((x) => isIdItem(x) && x.id === op.item.id)) return; // already there
+    const existing = arr.find((x) => isIdItem(x) && x.id === op.item.id);
+    if (existing !== undefined) {
+      // Already there. If with other content (undoing a deletion of something
+      // another writer brought back from an older copy), say so.
+      if (!deepEqual(existing, op.item)) {
+        if (this.opts.mode === "undo") this.report.skipped += 1;
+        else if (this.opts.mode === "strict") this.report.conflicts += 1;
+        else if (this.opts.mode === "rebase" && !this.keepInsertedCopy(op, existing)) this.report.skipped += 1;
+      }
+      return;
+    }
     if (this.opts.mode === "strict" && !anchorsPresent(arr, op.at)) {
       this.report.conflicts += 1;
       return;
     }
     insertAt(this.writable(op.path) as unknown[], op.item, op.at, false);
+    // Salvage cannot tell a new item from one deleted elsewhere since: say so.
+    if (this.opts.mode === "salvage") this.report.restored += 1;
   }
 
   private del(op: Extract<Op, { op: "del" }>): void {
+    if (this.opts.mode === "salvage") {
+      this.report.skipped += 1;
+      return;
+    }
     const arr = getAt(this.root, op.path);
     if (!Array.isArray(arr)) return; // its container is gone too
     const i = arr.findIndex((x) => isIdItem(x) && x.id === op.item.id);
@@ -577,10 +729,27 @@ class Applier {
   }
 
   private mov(op: Extract<Op, { op: "mov" }>): void {
+    if (this.opts.mode === "salvage") {
+      this.report.skipped += 1;
+      return;
+    }
     const arr = getAt(this.root, op.path);
     if (!Array.isArray(arr)) return;
     const i = arr.findIndex((x) => isIdItem(x) && x.id === op.id);
     if (i < 0) return;
+    const idAt = (list: unknown[], k: number) =>
+      k >= 0 && k < list.length && isIdItem(list[k]) ? (list[k] as IdItem).id : null;
+    if (idAt(arr, i - 1) === op.to[0] && idAt(arr, i + 1) === op.to[1]) return; // already there
+    if (this.opts.mode === "strict") {
+      // Server-side merges: if the other writer moved this item (or changed
+      // what is next to it), placing it by our anchors would undo that.
+      const theirs = getAt(this.start, op.path);
+      const j = Array.isArray(theirs) ? theirs.findIndex((x) => isIdItem(x) && x.id === op.id) : -1;
+      if (j < 0 || idAt(theirs as unknown[], j - 1) !== op.from[0] || idAt(theirs as unknown[], j + 1) !== op.from[1]) {
+        this.report.conflicts += 1;
+        return;
+      }
+    }
     const [prev, next] = op.to;
     const has = (id: string | null) => id !== null && id !== op.id && arr.some((x) => isIdItem(x) && x.id === id);
     if (!(prev === null || has(prev)) && !has(next)) {
@@ -640,13 +809,47 @@ export function applyPatch<T extends object>(
 
 /**
  * The same document as `next`, sharing every part that is equal to `prev`
- * with `prev` (so unchanged pages, blocks and rows are the same objects).
- * Returns the patch from `prev` to `next` as well.
+ * with `prev` (so unchanged pages, blocks and rows are the same objects, and
+ * only what changed re-renders). `changed` is false when the two are equal
+ * (then `doc` is `prev` itself). One pass over the document.
  */
-export function shareWith<T extends object>(prev: T, next: T): { doc: T; ops: Op[] } {
-  const ops = diff(prev, next);
-  if (ops.length === 0) return { doc: prev, ops };
-  return { doc: applyPatch(prev, ops, { mode: "undo" }).doc, ops };
+export function shareWith<T extends object>(prev: T, next: T): { doc: T; changed: boolean } {
+  // Built from `next` directly (not by replaying a patch on `prev`): several
+  // moves in one list replayed one by one need not give `next`'s order.
+  const doc = share(prev, next) as T;
+  return { doc, changed: doc !== prev };
+}
+
+/** `next`, with every part deep-equal to the matching part of `prev` taken from `prev`. */
+function share(prev: unknown, next: unknown): unknown {
+  if (prev === next) return prev;
+  if (Array.isArray(next)) {
+    if (!Array.isArray(prev)) return next;
+    const byId = new Map<string, unknown>();
+    for (const item of prev) if (isIdItem(item)) byId.set(item.id, item);
+    let same = prev.length === next.length;
+    const out = next.map((item, i) => {
+      const old = isIdItem(item) ? byId.get(item.id) : prev[i];
+      const shared = old === undefined ? item : share(old, item);
+      if (shared !== prev[i]) same = false;
+      return shared;
+    });
+    return same ? prev : out;
+  }
+  if (isPlainObject(next)) {
+    if (!isPlainObject(prev)) return next;
+    const keys = Object.keys(next);
+    let same = keys.length === Object.keys(prev).length;
+    const out: Record<string, unknown> = {};
+    for (const k of keys) {
+      const has = Object.prototype.hasOwnProperty.call(prev, k);
+      const shared = has ? share(prev[k], next[k]) : next[k];
+      if (!has || shared !== prev[k]) same = false;
+      out[k] = shared;
+    }
+    return same ? prev : out;
+  }
+  return next;
 }
 
 /** Rough size of a patch in bytes (for capping undo history). */

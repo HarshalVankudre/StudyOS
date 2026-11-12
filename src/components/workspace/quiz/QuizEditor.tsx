@@ -15,6 +15,7 @@ import {
 import { cn } from "@/lib/utils";
 import { CardContent } from "../study/CardContent";
 import { SourceChip } from "../study/SourceChip";
+import { DraftTextarea } from "../editor/DraftTextarea";
 
 const KINDS: QuizQuestionKind[] = ["mcq", "true_false", "short"];
 
@@ -468,8 +469,9 @@ function TextArea({
   small?: boolean;
 }) {
   const lines = value.split("\n").length;
+  // Buffered: one write per typing burst, not per key (see DraftTextarea).
   const field = (
-    <textarea
+    <DraftTextarea
       ref={ref}
       dir="auto"
       value={value}
@@ -477,7 +479,7 @@ function TextArea({
       placeholder={placeholder}
       maxLength={MAX_QUIZ_TEXT}
       rows={Math.min(10, Math.max(small ? 1 : 2, lines))}
-      onChange={(e) => onChange(e.target.value)}
+      onCommit={onChange}
       className={cn(
         "w-full min-w-0 resize-y rounded-lg border border-line bg-card px-3 py-2 text-base text-ink outline-none [field-sizing:content] placeholder:text-ink-soft/50 focus:border-ink/30 sm:text-sm",
         small ? "min-h-11" : "min-h-16",

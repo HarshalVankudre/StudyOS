@@ -7,6 +7,12 @@ import { Dialog as DialogPrimitive } from "radix-ui"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { rememberOpener, restoreFocus } from "@/components/ui/focus-return"
+import { useOptionalI18n } from "@/lib/i18n/context"
+
+/** The close label in the student's language ("Close" outside the app's provider). */
+function useCloseLabel(): string {
+  return useOptionalI18n()?.dict.common.close ?? "Close"
+}
 
 function Dialog({
   ...props
@@ -65,6 +71,7 @@ function DialogContent({
    */
   returnFocus?: () => HTMLElement | null | undefined
 }) {
+  const closeLabel = useCloseLabel()
   // The last mounted content node, kept after unmount: Radix reports the
   // close only after the node has been removed.
   const contentRef = React.useRef<HTMLDivElement | null>(null)
@@ -108,7 +115,7 @@ function DialogContent({
             className="absolute top-4 right-4 rounded-xs opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
           >
             <XIcon />
-            <span className="sr-only">Close</span>
+            <span className="sr-only">{closeLabel}</span>
           </DialogPrimitive.Close>
         )}
       </DialogPrimitive.Content>
@@ -134,6 +141,7 @@ function DialogFooter({
 }: React.ComponentProps<"div"> & {
   showCloseButton?: boolean
 }) {
+  const closeLabel = useCloseLabel()
   return (
     <div
       data-slot="dialog-footer"
@@ -146,7 +154,7 @@ function DialogFooter({
       {children}
       {showCloseButton && (
         <DialogPrimitive.Close asChild>
-          <Button variant="outline">Close</Button>
+          <Button variant="outline">{closeLabel}</Button>
         </DialogPrimitive.Close>
       )}
     </div>

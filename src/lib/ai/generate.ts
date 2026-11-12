@@ -863,7 +863,7 @@ async function openRouterGenerate(
   const missingBlock = [
     evidence.hasDates
       ? ""
-      : "NO DATES GIVEN: the student's input names no specific date. Leave every due date and exam date null — even for something like \"exams in February\" (say \"February\" in a description instead).",
+      : "NO DATES GIVEN: the student's input names no specific date. Leave every due date and exam date null — even for something like \"exams in February\" (say \"February\" in a description instead). Put no month or season in any title, and never write that something is near, soon or coming up.",
     evidence.hasWeights
       ? ""
       : "NO WEIGHTS GIVEN: leave every weight % cell null; do not guess how the work is weighted.",
@@ -977,11 +977,12 @@ function buildSystemPrompt(locale: Locale): string {
     "- Courses, instructors, rooms, weights, topics and dates come only from what the student wrote or their material. Use \"TBD\" for an unknown instructor, room or link.",
     "- Never invent a due date or an exam date. A row gets a date only when the student or their material gives it (resolve relative dates like \"next Friday\" from the current date given with the request); otherwise its date stays null and the student fills it in. Invented deadlines would show up in their calendar and daily plan as real ones.",
     "- Starter rows: one row for every item the student or their material names. Where they named none, add at most two clearly generic example rows per course (e.g. \"Problem Set 1\"), without a date.",
-    "- Every row in a database with a status property has a status: work their material says is done, handed in or graded gets the done option; everything else the first (not started) option.",
+    "- Every row in a database with a status property has a status: work their material says is done, handed in or graded gets the done option; everything else the first (not started) option. Never mark a row in progress (or a topic practised) unless the student said so about that item.",
     "",
     "GRADED WORK AND GRADES:",
     "- All graded work — homework, problem sets, quizzes, labs, papers, projects, midterms AND exams — lives in ONE graded-work database, with a select property for the type (Homework, Quiz, Exam, …), a number property for the weight (percent of the final grade, e.g. \"Weight %\") and a date property for the due date. Never put exams, projects or grades in a separate database; a planned exams or projects component is a page that shows a view of this database.",
     "- Every graded item from the student's material gets exactly one row with its real weight and date; never drop or change a stated weight, and never add a second row for the same item.",
+    "- A weight shared by a GROUP of items (\"Problem sets 20%\", \"Weekly homework 30%, lowest dropped\", \"Quizzes 10%\") is a grading category, never a row: put it in the graded-work database's `grading.categories` as {id, course: <the course option id>, name, weight, dropLowest?, expectedCount?}, and give the group's single items (\"Problem Set 4\", \"Quiz 2\") rows WITHOUT a weight. A weight for ONE item (\"Midterm 25%\") goes on that item's row.",
     "- That database also has a number property for the score the student received (e.g. \"Score\"; a percentage, or points when there is also an \"Out of\" number property). Leave it null for work not graded yet; never invent scores.",
     "- Grades are shown with a `grades` block (a live calculator: current grade per course, what is needed on the rest for a target, what-if) on the dashboard or on a grades page — never a separate grade or \"Grade Tracker\" table. Point its `databaseId` at the graded-work database and its `columns` at that database's property ids. Pick `scale` from where the student studies: \"us_letter\" or \"us_gpa\" (USA), \"uk_degree\" (UK), \"de_grade\" (Germany), otherwise \"percent\".",
     "",
@@ -1016,6 +1017,7 @@ Database = {
     groupByPropertyId?: string; datePropertyId?: string; visiblePropertyIds?: string[];
     sorts?: { propertyId: string; direction: "asc"|"desc" }[];
     filters?: { propertyId: string; operator: string; value?: string|number|boolean|string[] }[]; filterMatch?: "all"|"any" }[];  // e.g. a select filter {"propertyId":"a-type","operator":"is","value":"ty-exam"}
+  grading?: { categories: { id: string; course: string; name: string; weight: number; dropLowest?: number; expectedCount?: number }[] };  // graded-work database only: weights shared by many items ("Problem sets 20%"); course = the course option id ("*" when there is no course column); items count in a category by their type/title; never a row for a category
 }
 Page = { id: string; title: string; icon?: string; blocks: Block[] }
 Block = one of:
@@ -1030,7 +1032,7 @@ Block = one of:
   { id; type:"database_view"; databaseId; viewId }
   { id; type:"flashcards"; title?; cards: { id; front; back }[] }  // spaced-repetition deck; omit scheduling fields on new cards
   { id; type:"quiz"; title?; questions: { id; kind:"mcq"|"true_false"|"short"; prompt; choices?: string[]; answerIndex?: number; answerBool?: boolean; answerText?: string; explanation?; topic? }[] }  // practice quiz/exam; mcq: 2-6 choices + 0-based answerIndex; true_false: answerBool; short: model answerText; Markdown + $math$ allowed; never write stats or attempts (keep existing ones)
-  { id; type:"grades"; title?; databaseId; columns?: { course?; score?; maxScore?; weight?; due? }; scale?: "percent"|"us_letter"|"us_gpa"|"uk_degree"|"de_grade"; defaultTarget?: number; targets?: { [courseKey]: number } }  // live grade calculator over the graded-work database; columns are property ids of that database (course: select/relation/text, score/maxScore/weight: number, due: date), omitted ones are detected; targets are percentages keyed by course option id; the agent can add or reconfigure one with {"op":"set_grades_block","pageId","block","afterBlockId"?}`;
+  { id; type:"grades"; title?; databaseId; columns?: { course?; score?; maxScore?; weight?; due? }; scale?: "percent"|"us_letter"|"us_gpa"|"uk_degree"|"de_grade"; defaultTarget?: number; targets?: { [courseKey]: number } }  // live grade calculator over the graded-work database; columns are property ids of that database (course: select/relation/text, score/maxScore/weight: number, due: date), omitted ones are detected; targets are percentages keyed by course option id; the agent can add or reconfigure one with {"op":"set_grades_block","pageId","block","afterBlockId"?,"categories"?,"assign"?} (categories: weights many items share, kept in the graded-work database's grading.categories)`;
 
 /**
  * Pull the JSON object out of the model's reply, tolerating fences or stray

@@ -18,13 +18,20 @@
  *    cell the student changed is theirs and is left alone.
  *  - New events: an explicit import adds exactly the events the student
  *    ticked; a re-sync adds only events it has never decided on before
- *    (`seen`), so an event the student skipped, or a row they deleted, does
+ *    (`seen`) and that look like coursework (lib/feeds/coursework), so an
+ *    event the student skipped, a row they deleted, or a "Reading week" does
  *    not come back.
- *  - An event that disappears from its feed flags its row (`missingSince`);
- *    the row is never removed. If the event returns, the flag is cleared.
+ *  - Changed events: a re-sync follows them; an explicit import follows the
+ *    ones the student left ticked in the preview (`pendingUpdates` lists them).
+ *  - An event that disappears from a connected feed flags its row
+ *    (`missingSince`); the row is never removed. If the event returns, the
+ *    flag is cleared. An uploaded file never flags anything: a file may be a
+ *    partial export (one course, one date range), so an event missing from
+ *    it says nothing about the deadline.
  */
 import { rowEventSummaries } from "@/lib/calendar/events";
 import { titleProperty } from "@/lib/workspace/helpers";
+import { stableId } from "@/lib/workspace/stable-id";
 import { completionField } from "@/lib/workspace/view-logic";
 import type {
   CellValue,
@@ -34,6 +41,7 @@ import type {
   RowSource,
   Workspace,
 } from "@/lib/workspace/types";
+import { looksLikeCoursework } from "./coursework";
 import { courseLabel, matchCourse, normalizeLabel, relationLabels, type FeedMapping, type MappedField } from "./mapping";
 import { eventDay, type FeedEvent } from "./normalize";
 
@@ -53,7 +61,7 @@ export interface ApplyOptions {
   /** IANA zone used to turn instants into days (the browser's when omitted). */
   timeZone?: string;
   mode: "import" | "sync";
-  /** import: keys of the events the student chose to add. */
+  /** import: keys of the events the student chose to add, or to update when already in the table. */
   selected?: ReadonlySet<string>;
   /** sync: keys already decided on in an earlier run. */
   seen?: ReadonlySet<string>;
@@ -63,7 +71,13 @@ export interface ApplyOptions {
   horizonDay?: string;
   /** Ids and names for columns the mapping asks to create ("new"). */
   newColumns: { due: { id: string; name: string }; course: { id: string; name: string }; link: { id: string; name: string } };
-  newId?: () => string;
+  /**
+   * Id for a row or option this run creates, from what it is (`seed`). The
+   * default derives it from the feed and the seed, so a re-run (the import is
+   * re-run, not replayed, when the workspace changed elsewhere before it was
+   * saved) creates the very same ids and never a second row.
+   */
+  newId?: (seed: string) => string;
 }
 
 export type ChangeKind = "added" | "updated" | "flagged" | "restored" | "linked";
@@ -99,10 +113,10 @@ function titleKey(text: string): string {
   return normalizeLabel(text);
 }
 
-/** Default choice for an event the student has not decided on. */
+/** Default choice for an event the student has not decided on: upcoming coursework. */
 export function isDefaultSelected(event: FeedEvent, today: string, timeZone?: string): boolean {
   if (event.series) return false;
-  if (event.role === "opening") return false;
+  if (!looksLikeCoursework(event)) return false;
   return eventDay(event.when, timeZone) >= today;
 }
 
@@ -131,18 +145,40 @@ class CourseResolver {
   constructor(
     private ws: Workspace,
     private prop: DatabaseProperty,
-    private newId: () => string,
+    private newId: (seed: string) => string,
   ) {}
+
+  /**
+   * Relation labels and per-course matches, memoised while the target table
+   * keeps its length (labels are built from every target row, so building
+   * them per event was events × rows). `ensure` appending a row invalidates.
+   */
+  private relCache: { length: number; rel: ReturnType<typeof relationLabels>; byCourse: Map<string, number> } | null = null;
+
+  private relationMatch(course: string): { rel: NonNullable<ReturnType<typeof relationLabels>>; index: number } | null {
+    const target = this.ws.databases.find((d) => d.id === this.prop.relationDatabaseId);
+    if (!target) return null;
+    if (!this.relCache || this.relCache.length !== target.rows.length) {
+      this.relCache = { length: target.rows.length, rel: relationLabels(this.ws, this.prop), byCourse: new Map() };
+    }
+    const { rel, byCourse } = this.relCache;
+    if (!rel) return null;
+    let index = byCourse.get(course);
+    if (index === undefined) {
+      index = matchCourse(course, rel.labels);
+      byCourse.set(course, index);
+    }
+    return { rel, index };
+  }
 
   /** The cell value for this course, without creating anything (null = not found). */
   find(course: string): CellValue | null {
     const { prop } = this;
     if (prop.type === "text") return course;
     if (prop.type === "relation") {
-      const rel = relationLabels(this.ws, prop);
-      if (!rel) return null;
-      const i = matchCourse(course, rel.labels);
-      return i === -1 ? null : [rel.db.rows[i].id];
+      const match = this.relationMatch(course);
+      if (!match || match.index === -1) return null;
+      return [match.rel.db.rows[match.index].id];
     }
     const options = prop.options ?? [];
     const i = matchCourse(course, options.map((o) => o.label));
@@ -161,13 +197,13 @@ class CourseResolver {
       const target = this.ws.databases.find((d) => d.id === prop.relationDatabaseId);
       const title = target ? titleProperty(target) : undefined;
       if (!target || !title) return null;
-      const id = this.newId();
+      const id = this.newId(`course-row:${prop.id}:${label}`);
       target.rows.push({ id, cells: { [title.id]: label } });
       return [id];
     }
     if (prop.type !== "select" && prop.type !== "multi_select") return null;
     const options = (prop.options = prop.options ?? []);
-    const id = this.newId();
+    const id = this.newId(`course-option:${prop.id}:${label}`);
     options.push({ id, label, color: OPTION_COLORS[options.length % OPTION_COLORS.length] });
     return prop.type === "multi_select" ? [id] : id;
   }
@@ -189,7 +225,7 @@ export function applyFeedEvents(ws: Workspace, events: FeedEvent[], opts: ApplyO
   const result: ApplyResult = { changes: [], considered: [], keptEdits: 0, deferred: 0, mapping: opts.mapping };
   const db = ws.databases.find((d) => d.id === opts.databaseId);
   if (!db) return result;
-  const newId = opts.newId ?? (() => globalThis.crypto.randomUUID());
+  const newId = opts.newId ?? ((seed: string) => stableId("feed", opts.feedId, seed));
   const mapping = (result.mapping = ensureColumns(db, opts));
 
   const titleProp = propById(db, mapping.title) ?? titleProperty(db);
@@ -271,7 +307,11 @@ export function applyFeedEvents(ws: Workspace, events: FeedEvent[], opts: ApplyO
     }
 
     if (row) {
-      const changed = syncRow(row, event, day);
+      // An explicit import changes a row already in the table only when the
+      // student left that change ticked; a row it just linked only gets its
+      // empty cells filled.
+      const followFeed = opts.mode === "sync" || linkedNow || Boolean(opts.selected?.has(event.key));
+      const changed = syncRow(row, event, day, followFeed);
       if (linkedNow) result.changes.push({ kind: "linked", key: event.key, title: event.title });
       else if (changed.length) result.changes.push({ kind: "updated", key: event.key, title: event.title, fields: changed });
       if (isNewDecision) result.considered.push(event.key);
@@ -342,17 +382,18 @@ export function applyFeedEvents(ws: Workspace, events: FeedEvent[], opts: ApplyO
     }
     const status = statusValue(db!, statusProp, Boolean(event.completed));
     if (statusProp && status !== undefined) cells[statusProp.id] = status;
-    return { id: newId(), cells, source: { kind: "ical", feed: opts.feedId, key: event.key, synced } };
+    return { id: newId(`row:${event.key}`), cells, source: { kind: "ical", feed: opts.feedId, key: event.key, synced } };
   }
 
   /** Follow the feed in the fields the student has not edited. */
-  function syncRow(row: DatabaseRow, event: FeedEvent, day: string): MappedField[] {
+  function syncRow(row: DatabaseRow, event: FeedEvent, day: string, followFeed: boolean): MappedField[] {
     const src = (row.source = row.source ?? { kind: "ical", feed: opts.feedId, key: event.key });
     if (src.feed === FILE_FEED && opts.feedId !== FILE_FEED) src.feed = opts.feedId;
     if (src.missingSince) {
       delete src.missingSince;
       result.changes.push({ kind: "restored", key: event.key, title: event.title });
     }
+    if (!followFeed) return [];
     const synced = (src.synced = { ...(src.synced ?? {}) });
     const changed: MappedField[] = [];
 
@@ -404,6 +445,96 @@ export function applyFeedEvents(ws: Workspace, events: FeedEvent[], opts: ApplyO
     if (Object.keys(synced).length === 0) delete src.synced;
     return changed;
   }
+}
+
+/** A change an import would make to a row already in the table. */
+export interface PendingUpdate {
+  fields: MappedField[];
+  /** The row's due day before and after, when the date changes. */
+  due?: { from: string; to: string };
+  /** The row's title before and after, when it is renamed. */
+  title?: { from: string; to: string };
+}
+
+/**
+ * Rows already in the table whose event changed at the source (a new date,
+ * a new title) and that an import would update, by event key: a dry run of
+ * the import on a copy, so the preview shows exactly what applying does.
+ * Fields the student edited are theirs and never listed.
+ */
+export function pendingUpdates(
+  ws: Workspace,
+  databaseId: string,
+  events: FeedEvent[],
+  mapping: FeedMapping,
+  timeZone?: string,
+): Map<string, PendingUpdate> {
+  const out = new Map<string, PendingUpdate>();
+  const db = ws.databases.find((d) => d.id === databaseId);
+  if (!db || events.length === 0) return out;
+  const before = new Map(db.rows.map((r) => [r.id, r]));
+  const copy: Workspace = { ...ws, databases: structuredClone(ws.databases) };
+  // Columns the mapping would create are left out: only existing rows matter.
+  const known: FeedMapping = {
+    ...mapping,
+    due: mapping.due === "new" ? null : mapping.due,
+    course: mapping.course === "new" ? null : mapping.course,
+    link: mapping.link === "new" ? null : mapping.link,
+  };
+  const spec = { id: "\u0000preview", name: "" };
+  const result = applyFeedEvents(copy, events, {
+    databaseId,
+    feedId: FILE_FEED,
+    mapping: known,
+    today: "0000-00-00",
+    timeZone,
+    mode: "import",
+    selected: new Set(events.map((e) => e.key)),
+    newColumns: { due: spec, course: spec, link: spec },
+    newId: (seed) => `\u0000preview:${seed}`,
+  });
+  const after = copy.databases.find((d) => d.id === databaseId)!;
+  const titleProp = propById(db, known.title) ?? titleProperty(db);
+  const dueProp = propById(db, known.due);
+  for (const change of result.changes) {
+    if (change.kind !== "updated" || !change.fields?.length) continue;
+    const row = after.rows.find((r) => r.source?.key === change.key);
+    const old = row ? before.get(row.id) : undefined;
+    if (!row || !old) continue;
+    const update: PendingUpdate = { fields: change.fields };
+    if (dueProp && change.fields.includes("due")) {
+      update.due = { from: cellText(old.cells[dueProp.id]), to: cellText(row.cells[dueProp.id]) };
+    }
+    if (titleProp && change.fields.includes("title")) {
+      update.title = { from: cellText(old.cells[titleProp.id]), to: cellText(row.cells[titleProp.id]) };
+    }
+    out.set(change.key, update);
+  }
+  return out;
+}
+
+/**
+ * Upcoming rows an earlier import of the same calendar file brought in whose
+ * events are not in this file. They are left as they are (a file may be
+ * partial); the preview says so instead of guessing that they were removed.
+ * A file sharing no event with the table's file rows is another calendar: 0.
+ */
+export function rowsMissingFromFile(ws: Workspace, databaseId: string, events: FeedEvent[], mapping: FeedMapping, today: string): number {
+  const db = ws.databases.find((d) => d.id === databaseId);
+  if (!db) return 0;
+  const keys = new Set(events.map((e) => e.key));
+  const dueProp = propById(db, mapping.due === "new" ? null : mapping.due);
+  const fileRows = db.rows.filter((r) => r.source?.feed === FILE_FEED);
+  if (!fileRows.some((r) => keys.has(r.source!.key))) return 0;
+  let count = 0;
+  for (const row of fileRows) {
+    const src = row.source!;
+    if (keys.has(src.key)) continue;
+    const due = dueProp ? cellText(row.cells[dueProp.id]) : (src.synced?.due ?? "");
+    if (due && due < today) continue;
+    count += 1;
+  }
+  return count;
 }
 
 /** What an import would do with each event, for the preview. */

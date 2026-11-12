@@ -493,6 +493,7 @@ function LeadPicker({
   onChange: (next: number[]) => void;
 }) {
   const labelId = useId();
+  const { plural } = useI18n();
   return (
     <div className="mt-3">
       <p id={labelId} className="text-sm text-ink-soft">
@@ -514,7 +515,7 @@ function LeadPicker({
                   : "border-line-strong bg-surface text-ink-soft hover:bg-hover hover:text-ink",
               )}
             >
-              {fmt(days === 1 ? N.leadOne : N.leadOther, { count: days })}
+              {plural(N.leadDays, days)}
             </button>
           );
         })}

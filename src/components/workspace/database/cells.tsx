@@ -280,6 +280,7 @@ export function CompleteToggle({
   return (
     <button
       type="button"
+      data-print="keep"
       onClick={onToggle}
       aria-pressed={done}
       aria-label={t(done ? dict.dbViews.markOpen : dict.dbViews.markDone, { name })}

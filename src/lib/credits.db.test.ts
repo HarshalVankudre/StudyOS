@@ -27,6 +27,7 @@ vi.mock("@/lib/stripe", async (importOriginal) => {
 });
 vi.mock("@clerk/nextjs/server", () => ({ auth: async () => ({ userId: null }) }));
 vi.mock("@/lib/ops/report-error", () => ({ reportError: () => undefined }));
+vi.mock("@/lib/usage-limits", () => ({ recordFunnelEvent: () => undefined }));
 
 describe.skipIf(!enabled)("credits on Postgres", () => {
   const run = `dbtest_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -203,5 +204,106 @@ describe.skipIf(!enabled)("credits on Postgres", () => {
       expect(await grantCredits(u, 5, "test")).toBe("deleted_account");
       if (granted !== "granted") expect(await getCreditBalance(u)).toBe(0);
     }
+  }, 60_000);
+
+  // ---- Billing review, round 2 ------------------------------------------------------
+
+  it("a row the previous code wrote ('canceled' for a past_due subscription) takes the live state again", async () => {
+    const prisma = await db();
+    const { applyLiveSubscription } = await import("./billing");
+    const u = user("legacy");
+    const sub = h.stripe.addSubscription({ id: `sub_${u}`, customer: `cus_${u}`, metadata: { userId: u } });
+    await prisma.subscription.create({
+      data: { userId: u, stripeCustomerId: `cus_${u}`, stripeSubscriptionId: sub.id, status: "canceled" },
+    });
+    expect(await applyLiveSubscription(u, sub as never)).toBe("ok");
+    expect((await prisma.subscription.findUnique({ where: { userId: u } }))?.status).toBe("active");
+  }, 60_000);
+
+  it("the one-off repair re-reads unsynced rows on Postgres (least recently checked first) and is idempotent", async () => {
+    const prisma = await db();
+    const { reconcileUnsyncedSubscriptions } = await import("./billing");
+    const back = user("rec_back");
+    const gone = user("rec_gone");
+    const fresh = user("rec_fresh");
+    h.stripe.addSubscription({ id: `sub_${back}`, customer: `cus_${back}` });
+    h.stripe.addSubscription({ id: `sub_${gone}`, customer: `cus_${gone}` });
+    h.stripe.setSubscriptionStatus(`sub_${gone}`, "canceled");
+    await prisma.subscription.createMany({
+      data: [
+        { userId: back, stripeCustomerId: `cus_${back}`, stripeSubscriptionId: `sub_${back}`, status: "canceled" },
+        { userId: gone, stripeCustomerId: `cus_${gone}`, stripeSubscriptionId: `sub_${gone}`, status: "active" },
+        // Synced by the new code already: not part of the repair.
+        { userId: fresh, stripeCustomerId: `cus_${fresh}`, stripeSubscriptionId: `sub_${fresh}`, status: "active", stripeSyncedAt: new Date() },
+      ],
+    });
+    const only = [back, gone, fresh];
+    const first = await reconcileUnsyncedSubscriptions({ userIds: only, limit: 1 });
+    expect(first).toMatchObject({ checked: 1, remaining: 1 });
+    const second = await reconcileUnsyncedSubscriptions({ userIds: only, limit: 1 });
+    expect(second).toMatchObject({ checked: 1, remaining: 0 });
+    const changed = [...first.changed, ...second.changed].map((c) => `${c.userId}:${c.from}->${c.to}`).sort();
+    expect(changed).toEqual([`${back}:canceled->active`, `${gone}:active->canceled`].sort());
+    expect(await reconcileUnsyncedSubscriptions({ userIds: only })).toEqual({ checked: 0, changed: [], failed: 0, remaining: 0 });
+    const events = await prisma.billingEvent.findMany({ where: { kind: "legacy_resync", userId: { in: only } } });
+    expect(events).toHaveLength(2);
+  }, 60_000);
+
+  it("10 parallel agent turns at a balance of 30 hold at most 30 between them", async () => {
+    const { chargeCredits, getCreditBalance, reserveCredits } = await import("./credits");
+    const u = user("ceiling");
+    await getCreditBalance(u);
+    await chargeCredits(u, 270, "test");
+    const holds = await Promise.all(
+      Array.from({ length: 10 }, () => reserveCredits(u, { estimate: 30, min: 2, reason: "agent" })),
+    );
+    expect(holds.reduce((sum, x) => sum + (x?.amount ?? 0), 0)).toBe(30);
+    expect(await balanceAndLedger(u)).toEqual({ balance: 0, ledger: 0 });
+  }, 60_000);
+
+  it("a hold whose settle recorded its charge is completed, never released, even when they race", async () => {
+    const prisma = await db();
+    const { getCreditBalance, releaseCreditHold, releaseExpiredHolds, reserveCredits } = await import("./credits");
+    const u = user("pending");
+    await getCreditBalance(u); // 300
+    const hold = await reserveCredits(u, { estimate: 100, reason: "generate", ttlMs: 1 });
+    // What settleCreditHold writes before its transaction (which then failed).
+    await prisma.creditHold.update({ where: { id: hold!.id }, data: { pendingCharge: 40 } });
+    await new Promise((r) => setTimeout(r, 5));
+    await Promise.all([releaseCreditHold(hold!), releaseCreditHold(hold!), releaseExpiredHolds({ userId: u })]);
+    expect(await prisma.creditHold.findUnique({ where: { id: hold!.id } })).toMatchObject({ state: "settled", charged: 40 });
+    expect(await balanceAndLedger(u)).toEqual({ balance: 260, ledger: 260 });
+  }, 60_000);
+
+  it("a subscription dispute processed before its invoice pauses Pro by payment; winning it restores everything", async () => {
+    const prisma = await db();
+    process.env.STRIPE_WEBHOOK_SECRET = "whsec_test";
+    const { POST } = await import("@/app/api/stripe/webhook/route");
+    const { webhookRequest } = await import("@/test/billing-fakes");
+    const { createProCheckout } = await import("./billing");
+    const { subscriptionGrantsPro } = await import("./credits");
+    const send = (type: string, object: unknown) => POST(webhookRequest({ type, data: { object } }));
+    const u = user("dispute");
+    const res = await createProCheckout({ userId: u, email: null, priceId: "price_year", origin: "o" });
+    if (!("url" in res)) throw new Error("blocked");
+    const now = Math.floor(Date.now() / 1000);
+    const a = h.stripe.completeSubscriptionCheckout(res.url.split("/").pop()!, {
+      periodStart: now - 86_400,
+      periodEnd: now + 364 * 86_400,
+      interval: "year",
+    });
+    const d = h.stripe.dispute(a.chargeId!, { created: now - 3600 });
+    expect((await send("charge.dispute.created", d)).status).toBe(200);
+    expect((await send("invoice.paid", a.invoice)).status).toBe(200);
+    let row = await prisma.subscription.findUnique({ where: { userId: u } });
+    expect(row).toMatchObject({ disputeId: d.id, allowanceStopAt: null });
+    expect(subscriptionGrantsPro(row)).toBe(false);
+    expect((await send("charge.dispute.closed", { ...d, status: "won" })).status).toBe(200);
+    row = await prisma.subscription.findUnique({ where: { userId: u } });
+    expect(row).toMatchObject({ disputeId: null, disputedAt: null, allowanceStopAt: null });
+    expect(subscriptionGrantsPro(row)).toBe(true);
+    const grants = await prisma.creditLedger.count({ where: { userId: u, reason: "pro_monthly" } });
+    expect(grants).toBe(1);
+    expect(await balanceAndLedger(u)).toEqual({ balance: 1300, ledger: 1300 });
   }, 60_000);
 });

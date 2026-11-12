@@ -9,6 +9,7 @@ import { I18nProvider } from "@/lib/i18n/client";
 import { clerkLocalization } from "@/lib/i18n/clerk";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { SkipLink } from "@/components/command/SkipLink";
+import { SignedOutPushGuard } from "@/components/notifications/SignedOutPushGuard";
 
 const hanken = Hanken_Grotesk({
   variable: "--font-hanken",
@@ -111,6 +112,7 @@ export default async function RootLayout({
                 },
               }}
             >
+              <SignedOutPushGuard />
               {children}
             </ClerkProvider>
           </I18nProvider>

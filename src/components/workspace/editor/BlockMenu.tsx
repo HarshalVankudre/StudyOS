@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type RefObject } from "react";
+import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { ArrowDown, ArrowUp, Check, ChevronDown, Copy, GripVertical, Plus, Repeat2, Trash2 } from "lucide-react";
 import {
   DropdownMenu,
@@ -43,11 +43,14 @@ export function BlockMenu({
   isFirst,
   isLast,
   handleRef,
+  openMenuRef,
 }: {
   block: Block;
   isFirst: boolean;
   isLast: boolean;
   handleRef: RefObject<HTMLButtonElement | null>;
+  /** Set to a function that focuses the handle and opens the menu. */
+  openMenuRef?: RefObject<(() => void) | null>;
 }) {
   const editor = useEditor();
   const { dict, dir } = useI18n();
@@ -67,6 +70,17 @@ export function BlockMenu({
   // Text is one tap away from being retyped; a deck, table or artifact isn't.
   const needsConfirm = !textBlock && blockHasContent(block);
 
+  useLayoutEffect(() => {
+    if (!openMenuRef) return;
+    openMenuRef.current = () => {
+      handleRef.current?.focus();
+      setOpen(true);
+    };
+    return () => {
+      openMenuRef.current = null;
+    };
+  }, [openMenuRef, handleRef]);
+
   return (
     <DropdownMenu
       open={open}
@@ -85,6 +99,11 @@ export function BlockMenu({
           type="button"
           aria-label={L.blockOptions}
           title={L.blockOptionsHint}
+          // One Tab stop per block: a text block's handle is reached from its
+          // text (Esc, or Ctrl/⌘+/ to open the menu), not by Tab. Blocks
+          // without text (a divider, a deck) keep the handle as their stop.
+          tabIndex={textBlock ? -1 : undefined}
+          aria-keyshortcuts={textBlock ? "Control+/ Meta+/" : undefined}
           // Radix opens on pointerdown; we open on click instead so a mouse
           // press can become a drag and a touch can become a scroll.
           onPointerDown={(e) => {

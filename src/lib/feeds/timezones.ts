@@ -75,7 +75,39 @@ const WINDOWS_ZONES: Record<string, string> = {
   "new zealand standard time": "Pacific/Auckland",
 };
 
-const validZones = new Map<string, boolean>();
+/**
+ * A small least-recently-used cache. The zone caches below are shared by
+ * every calendar this process reads, so they must never stop caching once
+ * full (a hostile feed could fill them with junk names and leave every later,
+ * normal feed paying for a fresh Intl lookup per date): the oldest entry is
+ * evicted instead, and a name in use stays cached.
+ */
+export class LruCache<K, V> {
+  private readonly map = new Map<K, V>();
+  constructor(private readonly capacity: number) {}
+  get(key: K): V | undefined {
+    const value = this.map.get(key);
+    if (value !== undefined) {
+      this.map.delete(key);
+      this.map.set(key, value);
+    }
+    return value;
+  }
+  set(key: K, value: V): void {
+    this.map.delete(key);
+    this.map.set(key, value);
+    while (this.map.size > this.capacity) {
+      const oldest = this.map.keys().next();
+      if (oldest.done) break;
+      this.map.delete(oldest.value);
+    }
+  }
+  get size(): number {
+    return this.map.size;
+  }
+}
+
+const validZones = new LruCache<string, boolean>(2_000);
 
 /** True when the runtime knows `zone` as an IANA time zone. */
 export function isKnownZone(zone: string): boolean {
@@ -89,7 +121,7 @@ export function isKnownZone(zone: string): boolean {
   } catch {
     ok = false;
   }
-  if (validZones.size < 500) validZones.set(zone, ok);
+  validZones.set(zone, ok);
   return ok;
 }
 
@@ -141,7 +173,7 @@ export function resolveZone(
   return null;
 }
 
-const formatters = new Map<string, Intl.DateTimeFormat>();
+const formatters = new LruCache<string, Intl.DateTimeFormat>(600);
 
 function formatterFor(zone: string): Intl.DateTimeFormat {
   let f = formatters.get(zone);
@@ -156,7 +188,7 @@ function formatterFor(zone: string): Intl.DateTimeFormat {
       minute: "2-digit",
       second: "2-digit",
     });
-    if (formatters.size < 200) formatters.set(zone, f);
+    formatters.set(zone, f);
   }
   return f;
 }

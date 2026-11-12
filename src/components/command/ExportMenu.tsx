@@ -49,8 +49,9 @@ interface ExportAction {
  * room, so the same choices open as a sheet from the palette.
  */
 export function ExportMenu({ workspace, page }: { workspace: Workspace; page: Page | undefined }) {
-  const { dict, t } = useI18n();
+  const { dict, t, locale } = useI18n();
   const E = dict.exportMenu;
+  const mdOptions = () => ({ labels: E.labels, origin: origin(), locale, ukLabels: dict.grades.uk });
   const [sheetOpen, setSheetOpen] = useState(false);
 
   useEffect(() => {
@@ -79,7 +80,7 @@ export function ExportMenu({ workspace, page }: { workspace: Workspace; page: Pa
       disabled: !page,
       run: guard(() => {
         if (!page) return;
-        const md = pageToMarkdown(page, workspace, { labels: E.labels, origin: origin() });
+        const md = pageToMarkdown(page, workspace, mdOptions());
         downloadFile(`${safeFileName(page.title)}.md`, md, "text/markdown;charset=utf-8");
       }),
     },
@@ -99,7 +100,7 @@ export function ExportMenu({ workspace, page }: { workspace: Workspace; page: Pa
       icon: <Archive className="h-4 w-4" aria-hidden />,
       run: guard(async () => {
         const { workspaceToZip } = await import("@/lib/export/zip");
-        const zip = workspaceToZip(workspace, { labels: E.labels, origin: origin() });
+        const zip = workspaceToZip(workspace, mdOptions());
         downloadFile(`${safeFileName(workspace.name, "StudyOS")}.zip`, zip as Uint8Array<ArrayBuffer>, "application/zip");
       }),
     },

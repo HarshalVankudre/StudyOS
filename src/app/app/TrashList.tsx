@@ -20,7 +20,7 @@ export interface TrashItem {
  * Collapsed by default so it stays out of the way.
  */
 export function TrashList({ items }: { items: TrashItem[] }) {
-  const { dict, t, locale } = useI18n();
+  const { dict, t, locale, plural } = useI18n();
   const S = dict.safety;
   const router = useRouter();
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -46,7 +46,7 @@ export function TrashList({ items }: { items: TrashItem[] }) {
     <details className="group mt-10 rounded-md border border-line bg-card shadow-card">
       <summary className="flex min-h-12 cursor-pointer list-none items-center gap-2 px-5 py-3 text-sm font-semibold text-ink-soft transition hover:text-ink [&::-webkit-details-marker]:hidden">
         <Trash2 className="h-4 w-4" aria-hidden />
-        {t(S.trashCount, { count: items.length })}
+        {plural(S.trashCount, items.length)}
         <span className="ms-auto text-ink-faint transition group-open:rotate-90 rtl:-scale-x-100" aria-hidden>
           ›
         </span>

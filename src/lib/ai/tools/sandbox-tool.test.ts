@@ -194,3 +194,17 @@ describe("run_in_sandbox tool", () => {
     });
   });
 });
+
+describe("run_in_sandbox: renders counted toward the agent turn's cap", () => {
+  it("tallies a delivered render under its task, once, and nothing for a failed one", async () => {
+    const { takeSandboxCreditsCharged } = await import("./sandbox-tool");
+    const charge = { settle: async () => {}, release: async () => {} };
+    const quota = { reserve: async () => ({ ok: true as const, charge }) };
+    const ok = deps();
+    await createSandboxTool({ ...ok, enabled: true, quota }).handler(baseInput, { taskId: "t_tally", ownerId: "u" });
+    const failed = deps({ exitCode: 1, logTail: "error", artifacts: [] });
+    await createSandboxTool({ ...failed, enabled: true, quota }).handler(baseInput, { taskId: "t_tally", ownerId: "u" });
+    expect(takeSandboxCreditsCharged("t_tally")).toBe(2);
+    expect(takeSandboxCreditsCharged("t_tally")).toBe(0);
+  });
+});

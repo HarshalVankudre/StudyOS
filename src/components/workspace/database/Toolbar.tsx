@@ -33,7 +33,7 @@ import { ImportDeadlinesButton } from "../feeds/ImportDeadlinesButton";
 import { DraftInput } from "../editor/DraftInput";
 import type { DbActions } from "./actions";
 import { ChipMultiSelect } from "./cells";
-import { deadlineProp, orderedProps, rowTitle } from "./shared";
+import { deadlineProp, defaultPropertyOrder, orderedProps, rowTitle } from "./shared";
 
 type Panel = "filter" | "sort" | "fields" | null;
 
@@ -84,7 +84,7 @@ export function ViewToolbar({
   );
 
   return (
-    <div className="mb-3">
+    <div data-print="hide" className="mb-3">
       <div className="flex items-center gap-1">
         <div className="relative min-w-0 flex-1 sm:max-w-xs">
           <Search className="pointer-events-none absolute start-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-faint" aria-hidden />
@@ -538,8 +538,8 @@ function FieldsPanel({ db, view, actions }: { db: Database; view: DBView; action
 
   const save = (ids: string[]) =>
     actions.updateView(view.id, (v, target) => {
-      // Showing every field in stored order is the same as having no list.
-      const all = target.properties.map((p) => p.id);
+      // Showing every field in the default order is the same as having no list.
+      const all = defaultPropertyOrder(target).map((p) => p.id);
       v.visiblePropertyIds =
         ids.length === all.length && ids.every((id, i) => id === all[i]) ? undefined : ids;
     });

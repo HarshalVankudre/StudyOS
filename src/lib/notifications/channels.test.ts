@@ -112,6 +112,32 @@ describe("push channel", () => {
     expect(subs.rows).toHaveLength(0);
   });
 
+  it("a message with a huge deep link still arrives, opening the app's home", async () => {
+    subs.add("u1", "s", `${base}/s`);
+    const huge = { ...message, url: `/app/ws?page=${"p".repeat(5_000)}&db=${"d".repeat(5_000)}` };
+    const bodies: string[] = [];
+    const channel = createPushChannel({
+      subscriptions: subs,
+      vapid,
+      allowEndpoint: () => true,
+      send: async (_sub, payload) => {
+        bodies.push(payload);
+        return { kind: "sent", status: 201 };
+      },
+    });
+    const result = await channel.deliver("u1", huge);
+    expect(result.delivered).toBe(1);
+    expect(JSON.parse(bodies[0])).toMatchObject({ title: message.title, url: "/app" });
+  });
+
+  it("never counts a too-large message as a rejection of the device", async () => {
+    subs.add("u1", "s", `${base}/s`);
+    answers.set("/s", 413);
+    for (let i = 0; i < MAX_REJECTIONS + 2; i++) await localChannel().deliver("u1", message);
+    expect(subs.rows).toHaveLength(1);
+    expect(subs.rows[0].failures).toBe(0);
+  });
+
   it("never logs the endpoint", async () => {
     subs.add("u1", "s", `${base}/secret-capability-token`);
     answers.set("/secret-capability-token", 400);

@@ -53,6 +53,8 @@ export interface KitStats {
   unverified: number;
   /** Dropped because they were malformed (bad JSON item, impossible answer). */
   malformed: number;
+  /** Summary-note bullets dropped because they copied a passage of the material. */
+  copiedNotePoints?: number;
   /** Dropped as duplicates or near-duplicates of another item. */
   duplicates: number;
   /** Verified items left over after balancing to the requested amount. */

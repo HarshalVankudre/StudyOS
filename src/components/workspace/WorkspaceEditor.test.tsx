@@ -238,11 +238,14 @@ describe("WorkspaceEditor save safety", () => {
     const user = userEvent.setup();
     actions.saveWorkspaceAction.mockResolvedValueOnce({ status: "conflict", version: 2 });
     actions.getWorkspaceStateAction.mockResolvedValue({
-      workspace: { ...workspace, name: "Renamed in another tab" },
+      workspace: { ...workspace, icon: "🧪" },
       version: 2,
     });
     renderEditor();
-    await user.type(screen.getByRole("textbox", { name: "Test workspace" }), "?");
+    // An icon is one value (not merged letter by letter): this tab's wins,
+    // and the banner says so.
+    await user.type(screen.getByRole("textbox", { name: "Workspace icon" }), "!");
+    await user.tab(); // written when the field is left (or after a pause)
 
     // No "keep mine / load latest" choice: the edit is merged onto version 2.
     expect(
@@ -251,20 +254,48 @@ describe("WorkspaceEditor save safety", () => {
     await waitFor(() =>
       expect(actions.saveWorkspaceAction).toHaveBeenLastCalledWith(
         "workspace-1",
-        expect.objectContaining({ name: "Test workspace?" }),
+        expect.objectContaining({ icon: "📚!" }),
         2,
+        expect.any(String), // the save id
       ),
     );
     expect(await screen.findByRole("status", { name: "Saved" })).toBeInTheDocument();
 
-    // The other tab's name was replaced by this edit; it can be put back.
+    // The other tab's icon was replaced by this edit; it can be put back.
     await user.click(screen.getByRole("button", { name: "Use the other version for those" }));
     await waitFor(
       () =>
         expect(actions.saveWorkspaceAction).toHaveBeenLastCalledWith(
           "workspace-1",
-          expect.objectContaining({ name: "Renamed in another tab" }),
+          expect.objectContaining({ icon: "🧪" }),
           3,
+          expect.any(String),
+        ),
+      { timeout: 3000 },
+    );
+    expect(screen.queryByText("Merged with changes made elsewhere")).toBeNull();
+  });
+
+  it("a name changed here and in another tab is merged word by word", async () => {
+    const user = userEvent.setup();
+    actions.saveWorkspaceAction.mockResolvedValueOnce({ status: "conflict", version: 2 });
+    actions.getWorkspaceStateAction.mockResolvedValue({
+      workspace: { ...workspace, name: "Test workspace 2026" },
+      version: 2,
+    });
+    renderEditor();
+    const name = screen.getByRole("textbox", { name: "Test workspace" });
+    await user.clear(name);
+    await user.type(name, "My workspace");
+    await user.tab();
+
+    await waitFor(
+      () =>
+        expect(actions.saveWorkspaceAction).toHaveBeenLastCalledWith(
+          "workspace-1",
+          expect.objectContaining({ name: "My workspace 2026" }),
+          2,
+          expect.any(String),
         ),
       { timeout: 3000 },
     );

@@ -4,8 +4,9 @@
  * blocks (database views, flashcards, quizzes, components, images) become
  * plain Markdown a student can read anywhere.
  */
+import { buildGradeReport, formatGrade, formatPercent, type UkClassLabels } from "@/lib/grades";
 import { dayKeyOf, applyView } from "@/lib/workspace/view-logic";
-import type { Block, Database, Page, Workspace } from "@/lib/workspace/types";
+import type { Block, Database, GradesBlock, Page, SourceRef, Workspace } from "@/lib/workspace/types";
 import { cellText, visibleProperties } from "./cells";
 
 /** Words that appear in exported files, from the student's language. */
@@ -18,6 +19,20 @@ export interface MarkdownLabels {
   falseLabel: string;
   quiz: string;
   component: string;
+  /** Before a card's or question's citation. */
+  source: string;
+  /** A cited page, with {page}. */
+  sourcePage: string;
+  gradeCurrent: string;
+  /** With {percent}. */
+  gradeDecided: string;
+  gradeTarget: string;
+  gradeWork: string;
+  gradeWeight: string;
+  gradeScore: string;
+  gradeNotGraded: string;
+  gradeNoCourse: string;
+  gradeNoScores: string;
 }
 
 export const ENGLISH_MARKDOWN_LABELS: MarkdownLabels = {
@@ -29,10 +44,26 @@ export const ENGLISH_MARKDOWN_LABELS: MarkdownLabels = {
   falseLabel: "False",
   quiz: "Quiz",
   component: "Interactive component",
+  source: "Source",
+  sourcePage: "p. {page}",
+  gradeCurrent: "Current grade",
+  gradeDecided: "{percent} of the grade decided",
+  gradeTarget: "Target",
+  gradeWork: "Graded work",
+  gradeWeight: "Weight",
+  gradeScore: "Score",
+  gradeNotGraded: "not graded yet",
+  gradeNoCourse: "No course",
+  gradeNoScores: "No scores yet.",
 };
 
 export interface MarkdownOptions {
-  labels?: MarkdownLabels;
+  /** Missing labels fall back to English. */
+  labels?: Partial<MarkdownLabels>;
+  /** Number formatting for grades (default "en"). */
+  locale?: string;
+  /** Names of UK degree classes, for grade blocks on that scale. */
+  ukLabels?: UkClassLabels;
   /** Prefix for image links, e.g. "https://studyos.app" (default: relative). */
   origin?: string;
   /** The day database views are evaluated on (default: today, local). */
@@ -81,11 +112,81 @@ export function databaseTable(
   return [head, sep, ...body].join("\n");
 }
 
+interface ResolvedOptions {
+  labels: MarkdownLabels;
+  origin: string;
+  today: string;
+  locale: string;
+  ukLabels?: UkClassLabels;
+}
+
+/** One line of inline text with emphasis markers escaped, so it cannot break the italics around it. */
+function plainInline(text: string): string {
+  return text.replace(/\s*\n\s*/g, " ").replace(/([\*_`])/g, "\$1").trim();
+}
+
+/** "*Source: Lecture 7, p. 3 — “quoted passage”*", or "" when nothing is cited. */
+export function sourceLine(source: SourceRef | undefined, L: MarkdownLabels): string {
+  if (!source) return "";
+  const label = source.label?.trim();
+  const page =
+    typeof source.page === "number" && source.page > 0 ? L.sourcePage.replace("{page}", String(source.page)) : "";
+  const where = [label && plainInline(label), page].filter(Boolean).join(", ");
+  const quote = source.quote?.trim() ? `“${plainInline(source.quote)}”` : "";
+  const text = [where, quote].filter(Boolean).join(" — ");
+  return text ? `*${L.source}: ${text}*` : "";
+}
+
+/**
+ * A grades block as people read it: per course the current grade, how much
+ * of it is decided and the target, then the graded work with weights and
+ * scores. Computed with the same math as the block on screen.
+ */
+function gradesToMarkdown(block: GradesBlock, ws: Pick<Workspace, "databases">, o: ResolvedOptions): string {
+  const L = o.labels;
+  // The report only reads the workspace's databases.
+  const report = buildGradeReport(ws as Workspace, block, { ukLabels: o.ukLabels });
+  const title = block.title || report?.database.name || "";
+  if (!report) return title ? `**${title}**` : "";
+  const pct = (n: number) => formatPercent(n, o.locale);
+  const grade = (n: number) => {
+    const shown = formatGrade(n, report.scale, o.locale);
+    return report.scale.display === "percent" ? shown : `${shown} (${pct(n)})`;
+  };
+  const parts: string[] = [];
+  if (title) parts.push(`**${title}**`);
+  for (const course of report.courses) {
+    const g = course.grade;
+    const facts = [
+      `${L.gradeCurrent}: ${g.current === null ? "—" : grade(g.current)}`,
+      L.gradeDecided.replace("{percent}", pct(g.decidedShare * 100)),
+      course.target !== null ? `${L.gradeTarget}: ${grade(course.target)}` : "",
+    ].filter(Boolean);
+    parts.push(`**${plainInline(course.label || L.gradeNoCourse)}** · ${facts.join(" · ")}`);
+    const rows = g.items.filter((item) => item.counted || item.percent !== null);
+    if (rows.length === 0) {
+      parts.push(L.gradeNoScores);
+      continue;
+    }
+    const lines = [
+      `| ${tableCell(L.gradeWork)} | ${tableCell(L.gradeWeight)} | ${tableCell(L.gradeScore)} |`,
+      "| --- | --- | --- |",
+      ...rows.map((item) => {
+        const weight = item.counted && g.totalWeight > 0 ? pct((item.weight / g.totalWeight) * 100) : "—";
+        const score = item.percent === null ? L.gradeNotGraded : pct(item.percent);
+        return `| ${tableCell(item.name)} | ${weight} | ${tableCell(score)} |`;
+      }),
+    ];
+    parts.push(lines.join("\n"));
+  }
+  return parts.join("\n\n");
+}
+
 function blockToMarkdown(
   block: Block,
   ws: Pick<Workspace, "databases">,
   number: number,
-  o: Required<Pick<MarkdownOptions, "labels" | "origin" | "today">>,
+  o: ResolvedOptions,
 ): string {
   const L = o.labels;
   switch (block.type) {
@@ -127,7 +228,8 @@ function blockToMarkdown(
     case "flashcards": {
       const parts = [`**${block.title || L.flashcards}**`];
       for (const card of block.cards) {
-        parts.push(`**${L.question}:** ${card.front}\n\n**${L.answer}:** ${card.back}`);
+        const cite = sourceLine(card.source, L);
+        parts.push(`**${L.question}:** ${card.front}\n\n**${L.answer}:** ${card.back}${cite ? `\n\n${cite}` : ""}`);
       }
       return parts.join("\n\n");
     }
@@ -148,17 +250,14 @@ function blockToMarkdown(
           lines.push(`${pad}**${L.answer}:** ${hang(q.answerText, pad)}`);
         }
         if (q.explanation) lines.push("", `${pad}*${L.explanation}:* ${hang(q.explanation, pad)}`);
+        const cite = sourceLine(q.source, L);
+        if (cite) lines.push("", `${pad}${cite}`);
         parts.push(lines.join("\n"));
       });
       return parts.join("\n\n");
     }
-    case "grades": {
-      // The grade summary is computed from a database; export that database.
-      const db = block.databaseId ? ws.databases.find((d) => d.id === block.databaseId) : undefined;
-      const title = block.title || db?.name || "";
-      const table = db ? databaseTable(db, ws, undefined, o.today) : "";
-      return [title && `**${title}**`, table].filter(Boolean).join("\n\n");
-    }
+    case "grades":
+      return gradesToMarkdown(block, ws, o);
     default:
       // A block type newer than this exporter: leave it out rather than fail.
       return "";
@@ -173,10 +272,12 @@ export function pageToMarkdown(
   ws: Pick<Workspace, "databases">,
   options: MarkdownOptions = {},
 ): string {
-  const o = {
-    labels: options.labels ?? ENGLISH_MARKDOWN_LABELS,
+  const o: ResolvedOptions = {
+    labels: { ...ENGLISH_MARKDOWN_LABELS, ...options.labels },
     origin: (options.origin ?? "").replace(/\/+$/, ""),
     today: options.today ?? dayKeyOf(new Date()),
+    locale: options.locale ?? "en",
+    ukLabels: options.ukLabels,
   };
   const title = `# ${page.icon ? `${page.icon} ` : ""}${page.title}`.trimEnd();
   let out = title;

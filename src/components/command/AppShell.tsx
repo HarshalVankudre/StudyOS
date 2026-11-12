@@ -15,6 +15,11 @@ import { ShortcutSheet } from "./ShortcutSheet";
 
 const noop = () => () => {};
 
+/** Pages whose own header carries a search button (no floating one needed). */
+export function hasHeaderSearch(pathname: string | null): boolean {
+  return pathname === "/app" || pathname === "/app/";
+}
+
 /**
  * Everything every /app page shares: the ⌘/Ctrl+K palette, the "?" shortcut
  * sheet, the phone install hint and the offline service worker. A floating
@@ -80,7 +85,9 @@ export function AppShell() {
       <ShortcutSheet open={shortcutsOpen} onOpenChange={setShortcutsOpen} apple={apple} />
       {/* Workspace pages have search in their header (a button from the sm
           breakpoint up, the "More actions" menu on phones). */}
-      {!workspaceIdFromPath(pathname) && <SearchButton variant="floating" />}
+      {/* The home screen has search in its header too: a floating button
+          there sat on top of Today's items on phones. */}
+      {!workspaceIdFromPath(pathname) && !hasHeaderSearch(pathname) && <SearchButton variant="floating" />}
       <InstallHint />
     </>
   );

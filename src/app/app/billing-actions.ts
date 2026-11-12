@@ -5,6 +5,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { reportError } from "@/lib/ops/report-error";
+import { getProPricing } from "@/lib/plan-pricing";
 import {
   createCreditPackCheckout,
   createProCheckout,
@@ -34,9 +35,12 @@ async function primaryEmail(): Promise<string | null> {
 
 /**
  * Start a Stripe Checkout for Pro and redirect to it. The form may send
- * `interval=year` for annual billing (only when STRIPE_PRICE_PRO_ANNUAL is
- * set); anything else is monthly. Every failure lands on the pricing page
- * with a translated notice (`?billing=…`) instead of an error page.
+ * `interval=year` for annual billing; anything else is monthly. Only an
+ * interval the pricing page offers is sold (lib/plan-pricing.ts: its Stripe
+ * Price is readable and really is that interval), so a hand-made form can
+ * never buy something the page did not show. Every failure lands on the
+ * pricing page with a translated notice (`?billing=…`) instead of an error
+ * page.
  */
 export async function startCheckoutAction(formData?: FormData): Promise<void> {
   const { userId } = await auth();
@@ -47,6 +51,11 @@ export async function startCheckoutAction(formData?: FormData): Promise<void> {
   const priceId = proPriceId(interval);
   // Billing (or the requested interval) not configured in this environment.
   if (!isBillingConfigured() || !priceId) {
+    redirect("/pricing?billing=unavailable");
+  }
+  // Configured, but not offered (its Stripe Price is not that interval, or
+  // cannot be read right now).
+  if (!(await getProPricing()).offered[interval]) {
     redirect("/pricing?billing=unavailable");
   }
 

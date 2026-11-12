@@ -7,6 +7,7 @@ import type { QuizBlock as QuizBlockData } from "@/lib/workspace/types";
 import { MAX_QUIZ_QUESTIONS } from "@/lib/workspace/schema";
 import { isPlayableQuestion, newQuestion, percent, quizItems } from "@/lib/study/quiz";
 import { useWorkspace } from "../WorkspaceContext";
+import { DraftInput } from "../editor/DraftInput";
 import { QuizEditor } from "./QuizEditor";
 import { QuizSession, type QuizMode } from "./QuizSession";
 
@@ -54,12 +55,12 @@ export function QuizBlock({ pageId, block }: { pageId: string; block: QuizBlockD
     <div className="my-4 overflow-hidden rounded-xl border border-line-strong bg-card shadow-card" data-testid="quiz-block">
       <div className="flex flex-wrap items-center gap-3 border-b border-line px-3 py-3 sm:px-4">
         <ListChecks className="size-5 shrink-0 text-lime-deep" aria-hidden />
-        <input
+        <DraftInput
           dir="auto"
           value={block.title ?? ""}
-          onChange={(e) =>
+          onCommit={(title) =>
             mutateBlock((b) => {
-              b.title = e.target.value;
+              b.title = title;
             })
           }
           aria-label={Q.titlePlaceholder}
@@ -77,7 +78,7 @@ export function QuizBlock({ pageId, block }: { pageId: string; block: QuizBlockD
         </div>
       </div>
 
-      <div className="flex flex-col gap-2 px-3 py-3 sm:px-4">
+      <div data-print="hide" className="flex flex-col gap-2 px-3 py-3 sm:px-4">
         <div className="flex flex-wrap items-center gap-2">
           {playable > 0 ? (
             <>

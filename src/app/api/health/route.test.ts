@@ -16,6 +16,7 @@ const CONFIGURED = {
   STUDYOS_FREE_MODEL: "z-ai/glm-5.2",
   STUDYOS_PRO_MODEL: "z-ai/glm-5.2",
   OPENROUTER_API_KEY: "sk-or-secretvalue",
+  FEED_URL_KEY: "feed-url-key-value-1234567890abcdef",
   MAINTENANCE_SECRET: SECRET,
 };
 
@@ -72,6 +73,25 @@ describe("GET /api/health", () => {
     const body = await operator.json();
     expect(body.reason).toBe("config");
     expect(body.config.missingRequired).toEqual(["CLERK_SECRET_KEY"]);
+  });
+
+  it("stays 200 with an optional secret missing, and puts the warnings first in the operator view", async () => {
+    vi.stubEnv("FEED_URL_KEY", "");
+    const anonymous = await GET(request());
+    expect(anonymous.status).toBe(200);
+    expect(await anonymous.json()).toEqual({ ok: true });
+
+    const operator = await GET(request(SECRET));
+    expect(operator.status).toBe(200);
+    const body = await operator.json();
+    expect(Object.keys(body).slice(0, 2)).toEqual(["ok", "warnings"]);
+    expect(body.warnings.join(" ")).toMatch(/FEED_URL_KEY is not set, so connecting calendar links is OFF/);
+    expect(body.warnings.join(" ")).toMatch(/Clerk.s own profile screen KEEP THEIR STUDYOS DATA/);
+    expect(body.config.features.feedLinks).toBe(false);
+    const json = JSON.stringify(body);
+    for (const value of Object.values(CONFIGURED)) {
+      if (value.length > 6) expect(json).not.toContain(value);
+    }
   });
 
   it("is 503 when the database is unreachable", async () => {

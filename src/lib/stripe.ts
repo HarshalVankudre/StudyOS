@@ -13,8 +13,16 @@ if (!process.env.STRIPE_SECRET_KEY) {
  * back to a placeholder so the module loads; real API calls still require the
  * real key (set at runtime), and any call made without it fails as intended.
  */
+/**
+ * Per-request timeout of every Stripe call (the SDK default is 80 s): a hung
+ * request ends as an error the caller retries, instead of holding a webhook
+ * or the maintenance run past its own time limit.
+ */
+export const STRIPE_TIMEOUT_MS = 20_000;
+
 export const stripe = new Stripe(
   process.env.STRIPE_SECRET_KEY || "sk_placeholder_billing_disabled",
+  { timeout: STRIPE_TIMEOUT_MS },
 );
 
 /** Pro billing cadence. Annual is offered only when its price id is set. */

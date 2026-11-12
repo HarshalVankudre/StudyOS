@@ -9,6 +9,7 @@ const COMPLETE = {
   STUDYOS_FREE_MODEL: "z-ai/glm-5.2",
   STUDYOS_PRO_MODEL: "z-ai/glm-5.2",
   OPENROUTER_API_KEY: "sk-or-secretvalue",
+  FEED_URL_KEY: "feed-url-key-value-1234567890abcdef",
 };
 
 describe("container startup configuration check", () => {
@@ -23,6 +24,25 @@ describe("container startup configuration check", () => {
     expect(runEnvironmentCheck({ ...COMPLETE, DATABASE_URL: "" }, vi.fn(), logError)).toBe(1);
     expect(logError.mock.calls.flat().join("\n")).toMatch(/refusing to start.*DATABASE_URL/);
     expect(logError.mock.calls.flat().join("\n")).not.toContain("sk-or-secretvalue");
+  });
+
+  it("exits 0 when only optional secrets are missing, ending the log with one warnings block", () => {
+    const log = vi.fn();
+    const env = { ...COMPLETE, FEED_URL_KEY: "", STRIPE_SECRET_KEY: "sk_live_x", STRIPE_PRICE_PRO: "price_1", STRIPE_WEBHOOK_SECRET: "whsec_1" };
+    expect(runEnvironmentCheck(env, log, vi.fn())).toBe(0);
+    const out = log.mock.calls.flat().join("\n");
+    expect(out).toContain("required: ok");
+    const block = out.slice(out.indexOf("[StudyOS] WARNINGS"));
+    expect(block).toMatch(/CLERK_WEBHOOK_SIGNING_SECRET is not set/);
+    expect(block).toMatch(/FEED_URL_KEY is not set/);
+    expect(out.trimEnd().split("\n").at(-1)).toMatch(/^=+$/);
+    expect(out).not.toContain("sk_live_x");
+  });
+
+  it("exits 1 when the AI key for the configured model is missing", () => {
+    const logError = vi.fn();
+    expect(runEnvironmentCheck({ ...COMPLETE, STUDYOS_PRO_MODEL: "claude-haiku-5-5" }, vi.fn(), logError)).toBe(1);
+    expect(logError.mock.calls.flat().join("\n")).toMatch(/ANTHROPIC_API_KEY/);
   });
 
   it("keeps the STUDYOS_ALLOW_INCOMPLETE_ENV escape hatch and never blocks development", () => {

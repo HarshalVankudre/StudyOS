@@ -6,6 +6,7 @@ import { useI18n } from "@/lib/i18n/client";
 import type { Flashcard, FlashcardsBlock } from "@/lib/workspace/types";
 import { MAX_FLASHCARDS, MAX_FLASHCARD_TEXT } from "@/lib/workspace/schema";
 import { isStudyable } from "@/lib/study/srs";
+import { DraftTextarea } from "../editor/DraftTextarea";
 import { CardContent } from "./CardContent";
 
 /**
@@ -185,8 +186,9 @@ function SideInput({
   onChange: (value: string) => void;
 }) {
   const lines = value.split("\n").length;
+  // Buffered: one write per typing burst, not per key (see DraftTextarea).
   return (
-    <textarea
+    <DraftTextarea
       ref={ref}
       dir="auto"
       value={value}
@@ -194,7 +196,7 @@ function SideInput({
       placeholder={placeholder}
       maxLength={MAX_FLASHCARD_TEXT}
       rows={Math.min(10, Math.max(2, lines))}
-      onChange={(e) => onChange(e.target.value)}
+      onCommit={onChange}
       className="min-h-16 w-full resize-y rounded-lg border border-line bg-card px-3 py-2 text-base text-ink outline-none [field-sizing:content] placeholder:text-ink-soft/50 focus:border-ink/30 sm:text-sm"
     />
   );

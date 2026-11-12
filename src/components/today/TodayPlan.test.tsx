@@ -235,3 +235,43 @@ describe("TodayPlan", () => {
     expect(screen.getAllByText("History essay").length).toBeGreaterThan(0);
   });
 });
+
+describe("TodayPlan: QA round 2", () => {
+  const finalExam = (id: string, workspaceName: string, course?: string) => ({
+    id,
+    title: "Final exam",
+    workspaceName,
+    ...(course ? { course } : {}),
+    date: "2026-12-11",
+    days: 29,
+    major: true,
+    target: { workspaceId: "ws", pageId: "tracker", databaseId: "db", rowId: id },
+  });
+
+  it("names the course on exam chips that share a title", () => {
+    renderToday(
+      plan({
+        details: {
+          ...plan().details,
+          exams: [finalExam("f1", "Semester HQ", "MATH 221"), finalExam("f2", "Semester HQ", "CHEM 210")],
+        },
+      }),
+    );
+    expect(screen.getByRole("link", { name: /Final exam\s*MATH 221\s*in 29 days/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Final exam\s*CHEM 210\s*in 29 days/ })).toBeInTheDocument();
+  });
+
+  it("falls back to the workspace name when same-titled exams have no course", () => {
+    renderToday(
+      plan({ details: { ...plan().details, exams: [finalExam("f1", "Fall HQ"), finalExam("f2", "Pharmacy")] } }),
+    );
+    expect(screen.getByRole("link", { name: /Final exam\s*Fall HQ/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Final exam\s*Pharmacy/ })).toBeInTheDocument();
+  });
+
+  it("says when a review session leaves cards for later days", () => {
+    const bounded = { ...deck, reason: { code: "cards_due" as const, count: 33, readyCount: 60 }, dueCount: 33, progress: undefined };
+    renderToday(plan({ items: [bounded] }));
+    expect(screen.getByText(/33 of the 60 cards ready today\. The rest can wait for another day\./)).toBeInTheDocument();
+  });
+});

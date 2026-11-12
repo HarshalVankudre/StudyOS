@@ -11,18 +11,25 @@
  *     allowlisted hostname that resolves to a private IP is rejected.
  *   - `metadata.google.internal` denied by name; numeric/encoded IP hosts are
  *     normalized by the URL parser and caught by the IP denylist.
+ *   - The checked DNS answer is PINNED: the address check runs inside the
+ *     socket's own lookup (src/lib/net/pinned-lookup.ts), so the address
+ *     that was checked is the one connected to (no rebinding window).
+ *   - Port 443 only; no credentials (userinfo) in the URL.
  *   - Redirects followed manually, re-validating every hop.
  *   - Response size + total-time caps; per-fetch audit (never the body).
  *
  * Residual: this is an app-layer control. A compromised host process could
- * bypass it, and there is a small DNS TOCTOU window (no kernel IP pinning).
- * The platform-level network jail (VPC egress proxy) is added with the isolated
- * sandbox (Increment B); this layer is the in-process line of defense.
+ * bypass it. The platform-level network jail (VPC egress proxy) is added with
+ * the isolated sandbox (Increment B); this layer is the in-process line of
+ * defense.
  */
 import "server-only";
 
 import { lookup } from "node:dns/promises";
+import https from "node:https";
+import type { IncomingMessage } from "node:http";
 import net from "node:net";
+import { pinnedLookup, systemResolve, type PinnedLookup, type Resolver } from "./pinned-lookup";
 
 export class FetchDeniedError extends Error {}
 export class FetchTooLargeError extends Error {}
@@ -36,6 +43,11 @@ export interface ControlledFetchOptions {
   /** Caller cancellation (e.g. a cancelled agent task); combined with the timeout. */
   signal?: AbortSignal;
   audit?: (record: { host: string; status: number; bytes: number }) => void;
+  /** Test hooks (a local server with faked DNS); never set in production. */
+  resolve?: Resolver;
+  isAllowedAddress?: (ip: string) => boolean;
+  allowedPorts?: number[];
+  ca?: string | Buffer;
 }
 
 export interface ControlledFetchResult {
@@ -167,7 +179,8 @@ function isDeniedIpv6(ip: string): boolean {
 }
 
 /**
- * True if `ip` (a literal) is in a denied range. Non-IP strings return false.
+ * True if `ip` (a literal) is in a denied range, or is not a valid IP
+ * address at all (a resolver answer that is not an address is never trusted).
  * A bracketed IPv6 URL host ("[::1]", as `URL.hostname` returns it) and an
  * IPv6 zone id ("fe80::1%eth0") are understood.
  */
@@ -176,7 +189,7 @@ export function isDeniedIp(raw: string): boolean {
   const family = net.isIP(ip.split("%")[0]);
   if (family === 4) return isDeniedIpv4(ip);
   if (family === 6) return isDeniedIpv6(ip);
-  return false;
+  return true;
 }
 
 export function isHostAllowed(hostname: string, allowlist: string[]): boolean {
@@ -188,8 +201,11 @@ export function isHostAllowed(hostname: string, allowlist: string[]): boolean {
   });
 }
 
-/** Validate a URL string against scheme/host/IP-literal rules. Throws if denied. */
-export function assertUrlAllowed(rawUrl: string, allowlist: string[]): URL {
+/**
+ * Validate a URL string against scheme/credentials/port/host/IP-literal
+ * rules. Throws if denied.
+ */
+export function assertUrlAllowed(rawUrl: string, allowlist: string[], allowedPorts: number[] = [443]): URL {
   let url: URL;
   try {
     url = new URL(rawUrl);
@@ -199,8 +215,15 @@ export function assertUrlAllowed(rawUrl: string, allowlist: string[]): URL {
   if (url.protocol !== "https:") {
     throw new FetchDeniedError("only https is allowed");
   }
+  if (url.username || url.password) {
+    throw new FetchDeniedError("credentials in the URL are not allowed");
+  }
+  const port = url.port ? Number(url.port) : 443;
+  if (!allowedPorts.includes(port)) {
+    throw new FetchDeniedError("only port 443 is allowed");
+  }
   // URL parser normalizes numeric/encoded IPv4 hosts to dotted form.
-  if (isDeniedIp(url.hostname)) {
+  if (net.isIP(stripBrackets(url.hostname)) && isDeniedIp(url.hostname)) {
     throw new FetchDeniedError("host resolves to a denied address");
   }
   if (!isHostAllowed(url.hostname, allowlist)) {
@@ -209,7 +232,15 @@ export function assertUrlAllowed(rawUrl: string, allowlist: string[]): URL {
   return url;
 }
 
-/** Resolve a hostname and reject if ANY answer is in a denied range. */
+function stripBrackets(host: string): string {
+  return host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
+}
+
+/**
+ * Resolve a hostname and reject if ANY answer is in a denied range. (The
+ * fetch itself does not rely on this: its pinned lookup re-checks the very
+ * answers it connects to.)
+ */
 export async function assertResolvedIpsSafe(hostname: string): Promise<void> {
   const answers = await lookup(hostname, { all: true });
   for (const { address } of answers) {
@@ -217,6 +248,84 @@ export async function assertResolvedIpsSafe(hostname: string): Promise<void> {
       throw new FetchDeniedError("host resolves to a denied address");
     }
   }
+}
+
+interface Hop {
+  status: number;
+  location: string | null;
+  contentType: string | null;
+  bytes: number;
+  body: Buffer | null;
+}
+
+function requestOnce(
+  url: URL,
+  method: "GET" | "HEAD",
+  maxBytes: number,
+  signal: AbortSignal,
+  lookup: PinnedLookup,
+  ca: string | Buffer | undefined,
+): Promise<Hop> {
+  return new Promise<Hop>((resolvePromise, reject) => {
+    let settled = false;
+    const fail = (error: unknown) => {
+      if (settled) return;
+      settled = true;
+      // A caller or timeout abort surfaces as its own reason.
+      reject(signal.aborted ? signal.reason : error);
+    };
+    const host = stripBrackets(url.hostname);
+    const req = https.request(
+      {
+        protocol: "https:",
+        hostname: host,
+        port: url.port ? Number(url.port) : 443,
+        path: `${url.pathname}${url.search}`,
+        method,
+        agent: false,
+        lookup: lookup as never,
+        ...(ca ? { ca } : {}),
+        ...(net.isIP(host) ? {} : { servername: host }),
+        headers: { accept: "text/html,text/plain,application/json", "accept-encoding": "identity" },
+        signal,
+      },
+      (res: IncomingMessage) => {
+        const status = res.statusCode ?? 0;
+        if (status >= 300 && status < 400) {
+          res.destroy();
+          settled = true;
+          resolvePromise({ status, location: res.headers.location ?? null, contentType: null, bytes: 0, body: null });
+          return;
+        }
+        const declared = Number(res.headers["content-length"]);
+        if (Number.isFinite(declared) && declared > maxBytes) {
+          res.destroy();
+          fail(new FetchTooLargeError(`response exceeded ${maxBytes} bytes`));
+          return;
+        }
+        const chunks: Buffer[] = [];
+        let received = 0;
+        res.on("data", (chunk: Buffer) => {
+          received += chunk.length;
+          if (received > maxBytes) {
+            res.destroy();
+            fail(new FetchTooLargeError(`response exceeded ${maxBytes} bytes`));
+            return;
+          }
+          chunks.push(chunk);
+        });
+        res.on("end", () => {
+          if (settled) return;
+          settled = true;
+          const contentType = res.headers["content-type"] ?? null;
+          resolvePromise({ status, location: null, contentType, bytes: received, body: Buffer.concat(chunks) });
+        });
+        res.on("error", fail);
+      },
+    );
+    req.on("error", fail);
+    req.end();
+  });
 }
 
 export async function controlledFetch(
@@ -231,6 +340,15 @@ export async function controlledFetch(
     method = "GET",
     audit,
   } = options;
+  const allowedPorts = options.allowedPorts ?? [443];
+  const allowed = options.isAllowedAddress ?? ((ip: string) => !isDeniedIp(ip));
+  // Every hop's connection resolves through this lookup, which checks every
+  // DNS answer and connects only to the checked ones.
+  const pinned = pinnedLookup(
+    options.resolve ?? systemResolve,
+    allowed,
+    () => new FetchDeniedError("host resolves to a denied address"),
+  );
 
   // The fetch is bounded by a timeout AND the caller's cancellation: a cancelled
   // task must abort an in-flight web read, not just wait out the time cap.
@@ -245,49 +363,22 @@ export async function controlledFetch(
   try {
     let current = rawUrl;
     for (let hop = 0; hop <= maxRedirects; hop += 1) {
-      const url = assertUrlAllowed(current, allowlist);
-      await assertResolvedIpsSafe(url.hostname);
-
-      const response = await fetch(url, {
-        method,
-        redirect: "manual",
-        signal,
-        headers: { accept: "text/html,text/plain,application/json" },
-      });
+      const url = assertUrlAllowed(current, allowlist, allowedPorts);
+      if (signal.aborted) throw signal.reason;
+      const response = await requestOnce(url, method, maxBytes, signal, pinned, options.ca);
 
       if (response.status >= 300 && response.status < 400) {
-        const location = response.headers.get("location");
-        if (!location) throw new FetchDeniedError("redirect without location");
-        current = new URL(location, url).toString();
+        if (!response.location) throw new FetchDeniedError("redirect without location");
+        current = new URL(response.location, url).toString();
         continue; // re-validate the next hop
       }
 
-      const reader = response.body?.getReader();
-      let received = 0;
-      const chunks: Uint8Array[] = [];
-      while (reader) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        received += value.length;
-        if (received > maxBytes) {
-          await reader.cancel();
-          throw new FetchTooLargeError(`response exceeded ${maxBytes} bytes`);
-        }
-        chunks.push(value);
-      }
-      audit?.({ host: url.hostname, status: response.status, bytes: received });
-
-      const buffer = new Uint8Array(received);
-      let offset = 0;
-      for (const chunk of chunks) {
-        buffer.set(chunk, offset);
-        offset += chunk.length;
-      }
+      audit?.({ host: url.hostname, status: response.status, bytes: response.bytes });
       return {
         status: response.status,
-        bytes: received,
-        contentType: response.headers.get("content-type"),
-        text: new TextDecoder().decode(buffer),
+        bytes: response.bytes,
+        contentType: response.contentType,
+        text: new TextDecoder().decode(response.body ?? new Uint8Array(0)),
       };
     }
     throw new FetchDeniedError("too many redirects");

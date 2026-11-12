@@ -9,7 +9,6 @@ const m = vi.hoisted(() => ({
   balance: vi.fn(),
   plan: vi.fn(),
   usageLimit: vi.fn(),
-  activeTasks: vi.fn(),
   createTask: vi.fn(),
   claim: vi.fn(),
   markDone: vi.fn(),
@@ -47,8 +46,7 @@ vi.mock("@/lib/workspace/version-service", async (importOriginal) => ({
 vi.mock("@/lib/ai/tasks/store", () => ({
   appendTaskEvent: async () => {},
   claimTaskForFinalization: m.claim,
-  countActiveTasks: m.activeTasks,
-  createTask: m.createTask,
+  createTaskWithinLimit: m.createTask,
   isTaskCancelled: m.isCancelled,
   markTaskDone: m.markDone,
   markTaskError: m.markError,
@@ -93,7 +91,6 @@ beforeEach(() => {
   m.plan.mockResolvedValue("free");
   m.balance.mockResolvedValue(150);
   m.usageLimit.mockResolvedValue({ allowed: true });
-  m.activeTasks.mockResolvedValue(0);
   m.createTask.mockResolvedValue({ id: "task_1" });
   m.claim.mockResolvedValue(true);
   m.markDone.mockResolvedValue(true);
@@ -112,23 +109,37 @@ describe("up-front refusals (nothing runs, nothing is charged)", () => {
     const out = await events(await POST(request({})));
     expect(out).toHaveLength(1);
     expect(out[0]).toMatchObject({ type: "error", code: "insufficient_credits" });
-    expect(out[0].message).toMatch(/needs about \d+ credits and you have 1/);
-    expect(m.createTask).not.toHaveBeenCalled();
+    expect(out[0].message).toMatch(/needs about \d+ credits, and your balance is 1\./);
+    // The concurrency slot claimed before the cost check is given back at once.
+    expect(m.markError).toHaveBeenCalledWith("task_1", "refused");
     expect(m.runLoop).not.toHaveBeenCalled();
     expect(m.settle).not.toHaveBeenCalled();
     expect(m.append).not.toHaveBeenCalled();
     expect(m.reserve).not.toHaveBeenCalled();
   });
 
-  it("reserves the estimate before any model work; a parallel request that loses the race is refused", async () => {
+  it("reserves the turn's whole ceiling before any model work; a parallel request that loses the race is refused", async () => {
     m.reserve.mockResolvedValueOnce(null);
     m.balance.mockResolvedValueOnce(150).mockResolvedValueOnce(0);
     const out = await events(await POST(request({})));
     expect(m.reserve).toHaveBeenCalledWith("user_1", expect.objectContaining({ reason: "agent" }));
     const { estimate, min } = m.reserve.mock.calls[0][1];
-    expect(min).toBe(estimate);
+    // Up to the plan's per-message cap (free: 30), at least the small-turn estimate.
+    expect(estimate).toBe(30);
+    expect(min).toBeGreaterThanOrEqual(1);
+    expect(min).toBeLessThan(estimate);
     expect(out[0]).toMatchObject({ type: "error", code: "insufficient_credits" });
     expect(m.runLoop).not.toHaveBeenCalled();
+  });
+
+  it("the turn may spend only what it reserved (a parallel turn holds the rest)", async () => {
+    // Another turn holds most of the balance: this one got 12 of its 30.
+    m.reserve.mockResolvedValueOnce({ id: "hold_1", userId: "user_1", amount: 12, reason: "agent" });
+    m.runLoop.mockResolvedValue({ reply: "Hi", changed: false });
+    await events(await POST(request({})));
+    expect(m.runLoop.mock.calls[0][0].budget.maxCostUsd).toBeCloseTo(12 * 0.003, 10);
+    // Settled with the plan's cap and the task, so renders count toward it.
+    expect(m.settle).toHaveBeenCalledWith(expect.objectContaining({ capCredits: 30, taskId: "task_1" }));
   });
 
   it("refuses a stale base version before any model runs", async () => {
@@ -203,7 +214,8 @@ describe("a turn that runs", () => {
     expect(m.settle).toHaveBeenCalledWith(expect.objectContaining({ outcome: "completed" }));
   });
 
-  it("an overlap with edits saved during the task is a clear refusal that is never charged", async () => {
+  it("an overlap with edits saved during the task is settled as a failure: free within the daily allowance", async () => {
+    m.settle.mockResolvedValue(0); // within the free-failure allowance
     m.runLoop.mockImplementation(async () => {
       recordUsage({ input_tokens: 1_000, output_tokens: 500 }, "claude-haiku-5-5");
       return { reply: "Renamed.", changed: true, workspace: sampleWorkspace };
@@ -215,20 +227,44 @@ describe("a turn that runs", () => {
       code: "workspace_conflict",
       message: expect.stringMatching(/edited somewhere else.*Nothing was charged/),
     });
-    expect(m.settle).not.toHaveBeenCalled();
-    expect(m.releaseHold).toHaveBeenCalledWith(expect.objectContaining({ id: "hold_1" }));
+    // Free here (settle returned 0): the allowance covered it.
+    expect(m.settle).toHaveBeenCalledWith(expect.objectContaining({ outcome: "failed", hold: expect.objectContaining({ id: "hold_1" }) }));
     // An expected outcome, not a server error.
     expect(m.report).not.toHaveBeenCalled();
     expect(m.markError).toHaveBeenCalledWith("task_1", "workspace_conflict");
   });
 
-  it("a result too large to save is a clean failure that is never charged", async () => {
+  it("a result too large to save is settled as a failure: free within the daily allowance", async () => {
+    m.settle.mockResolvedValue(0); // within the free-failure allowance
     m.runLoop.mockResolvedValue({ reply: "x", changed: true, workspace: sampleWorkspace });
     m.apply.mockRejectedValue(new AgentResultTooLargeError(3_000_000));
     const out = await events(await POST(request({})));
-    expect(out.at(-1)).toMatchObject({ type: "error", message: expect.stringMatching(/too large to save/) });
-    expect(m.settle).not.toHaveBeenCalled();
-    // The reserved estimate goes back in full.
-    expect(m.releaseHold).toHaveBeenCalledWith(expect.objectContaining({ id: "hold_1" }));
+    expect(out.at(-1)).toMatchObject({ type: "error", message: expect.stringMatching(/too large to save.*Nothing was charged/) });
+    expect(m.settle).toHaveBeenCalledWith(expect.objectContaining({ outcome: "failed" }));
+  });
+
+  it("charges a conflict once the free-failure allowance is used up, and says so", async () => {
+    m.settle.mockResolvedValue(4);
+    m.runLoop.mockImplementation(async () => {
+      recordUsage({ input_tokens: 1_000, output_tokens: 500 }, "claude-haiku-5-5");
+      return { reply: "Renamed.", changed: true, workspace: sampleWorkspace };
+    });
+    m.apply.mockRejectedValue(new WorkspaceVersionConflictError("Workspace changed during the task"));
+    const out = await events(await POST(request({})));
+    expect(out.at(-1)).toMatchObject({
+      type: "error",
+      code: "workspace_conflict",
+      message: expect.stringMatching(/free retries are used up, so this attempt was charged 4 credits./),
+    });
+    expect(m.releaseHold).not.toHaveBeenCalled();
+  });
+
+  it("refuses when the user already holds every concurrent task slot", async () => {
+    m.createTask.mockResolvedValue(null);
+    const out = await events(await POST(request({})));
+    expect(out).toEqual([expect.objectContaining({ type: "error", code: "rate_limited" })]);
+    expect(m.createTask).toHaveBeenCalledWith({ workspaceId: "ws1", baseVersion: 7 }, 3);
+    expect(m.reserve).not.toHaveBeenCalled();
+    expect(m.runLoop).not.toHaveBeenCalled();
   });
 });

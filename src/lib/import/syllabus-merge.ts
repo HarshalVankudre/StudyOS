@@ -14,6 +14,11 @@
  *   - some row might be the same item (or two rows tie) → do nothing;
  *   - no row resembles it at all → add it as a new row.
  *
+ * A weight shared by a group of items ("Problem sets 20%", "Weekly homework
+ * 30%, lowest dropped") is not a row at all: it becomes a grading category of
+ * the list (`Database.grading`), and a row the model made for it is removed.
+ * Its single items ("Problem Set 4") stay rows and count in it.
+ *
  * Pure: takes a workspace, returns a new one.
  */
 import type {
@@ -24,6 +29,19 @@ import type {
   Workspace,
 } from "@/lib/workspace/types";
 import { completionField } from "@/lib/workspace/view-logic";
+import {
+  ALL_COURSES_KEY,
+  courseKeyForLabel,
+  resolveGradeColumns,
+  rowCourseKey,
+} from "@/lib/grades/workspace";
+import {
+  cellText,
+  clearCopiedCategoryWeights,
+  matchCategory,
+  rowTypeLabels,
+  upsertCategory,
+} from "@/lib/grades/categories";
 import { matchAssessments } from "./assessment-match";
 import type { SyllabusAssessment, SyllabusFacts } from "./syllabus-facts";
 
@@ -53,15 +71,18 @@ export function applySyllabusFacts(
   facts: SyllabusFacts,
   labels: AssessmentLabels,
 ): Workspace {
-  const items = facts.assessments.filter(
+  const all = facts.assessments.filter(
     (item) => item.weight !== undefined || item.date !== undefined,
   );
-  if (items.length === 0) return workspace;
+  if (all.length === 0) return workspace;
+  const groups = all.filter(isCategory);
+  const items = all.filter((item) => !isCategory(item));
 
   const next = structuredClone(workspace);
   const target = pickAssessmentDatabase(next.databases);
   if (!target) {
-    addAssessmentsDatabase(next, items, labels);
+    const db = addAssessmentsDatabase(next, items, labels, groups.length > 0);
+    if (db) addCategories(next, db, groups);
     return next;
   }
 
@@ -115,7 +136,77 @@ export function applySyllabusFacts(
     rowIds.add(id);
     db.rows.push({ id, cells });
   }
+  addCategories(next, db, groups);
   return next;
+}
+
+function isCategory(item: SyllabusAssessment): boolean {
+  return Boolean(item.group && item.weight !== undefined && !item.date);
+}
+
+/**
+ * Category weights into the list's grading scheme, on the right course: the
+ * course header the syllabus gave, else the course of a row the model made
+ * for it, else the only course, else the course its items are in.
+ */
+function addCategories(workspace: Workspace, db: Database, groups: SyllabusAssessment[]) {
+  if (groups.length === 0) return;
+  const columns = resolveGradeColumns(db, undefined);
+  const titleProp = pickTitleProperty(db);
+  const courseOf = (row: DatabaseRow) => rowCourseKey(workspace, db, columns, row);
+  for (const group of groups) {
+    const title = (row: DatabaseRow) => (titleProp ? cellText(row.cells[titleProp.id]) : "");
+    // The model's own row for the category: same name, no date, no score.
+    const twin = db.rows.find(
+      (row) =>
+        title(row) &&
+        matchAssessments(group.name, title(row)).strength === "same" &&
+        !db.properties.some((p) => p.type === "date" && !isEmpty(row.cells[p.id])) &&
+        (!columns.score || isEmpty(row.cells[columns.score.id])),
+    );
+    let course = group.course ? courseKeyForLabel(workspace, db, columns, group.course) : null;
+    if (course === null && twin) course = courseOf(twin);
+    if (course === null) course = soleCourse(workspace, db, columns.course?.id) ?? itemsCourse(db, group.name, title, courseOf, columns.course);
+    upsertCategory(db, {
+      course: course ?? "",
+      name: group.name,
+      weight: group.weight as number,
+      ...(group.dropLowest ? { dropLowest: group.dropLowest } : {}),
+      ...(group.count ? { expectedCount: group.count } : {}),
+    });
+    if (twin) db.rows = db.rows.filter((row) => row !== twin);
+  }
+  clearCopiedCategoryWeights(db, columns, courseOf);
+}
+
+/** The course key when the list can only mean one course. */
+function soleCourse(workspace: Workspace, db: Database, courseId: string | undefined): string | null {
+  const prop = db.properties.find((p) => p.id === courseId);
+  if (!prop) return ALL_COURSES_KEY;
+  if ((prop.type === "select" || prop.type === "multi_select") && prop.options?.length === 1) return prop.options[0].id;
+  if (prop.type === "relation") {
+    const related = workspace.databases.find((d) => d.id === prop.relationDatabaseId);
+    if (related?.rows.length === 1) return related.rows[0].id;
+  }
+  return null;
+}
+
+/** The course most of the category's items are in ("Problem Set 4" for "Problem sets"). */
+function itemsCourse(
+  db: Database,
+  name: string,
+  title: (row: DatabaseRow) => string,
+  courseOf: (row: DatabaseRow) => string,
+  courseProp: DatabaseProperty | undefined,
+): string | null {
+  const counts = new Map<string, number>();
+  for (const row of db.rows) {
+    if (matchCategory(title(row), rowTypeLabels(db, row, courseProp), [{ id: "x", name }]) !== "x") continue;
+    const key = courseOf(row);
+    if (key) counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  const best = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+  return best?.[0] ?? null;
 }
 
 type RowDecision = { kind: "match"; row: DatabaseRow } | { kind: "unsure" } | { kind: "none" };
@@ -222,7 +313,9 @@ function addAssessmentsDatabase(
   workspace: Workspace,
   items: SyllabusAssessment[],
   labels: AssessmentLabels,
-) {
+  forCategories = false,
+): Database | undefined {
+  if (items.length === 0 && !forCategories) return undefined;
   const dbId = uniqueId("db-syllabus-assessments", new Set(workspace.databases.map((d) => d.id)));
   const rows: DatabaseRow[] = items.map((item, index) => ({
     id: `syllabus-item-${index + 1}`,
@@ -234,7 +327,7 @@ function addAssessmentsDatabase(
       "sa-due": item.date ?? null,
     },
   }));
-  workspace.databases.push({
+  const db: Database = {
     id: dbId,
     name: labels.database,
     icon: "🎯",
@@ -251,7 +344,8 @@ function addAssessmentsDatabase(
       { id: "v-sa-table", name: labels.table, type: "table" },
       { id: "v-sa-calendar", name: labels.calendar, type: "calendar", datePropertyId: "sa-due" },
     ],
-  });
+  };
+  workspace.databases.push(db);
   const home =
     workspace.pages.find((page) => page.id === workspace.homePageId) ?? workspace.pages[0];
   if (home) {
@@ -271,4 +365,5 @@ function addAssessmentsDatabase(
       },
     );
   }
+  return db;
 }

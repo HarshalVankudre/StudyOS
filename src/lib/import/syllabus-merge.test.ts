@@ -377,3 +377,50 @@ describe("applySyllabusFacts (unchanged workspace)", () => {
     expect(applySyllabusFacts(ws, { assessments: [] }, labels)).toBe(ws);
   });
 });
+
+describe("applySyllabusFacts: grading categories", () => {
+  it("turns a weight many items share into a category of the right course, never a row", () => {
+    const ws = workspaceWithAssignments();
+    // The model made a row for the category, and copied its weight onto an item.
+    ws.databases[0].rows.push(
+      { id: "g-ps", cells: { "a-name": "Problem sets", "a-course": "co-cs", "a-weight": 20 } },
+      { id: "ps4", cells: { "a-name": "Problem Set 4", "a-course": "co-cs", "a-due": "2026-11-03", "a-weight": 20 } },
+      { id: "q1", cells: { "a-name": "Quiz 1", "a-course": "co-math", "a-due": "2026-11-10" } },
+    );
+    const merged = applySyllabusFacts(
+      ws,
+      {
+        assessments: [
+          { course: "CS 201 Data Structures", name: "Problem sets", weight: 20, group: true, count: 10, dropLowest: 1 },
+          { course: "CS 201 Data Structures", name: "Midterm", weight: 25 },
+          // No course header: the quizzes are all in MATH 240.
+          { name: "Quizzes", weight: 10, group: true },
+        ],
+      },
+      labels,
+    );
+    const db = merged.databases[0];
+    expect(db.rows.map((r) => r.id)).toEqual(["r1", "r2", "ps4", "q1"]);
+    expect(db.grading?.categories).toEqual([
+      expect.objectContaining({ course: "co-cs", name: "Problem sets", weight: 20, dropLowest: 1, expectedCount: 10 }),
+      expect.objectContaining({ course: "co-math", name: "Quizzes", weight: 10 }),
+    ]);
+    // The single item's weight is its own; the copied category weight is gone.
+    expect(db.rows.find((r) => r.id === "r1")?.cells["a-weight"]).toBe(25);
+    expect(db.rows.find((r) => r.id === "ps4")?.cells["a-weight"]).toBeNull();
+    expect(safeParseWorkspace(merged).success).toBe(true);
+  });
+
+  it("puts categories on a new list's courses when there was no list", () => {
+    const ws: Workspace = { id: "w", name: "W", pages: [{ id: "home", title: "Home", blocks: [] }], databases: [], homePageId: "home" };
+    const merged = applySyllabusFacts(
+      ws,
+      { assessments: [{ course: "BIO 110", name: "Lab reports", weight: 30, group: true }, { course: "BIO 110", name: "Final exam", weight: 70 }] },
+      labels,
+    );
+    const db = merged.databases[0];
+    expect(db.rows.map((r) => r.cells["sa-name"])).toEqual(["Final exam"]);
+    expect(db.grading?.categories).toEqual([expect.objectContaining({ course: "text:bio110", name: "Lab reports", weight: 30 })]);
+    expect(safeParseWorkspace(merged).success).toBe(true);
+  });
+});

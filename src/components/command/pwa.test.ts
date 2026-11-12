@@ -20,6 +20,11 @@ describe("web app manifest", () => {
     expect(m.icons?.some((i) => i.purpose === "maskable" && i.sizes === "512x512")).toBe(true);
     expect(m.icons?.some((i) => i.purpose === "any" && i.sizes === "192x192")).toBe(true);
   });
+  it("promises the same setup time as the landing page", () => {
+    expect(getDictionary("en").meta.homeTitle).toContain("about a minute");
+    expect(m.description).toContain("about a minute");
+    expect(m.description).not.toMatch(/two minutes/i);
+  });
 });
 
 describe("service worker", () => {

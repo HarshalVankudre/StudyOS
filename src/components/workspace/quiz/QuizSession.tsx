@@ -20,6 +20,7 @@ import { useWorkspace } from "../WorkspaceContext";
 import { useReviewRecorder } from "../study/useReviewRecorder";
 import { ExamQuestion, Explanation, PracticeAnswer, QuestionPrompt, Verdict } from "./QuizQuestionViews";
 import { QuizResults } from "./QuizResults";
+import { clearExamProgress, examKey, loadExamProgress, useExamProgress } from "./examProgress";
 
 export type QuizMode = "practice" | "exam";
 
@@ -95,15 +96,24 @@ export function QuizSession({
     [rng, mixed],
   );
 
-  const [run, setRun] = useState<Run>(() => makeRun(items, mode, attemptFor));
-  const [phase, setPhase] = useState<Phase>(mode === "exam" ? "setup" : "running");
-  const [answers, setAnswers] = useState<ReadonlyMap<string, QuizAnswer>>(() => new Map());
+  // An exam of this quiz left unfinished (reload, closed tab) is resumed.
+  const progressKey =
+    mode === "exam" && attemptFor ? examKey(workspace.id, attemptFor.pageId, attemptFor.blockId) : null;
+  const [resumed] = useState(() => (progressKey ? loadExamProgress(progressKey) : null));
+  const [run, setRun] = useState<Run>(() => {
+    const fresh = makeRun(items, mode, attemptFor);
+    return resumed ? { ...fresh, questions: resumed.questions } : fresh;
+  });
+  const [phase, setPhase] = useState<Phase>(resumed ? "running" : mode === "exam" ? "setup" : "running");
+  const [answers, setAnswers] = useState<ReadonlyMap<string, QuizAnswer>>(
+    () => new Map(resumed?.answers ?? []),
+  );
   // Practice
   const [index, setIndex] = useState(0);
   const [shortChecked, setShortChecked] = useState(false);
   // Exam
   const [timer, setTimer] = useState<number | null>(null);
-  const [deadline, setDeadline] = useState<number | null>(null);
+  const [deadline, setDeadline] = useState<number | null>(resumed?.deadline ?? null);
   const [now, setNow] = useState(() => Date.now());
   const [confirmSubmit, setConfirmSubmit] = useState(false);
   const [timedOut, setTimedOut] = useState(false);
@@ -180,6 +190,8 @@ export function QuizSession({
   const close = () => {
     if (phase === "running" && run.mode === "practice") save(run, answers, false);
     if (phase === "results") save(run, answers, true);
+    // Leaving an exam on purpose (after "Leave the exam?") forgets it.
+    if (progressKey) clearExamProgress(progressKey);
     onClose();
   };
 
@@ -278,8 +290,9 @@ export function QuizSession({
       // Saved now, so closing the tab on the results screen loses nothing;
       // written answers update it as they are self-marked.
       save(run, answers, true);
+      if (progressKey) clearExamProgress(progressKey);
     },
-    [run, answers, save],
+    [run, answers, save, progressKey],
   );
 
   const startExam = () => {
@@ -304,6 +317,16 @@ export function QuizSession({
   }, [deadline, phase]);
 
   const remainingMs = deadline === null ? null : Math.max(0, deadline - now);
+
+  // An exam in progress is pending work: kept on this device as it goes and
+  // counted by the leave prompt (examProgress.ts).
+  useExamProgress(
+    progressKey && run.attemptFor ? progressKey : null,
+    phase === "running" && run.mode === "exam",
+    run.questions,
+    answers,
+    deadline,
+  );
 
   const answeredCount = useMemo(
     () =>
@@ -427,6 +450,11 @@ export function QuizSession({
         >
           <div className="h-full bg-lime transition-all" style={{ width: `${progress}%` }} />
         </div>
+        {resumed && phase === "running" && (
+          <p role="status" className="border-b border-line bg-lime-faint px-4 py-2 text-center text-xs font-medium text-ink">
+            {resumed.deadline ? dict.safety.examResumedTimed : dict.safety.examResumed}
+          </p>
+        )}
         {confirmLeave && (
           <div
             role="alertdialog"

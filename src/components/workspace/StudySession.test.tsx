@@ -83,3 +83,35 @@ describe("StudySession and the workspace (finding 11)", () => {
     expect(at).toBeInstanceOf(Date);
   });
 });
+
+describe("StudySession progress (QA round 2: stuck at 1 / 18)", () => {
+  it("moves the counter and the bar with every new card graded, even when the cards come back", async () => {
+    const user = userEvent.setup();
+    const cards: Flashcard[] = [1, 2, 3].map((n) => ({ id: `n${n}`, front: `Front ${n}`, back: `Back ${n}` }));
+    h.ctx.workspace = {
+      id: "w1",
+      name: "W",
+      pages: [{ id: "p1", title: "P", blocks: [{ id: "deck", type: "flashcards", cards }] }],
+      databases: [],
+    };
+    const queue: ReviewItem[] = cards.map((card) => ({ pageId: "p1", blockId: "deck", card }));
+    render(<StudySession items={queue} title="Deck" onGrade={() => {}} onClose={() => {}} />);
+    const counter = () => screen.getByTestId("session-counter").textContent;
+    const bar = () => Number(screen.getByRole("progressbar").getAttribute("aria-valuenow"));
+    expect(counter()).toBe("1 / 3");
+    expect(bar()).toBe(0);
+
+    for (const expected of ["2 / 3", "3 / 3"]) {
+      const before = bar();
+      await user.click(screen.getByRole("button", { name: new RegExp(en.study.showAnswer) }));
+      await user.click(screen.getByRole("button", { name: new RegExp(en.study.grades.good) }));
+      expect(counter()).toBe(expected);
+      expect(bar()).toBeGreaterThan(before);
+    }
+    // All three seen; a new card graded Good comes back for a learning step.
+    await user.click(screen.getByRole("button", { name: new RegExp(en.study.showAnswer) }));
+    await user.click(screen.getByRole("button", { name: new RegExp(en.study.grades.good) }));
+    expect(counter()).toBe("3 / 3");
+    expect(screen.getByText(en.studyTools.repeatCard)).toBeInTheDocument();
+  });
+});

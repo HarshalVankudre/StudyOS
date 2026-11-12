@@ -299,3 +299,60 @@ describe("finding 4: the allowance schedule", () => {
     ).toEqual([1, 2]);
   });
 });
+
+// ---- Billing review, round 2 ------------------------------------------------------
+
+describe("round 2, finding 10: a settle that fails is completed, never given away", () => {
+  /** Make the next `n` database transactions fail (the settle's charge). */
+  function failTransactions(n = 1) {
+    const spy = vi.spyOn(h.db.db, "$transaction");
+    for (let i = 0; i < n; i++) spy.mockRejectedValueOnce(new Error("connection lost"));
+  }
+
+  it("the caller's release after a failed settle charges the recorded cost instead of giving it back", async () => {
+    await funded(200);
+    const hold = await reserveCredits(USER, { estimate: 40, reason: "generate" });
+    failTransactions();
+    await expect(settleCreditHold(hold!, 25)).rejects.toThrow("connection lost");
+    expect(h.db.state.holds[0]).toMatchObject({ state: "held", pendingCharge: 25 });
+    expect(await releaseCreditHold(hold!)).toBe(false); // nothing went back
+    expect(h.db.state.holds[0]).toMatchObject({ state: "settled", charged: 25 });
+    expect(h.db.balance(USER)).toBe(175);
+    expect(h.db.ledgerSum(USER)).toBe(175);
+  });
+
+  it("when the release fails too (or there is none: the agent route lets it expire), the expiry sweep completes it", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-12T10:00:00Z"));
+    await funded(200);
+    const hold = await reserveCredits(USER, { estimate: 40, reason: "agent" });
+    failTransactions(2);
+    await expect(settleCreditHold(hold!, 30)).rejects.toThrow();
+    await expect(releaseCreditHold(hold!)).rejects.toThrow();
+    vi.setSystemTime(new Date(Date.now() + CREDIT_HOLD_TTL_MS + 1000));
+    expect(await releaseExpiredHolds()).toBe(1);
+    expect(h.db.state.holds[0]).toMatchObject({ state: "settled", charged: 30 });
+    expect(await getCreditBalance(USER)).toBe(170);
+    expect(h.db.ledgerSum(USER)).toBe(170);
+  });
+
+  it("a hold with no recorded charge is still given back in full", async () => {
+    await funded(100);
+    const hold = await reserveCredits(USER, { estimate: 40, reason: "generate" });
+    expect(await releaseCreditHold(hold!)).toBe(true);
+    expect(h.db.balance(USER)).toBe(100);
+  });
+});
+
+describe("round 2, finding 3: parallel agent turns reserve their whole ceiling", () => {
+  it("three turns at a balance of 30 can hold 30 between them, so they can never spend more", async () => {
+    await funded(30);
+    const holds = await Promise.all(
+      [1, 2, 3].map(() => reserveCredits(USER, { estimate: 30, min: 2, reason: "agent" })),
+    );
+    const held = holds.filter(Boolean).reduce((sum, hold) => sum + hold!.amount, 0);
+    expect(held).toBe(30);
+    expect(holds.filter(Boolean)).toHaveLength(1);
+    expect(h.db.balance(USER)).toBe(0);
+  });
+});

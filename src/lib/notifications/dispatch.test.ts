@@ -48,7 +48,7 @@ describe("daily plan notification", () => {
     expect(channel.sent).toHaveLength(1);
     const { message } = channel.sent[0];
     expect(message.title).toBe("Today’s plan · about 45 min");
-    expect(message.body).toBe("Start here: Lab report draft (25 min). Then 1 more when you’re ready.");
+    expect(message.body).toBe("Start here: Lab report draft (25 min). Then one more when you’re ready.");
     expect(message.url).toBe("/app/ws1?page=home&db=db1&row=r9");
     // The next look is this evening's deadline moment, not every tick.
     expect(store.users.get("u1")!.nextCheckAt?.toISOString()).toBe("2026-11-12T17:00:00.000Z");

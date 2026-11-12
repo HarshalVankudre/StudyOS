@@ -1,3 +1,4 @@
+import { rejectCrossSite } from "@/lib/http/same-origin";
 import { auth } from "@clerk/nextjs/server";
 import { z } from "zod";
 import type {
@@ -22,6 +23,7 @@ import {
 import { getLocale } from "@/lib/i18n/server";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { fmt } from "@/lib/i18n/interpolate";
+import { plural } from "@/lib/i18n/plural";
 import {
   WorkspaceVersionConflictError,
   applyAgentWorkspaceChange,
@@ -30,8 +32,7 @@ import {
 import {
   appendTaskEvent,
   claimTaskForFinalization,
-  countActiveTasks,
-  createTask,
+  createTaskWithinLimit,
   isTaskCancelled,
   markTaskDone,
   markTaskError,
@@ -132,6 +133,8 @@ function isTooLarge(error: unknown): boolean {
 }
 
 export async function POST(request: Request) {
+  const crossSite = rejectCrossSite(request);
+  if (crossSite) return crossSite;
   // Captured before any await so the agent budget is measured from the same
   // instant as the route's `maxDuration` clock (request invocation).
   const requestStartedAt = Date.now();
@@ -152,6 +155,8 @@ export async function POST(request: Request) {
     async start(controller) {
       let closed = false;
       let taskId: string | null = null;
+      // The task row claimed with a concurrency slot, before the turn starts.
+      let claimedTaskId: string | null = null;
       // Cancellation plumbing, torn down in `finally` regardless of outcome.
       let stopWatching: () => void = () => {};
       let unregisterActiveTask: () => void = () => {};
@@ -193,11 +198,13 @@ export async function POST(request: Request) {
         finish();
       };
 
-      // Charge (or not) by outcome, exactly once per turn.
+      // Charge (or not) by outcome, exactly once per turn, never more than
+      // the plan's per-message cap with the turn's sandbox runs included.
+      let capCredits: number | undefined;
       const settle = async (outcome: AgentTurnOutcome): Promise<number> => {
         if (settled) return 0;
         settled = true;
-        return settleAgentTurn({ userId, usage, model, outcome, hold });
+        return settleAgentTurn({ userId, usage, model, outcome, hold, capCredits, taskId });
       };
 
       const remember = async (messages: NewChatMessage[]) => {
@@ -230,18 +237,24 @@ export async function POST(request: Request) {
 
         // Burst-rate throttle + concurrent-work cap. Credits bound total
         // spend; these bound how fast it can be spent and how many model
-        // loops one user can hold open at once.
+        // loops one user can hold open at once. Both are atomic per user:
+        // the task row that holds a concurrency slot is created in the same
+        // locked step as the count, so parallel requests cannot all see room.
         if (!(await checkUsageLimit(userId, "agent")).allowed) {
           refuse("rate_limited", T.limits.rateLimited);
           return;
         }
-        if ((await countActiveTasks()) >= MAX_CONCURRENT_AGENT_TASKS) {
+        const task = await createTaskWithinLimit({ workspaceId, baseVersion }, MAX_CONCURRENT_AGENT_TASKS);
+        if (!task) {
           refuse("rate_limited", T.limits.rateLimited);
           return;
         }
+        // Ended in `finally` if the turn is refused before it starts.
+        claimedTaskId = task.id;
 
         const plan = await getUserPlan();
         model = modelForPlan(plan);
+        capCredits = TURN_CREDIT_CAP[plan];
         const clock = studentClock(
           await studentTimeZone(request, userId, parsed.data.timeZone),
         );
@@ -275,16 +288,18 @@ export async function POST(request: Request) {
             "insufficient_credits",
             available <= 0
               ? T.credits.outAgent
-              : fmt(T.credits.agentTooExpensive, { cost: estimateCredits, balance: available }),
+              : fmt(T.credits.agentTooExpensive, { cost: plural(locale, T.counts.credits, estimateCredits), balance: available }),
           );
         if (balance < estimateCredits) {
           tooExpensive(balance);
           return;
         }
-        // Reserve the estimate atomically (a parallel request sees the
-        // balance without it); refuse if another request got there first.
+        // Reserve the turn's whole spend ceiling atomically: up to the
+        // plan's per-message cap, at least the estimate. A parallel turn sees
+        // the balance without it, so turns running at once can never spend
+        // the same credits; the hold is settled down to the real cost.
         hold = await reserveCredits(userId, {
-          estimate: estimateCredits,
+          estimate: TURN_CREDIT_CAP[plan],
           min: estimateCredits,
           reason: "agent",
         });
@@ -292,14 +307,12 @@ export async function POST(request: Request) {
           tooExpensive(await getCreditBalance(userId));
           return;
         }
-        // Hard spend ceiling for this turn: what the student had (the hold
-        // plus the rest of the balance) and the plan's per-message cap. The
+        // Hard spend ceiling for this turn: exactly what was reserved. The
         // loop sizes every call to stay under it.
-        const ceilingCredits = Math.min(balance, TURN_CREDIT_CAP[plan]);
+        const ceilingCredits = hold.amount;
 
-        // Durable record: survives a disconnect (reconnect by id) and carries a
-        // cancel flag consulted before the workspace is changed.
-        const task = await createTask({ workspaceId, baseVersion });
+        // Durable record (claimed above): survives a disconnect (reconnect by
+        // id) and carries a cancel flag consulted before the workspace is changed.
         taskId = task.id;
         send({ type: "task", taskId: task.id });
         persistChat = true;
@@ -466,22 +479,25 @@ export async function POST(request: Request) {
           });
         }
         if (taskId) await markTaskError(taskId, conflict ? "workspace_conflict" : "error").catch(() => {});
-        // Two failures are always uncharged: a result too large to save, and
-        // a result that overlaps edits saved during the task (the student did
-        // nothing wrong and got nothing). Other failures are uncharged within
-        // the daily allowance (see agent-charging).
+        // Every failure, including a result too large to save and a result
+        // that overlaps edits saved during the task, is uncharged within the
+        // daily free-failure allowance (see agent-charging) and charged for
+        // what it consumed after that. A conflict is easy to cause on purpose
+        // (edit the same page from another tab during every turn), so it
+        // cannot be an unlimited source of free model work.
         const tooLarge = isTooLarge(error);
-        if (tooLarge || conflict) {
-          await releaseAgentHold(hold).catch(() => {});
-        } else {
-          await settle("failed").catch((e) =>
-            reportError(e, { source: "api", route: "/api/agent", method: "POST", userId, workspaceId, taskId }),
-          );
-        }
+        const charged = await settle("failed").catch((e) => {
+          reportError(e, { source: "api", route: "/api/agent", method: "POST", userId, workspaceId, taskId });
+          return 0;
+        });
         const text = conflict
-          ? T.ai.agent.workspaceChanged
+          ? charged > 0
+            ? fmt(T.ai.agent.workspaceChangedCharged, { credits: plural(locale, T.counts.credits, charged) })
+            : T.ai.agent.workspaceChanged
           : tooLarge
-            ? T.ai.agent.resultTooLarge
+            ? charged > 0
+              ? fmt(T.ai.agent.resultTooLargeCharged, { credits: plural(locale, T.counts.credits, charged) })
+              : T.ai.agent.resultTooLarge
             : T.ai.agent.error;
         await remember([{ role: "assistant", content: text }]);
         send({ type: "error", code: conflict ? "workspace_conflict" : "failed", message: text });
@@ -490,6 +506,9 @@ export async function POST(request: Request) {
         // A hold that was not settled (an early exit or an unexpected throw)
         // goes back in full; after a settle this is a no-op.
         if (hold && !settled) await releaseAgentHold(hold).catch(() => {});
+        // A slot claimed by a turn that was refused before it started is
+        // given back at once instead of counting until the task expires.
+        if (claimedTaskId && !taskId) await markTaskError(claimedTaskId, "refused").catch(() => {});
         // Always release the cancellation plumbing so a finished task can't be
         // aborted later and the watcher's interval can't leak.
         stopWatching();

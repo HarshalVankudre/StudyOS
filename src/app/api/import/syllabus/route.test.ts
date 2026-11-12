@@ -128,11 +128,15 @@ describe("POST /api/import/syllabus", () => {
   });
 
   it("returns a clean too_large when the extraction process passes its memory cap", async () => {
-    // Any real process is above 1 MB resident, so the watchdog fires at once.
+    // Any real process is above 1 MB resident. The child arms its watchdog
+    // (first measurement taken) before it parses anything, so the real
+    // watchdog kills the real child before extraction can answer, however
+    // busy the machine is. The time bound only covers starting a process.
     isolation({ rssLimitMb: 1 });
     const response = await POST(upload(textPdf(["PSY 101 Intro to Psychology"]), "s.pdf", "application/pdf"));
     expect(response.status).toBe(413);
     expect(await response.json()).toEqual({ code: "too_large" });
     expect(mocks.reportError).not.toHaveBeenCalled();
-  });
+    expect(extractionLoad()).toEqual({ active: 0, waiting: 0 });
+  }, 30_000);
 });

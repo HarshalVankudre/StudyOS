@@ -12,22 +12,33 @@
  *
  * Every edit is recorded as an id-addressed patch (lib/workspace/changes.ts):
  * "page p1 / block b7 / text: 'hi' -> 'hi there'". When the server holds a
- * newer version (another tab or device, the AI agent, a save whose reply was
- * lost), the unsaved changes are re-applied on top of it by id. Edits that do
- * not overlap simply combine. Where they overlap, nothing is dropped silently:
- * text is merged three ways against the text as it was when the edits
- * diverged; if both changed the same words of a block, both versions are kept
- * (the student's as a new block right after); an edit to something deleted
- * elsewhere brings it back; a value the student overwrote is reported in a
- * banner with a way to restore it.
+ * newer version (another tab or device, the AI agent), the unsaved changes
+ * are re-applied on top of it by id. Edits that do not overlap simply
+ * combine. Where they overlap, nothing is dropped silently: prose is merged
+ * three ways against the text as it was when the edits diverged; if both
+ * changed the same words of a block, both versions are kept (the student's as
+ * a new block right after); other values (dates, links, choices) are single
+ * values: the student's wins and the banner offers the other one back; an
+ * edit to something deleted elsewhere brings it back.
+ *
+ * A change is applied once. Every save carries an id the server records with
+ * the version it produced (lib/workspace/save-ids.ts). A save that landed
+ * although its reply was lost, or a draft left by a tab closed mid-save, is
+ * recognised by that id: its changes are dropped and only later ones are
+ * merged, on top of the version that save produced. Never "applied again
+ * over whatever happened since" (which would undo another device's edits).
  *
  * The same model runs everything else:
  *  - Undo/redo: each history step is the student's own patch. Undo applies
  *    its inverse on top of the current document, so it never reverts what
  *    arrived from elsewhere (updates from outside are not history steps).
  *  - Drafts: the unsaved changes are written to localStorage as a patch, per
- *    tab. A draft left by a closed or crashed tab is merged in the same way
- *    when the workspace is opened again, never restored over newer content.
+ *    tab, with which of them were sent under which save id. A draft left by a
+ *    closed or crashed tab is merged in when the workspace is opened again,
+ *    after asking the server which of its saves landed; never restored over
+ *    newer content. A draft that cannot be matched with certainty (very old,
+ *    or from an older version of the app) is salvaged: its text is kept as
+ *    copies and nothing is overwritten or deleted.
  *  - Edits that compute from the current state (a flashcard grade) can ask to
  *    be re-run on the newer document instead (`update(fn, { rebase: "rerun" })`).
  *
@@ -36,9 +47,14 @@
  * changes it in place. That is all; the patch is derived automatically and
  * merges field by field. Use `rebase: "rerun"` only for edits whose result
  * depends on the value they start from (counters, schedules, scores); such a
- * mutator must also be idempotent, because it can run again on a document
- * that already contains its effect (when a save's reply was lost): give it a
- * natural key (e.g. the review timestamp) and do nothing if it is present.
+ * mutator must also be idempotent (it can run again on a document that
+ * already contains its effect): give it a natural key such as the answer's
+ * timestamp, skip it when an equal or later one is there, and never create
+ * random ids or timestamps inside it (lib/workspace/stable-id.ts).
+ *
+ * Edits run on a copy-on-write draft (lib/workspace/draft.ts): only what an
+ * edit touches is copied, so editing a large workspace costs what the edit
+ * costs. Versions of the document share everything they have in common.
  *
  * Network calls (save, read, version check) run one at a time through an
  * internal queue, so a re-read can never race a save even if the transport
@@ -54,11 +70,14 @@ import {
   pathKey,
   reportHasNews,
   restoreShell,
+  shareWith,
+  type ApplyMode,
   type IdItem,
   type Lookup,
   type MergeReport,
   type Op,
 } from "@/lib/workspace/changes";
+import { produce } from "@/lib/workspace/draft";
 import {
   breakCoalescing,
   canRedo,
@@ -72,6 +91,7 @@ import {
   type Removal,
 } from "@/lib/workspace/history";
 import { MAX_WORKSPACE_BYTES, repairWorkspace, workspaceBytes } from "@/lib/workspace/repair";
+import { landedVersion, logCovers, newSaveId, type SaveLog } from "@/lib/workspace/save-ids";
 import { safeParseWorkspace } from "@/lib/workspace/schema";
 import type { Workspace } from "@/lib/workspace/types";
 
@@ -99,19 +119,29 @@ export interface UpdateOptions {
 
 export type SaveResult =
   | { status: "saved"; version: number }
-  | { status: "conflict"; version: number }
+  | { status: "conflict"; version: number; saves?: SaveLog }
   | { status: "not_found" }
   | { status: "too_large" }
   | { status: "invalid" };
 
+export interface RemoteState {
+  workspace: Workspace;
+  version: number;
+  /** Recent editor saves (absent from servers older than save ids). */
+  saves?: SaveLog;
+}
+
 /**
- * Last-resort conflict: only raised if merging failed unexpectedly. The
- * student then chooses between their version and the newer one.
+ * Last-resort conflict: only raised if merging failed unexpectedly (and the
+ * result could not be repaired). The student then chooses between their
+ * version and the newer one; either choice is an undoable step.
  */
 export interface Conflict {
   kind: "remote";
   workspace: Workspace;
   version: number;
+  /** How many changes made elsewhere "Keep my version" would replace. */
+  discards: number;
 }
 
 /** What a merge with changes from elsewhere had to reconcile (for the banner). */
@@ -133,8 +163,8 @@ export type DraftStorage = Pick<Storage, "getItem" | "setItem" | "removeItem"> &
   Partial<Pick<Storage, "key" | "length">>;
 
 export interface SyncDeps {
-  save: (id: string, ws: Workspace, baseVersion: number) => Promise<SaveResult>;
-  fetchState: (id: string) => Promise<{ workspace: Workspace; version: number } | null>;
+  save: (id: string, ws: Workspace, baseVersion: number, saveId?: string) => Promise<SaveResult>;
+  fetchState: (id: string) => Promise<RemoteState | null>;
   fetchVersion: (id: string) => Promise<number | null>;
   /** localStorage (per-tab drafts and tab liveness). Enumeration enables recovery. */
   storage?: DraftStorage | null;
@@ -146,6 +176,12 @@ export interface SyncDeps {
   onSaved?: (version: number) => void;
   /** This tab's id (drafts are per tab). Random when omitted. */
   tabId?: string;
+  /**
+   * Send a request that outlives the page (fetch with keepalive) to
+   * /api/workspace/save; true when it was handed to the browser. Used when
+   * the tab closes, so the last edits reach the server, not only this device.
+   */
+  beacon?: (body: string) => boolean;
 }
 
 export interface SyncSnapshot {
@@ -173,6 +209,8 @@ const RESYNC_RETRY_MS = [1_000, 3_000];
 export const TAB_ALIVE_MS = 90_000;
 /** Drafts older than this are discarded (any workspace). */
 export const DRAFT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+/** Requests that outlive the page are small (browsers cap them near 64 KB). */
+export const BEACON_MAX_CHARS = 60_000;
 
 const DRAFT_PREFIX = "studyos:draft:";
 const DRAFT_V2_PREFIX = `${DRAFT_PREFIX}v2:`;
@@ -181,6 +219,8 @@ const TAB_PREFIX = "studyos:tab:";
 /**
  * localStorage key of a draft: per tab (`tabId`) since drafts are patches of
  * one tab's unsaved edits. Without `tabId`: the old single-draft key.
+ * A key "<tab>~<n>" holds a draft that tab took over (from a closed tab, or
+ * its own from before a reload) and has not finished merging yet.
  */
 export function draftKey(id: string, tabId?: string): string {
   return tabId ? `${DRAFT_V2_PREFIX}${id}:${tabId}` : `${DRAFT_PREFIX}${id}`;
@@ -190,23 +230,71 @@ export function tabKey(tabId: string): string {
   return `${TAB_PREFIX}${tabId}`;
 }
 
+const TAKEN_PREFIX = "studyos:taken:";
+
+/**
+ * Set when another tab took over this tab's draft (it looked closed: no sign
+ * of life for TAB_ALIVE_MS, as when a phone froze it in the background). If
+ * the tab was only asleep and wakes up, the edits it still holds are the
+ * other tab's to save now; this tab must not replay them (twice the text).
+ */
+export function takenKey(id: string, tabId: string): string {
+  return `${TAKEN_PREFIX}${id}:${tabId}`;
+}
+
 interface StoredDraft {
-  v: 2;
+  v: 2 | 3;
   id: string;
   tabId: string;
+  /** The version the edits are based on. */
   baseVersion: number;
   savedAt: number;
+  /** base -> the tab's document. */
   ops: Op[];
   /** Restorable copies of the items the ops touch (see changes.restoreShell). */
   ctx: Record<string, { item: IdItem; prev: string | null }>;
+  /**
+   * v3: saves sent without a reply, each with the changes made after it
+   * (that save's document -> the tab's document).
+   */
+  sends?: Array<{ saveId: string; ops: Op[] }>;
+}
+
+/** A whole-document draft written by the first version of the editor. */
+interface LegacyDraft {
+  v: 1;
+  baseVersion: number | null;
+  savedAt?: number;
+  workspace: unknown;
 }
 
 type Segment =
   | { kind: "patch"; before: Workspace; after: Workspace }
   | { kind: "rerun"; fns: Mutator[]; before: Workspace; after: Workspace };
 
+/** A save sent whose reply never arrived (it may or may not have landed). */
+interface Sent {
+  saveId: string;
+  doc: Workspace;
+  /** How many segments it carried. */
+  count: number;
+  baseVersion: number;
+}
+
 function randomId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `t-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+/** Run `fn` on a copy-on-write draft of `doc` (a JSON clone if the draft cannot take part). */
+function edit(doc: Workspace, fn: Mutator): Workspace {
+  try {
+    return produce(doc, fn);
+  } catch {
+    const clone = JSON.parse(JSON.stringify(doc)) as Workspace;
+    fn(clone);
+    const ops = diff(doc, clone);
+    return ops.length ? applyPatch(doc, ops, { mode: "undo" }).doc : doc;
+  }
 }
 
 function combine(prev: MergeNotice | null, source: MergeNotice["source"], report: MergeReport): MergeNotice {
@@ -218,7 +306,8 @@ function combine(prev: MergeNotice | null, source: MergeNotice["source"], report
       restored: prev.report.restored + report.restored,
       keptDeleted: prev.report.keptDeleted + report.keptDeleted,
       overwritten: [...prev.report.overwritten, ...report.overwritten],
-      skipped: 0,
+      skipped: prev.report.skipped + report.skipped,
+      repaired: prev.report.repaired + report.repaired,
       conflicts: 0,
     },
   };
@@ -234,8 +323,8 @@ export class WorkspaceSync {
   /** How many leading segments were sent and must not grow any more. */
   private sealed = 0;
   private inFlight = false;
-  /** A save whose outcome is unknown (the request failed after sending). */
-  private uncertain: { doc: Workspace; count: number; baseVersion: number } | null = null;
+  /** Saves sent since `base` whose outcome is unknown, oldest first. */
+  private sends: Sent[] = [];
   private history: History = createHistory();
   private status: SaveStatus = "saved";
   private conflict: Conflict | null = null;
@@ -249,9 +338,15 @@ export class WorkspaceSync {
   private queue: Promise<void> = Promise.resolve();
   private fields = new Set<PendingField>();
   private draftChecked = false;
-  /** This tab's own draft (from before a reload) has been merged in. */
-  private draftAdoptedOwn = false;
+  private claimSeq = 0;
+  private merging = false;
   private storageFailed = false;
+  /** This tab said goodbye (pagehide): no sign of life until it is shown again. */
+  private released = false;
+  /** The document last sent by `sendOnLeave` (not sent twice). */
+  private beaconed: Workspace | null = null;
+  /** Bumped when this tab's unsaved edits were handed to another tab. */
+  private epoch = 0;
   private disposed = false;
   private listeners = new Set<() => void>();
   private snapshot: SyncSnapshot;
@@ -350,14 +445,17 @@ export class WorkspaceSync {
 
   /** Apply an edit (see UpdateOptions; a string is the coalescing key). */
   update(mutator: Mutator, options: string | null | UpdateOptions = null) {
+    // Woken up after another tab took our edits over: this edit is ours,
+    // those are not (checked before the edit is made on top of them).
+    this.checkHandedOver();
     const opts: UpdateOptions =
       typeof options === "object" && options !== null ? options : { coalesceKey: options };
     const prev = this.present;
-    const draft = structuredClone(prev);
-    mutator(draft);
-    const ops = diff(prev, draft);
+    const next = edit(prev, mutator);
+    if (next === prev) return;
+    // Only what the edit touched differs, so this compares little.
+    const ops = diff(prev, next);
     if (ops.length === 0) return;
-    const next = applyPatch(prev, ops, { mode: "undo" }).doc;
     const removal = detectRemoval(prev, next);
     const entryId = this.commitLocal(prev, next, {
       ops,
@@ -410,6 +508,7 @@ export class WorkspaceSync {
   }
 
   undo(): boolean {
+    this.checkHandedOver();
     this.commitFields();
     const taken = takeUndo(this.history);
     if (!taken) return false;
@@ -419,6 +518,7 @@ export class WorkspaceSync {
   }
 
   redo(): boolean {
+    this.checkHandedOver();
     this.commitFields();
     const taken = takeRedo(this.history);
     if (!taken) return false;
@@ -432,6 +532,7 @@ export class WorkspaceSync {
    * current document; later steps stay. It can be redone.
    */
   undoTo(entryId: number): boolean {
+    this.checkHandedOver();
     this.commitFields();
     const taken = takeUndo(this.history, entryId);
     if (!taken) return false;
@@ -492,6 +593,7 @@ export class WorkspaceSync {
 
   private async saveStep(): Promise<void> {
     if (this.paused || this.conflict) return;
+    this.checkHandedOver();
     if (this.needsPull && !(await this.pullStep())) return;
     if (this.status === "gone") return;
     if (this.segments.length === 0) {
@@ -508,35 +610,54 @@ export class WorkspaceSync {
       this.emit();
       return;
     }
-    const count = this.segments.length;
-    const baseVersion = this.baseVersion;
-    this.sealed = count;
+    const sent: Sent = {
+      saveId: newSaveId(),
+      doc,
+      count: this.segments.length,
+      baseVersion: this.baseVersion,
+    };
+    // Recorded (and in the local draft) before the request leaves, so a tab
+    // that dies while waiting for the reply leaves enough behind to tell.
+    this.sends.push(sent);
+    this.sealed = sent.count;
     this.inFlight = true;
     this.status = "saving";
     this.writeDraft();
     this.emit();
 
     let result: SaveResult | null = null;
+    const epoch = this.epoch;
     try {
-      result = await this.deps.save(this.id, doc, baseVersion);
+      result = await this.deps.save(this.id, doc, sent.baseVersion, sent.saveId);
     } catch {
       result = null;
     }
     this.inFlight = false;
+    this.checkHandedOver();
+    if (epoch !== this.epoch) {
+      // Handed over while waiting (the other tab knows this save by its id):
+      // whatever the reply, read what the server has now.
+      this.needsPull = true;
+      this.scheduleFlush(0);
+      this.emit();
+      return;
+    }
 
     if (!result) {
-      // It may or may not have reached the server; a later save tells.
-      this.uncertain = { doc, count, baseVersion };
+      // It may or may not have reached the server: its id tells later.
       this.status = this.deps.isOnline?.() === false ? "offline" : "error";
       this.scheduleRetry();
       this.emit();
       return;
     }
+    // This save's outcome is known now.
+    this.sends = this.sends.filter((s) => s !== sent);
     switch (result.status) {
       case "saved":
-        this.uncertain = null;
+        // Earlier saves without a reply share its base: none of them landed.
+        this.sends = [];
         this.retryCount = 0;
-        this.acceptSaved(doc, count, result.version);
+        this.acceptSaved(doc, sent.count, result.version);
         break;
       case "conflict":
         // A newer version exists: bring our edits over to it and save again.
@@ -618,7 +739,7 @@ export class WorkspaceSync {
 
   /** Read the saved document and bring local edits over to it. False on failure. */
   private async pullStep(afterConflict = false): Promise<boolean> {
-    let state: { workspace: Workspace; version: number } | null;
+    let state: RemoteState | null;
     try {
       state = await this.deps.fetchState(this.id);
     } catch {
@@ -631,10 +752,8 @@ export class WorkspaceSync {
     return this.receive(state, afterConflict);
   }
 
-  private receive(
-    state: { workspace: Workspace; version: number } | null,
-    afterConflict = false,
-  ): boolean {
+  private receive(state: RemoteState | null, afterConflict = false): boolean {
+    this.checkHandedOver();
     if (!state) {
       this.status = "gone";
       this.emit();
@@ -650,7 +769,7 @@ export class WorkspaceSync {
       this.status = this.segments.length > 0 ? "saving" : "saved";
     }
     const before = this.baseVersion;
-    this.applyRemote(state.workspace, state.version);
+    this.applyRemote(state.workspace, state.version, state.saves);
     if (this.conflict || this.paused || this.segments.length === 0) return true;
     // A save refused as stale although the server reports no newer version
     // (a lagging read): back off instead of retrying in a tight loop.
@@ -659,20 +778,36 @@ export class WorkspaceSync {
     return true;
   }
 
-  /** A version of the document from the server: merge local edits onto it. */
-  private applyRemote(theirs: Workspace, version: number) {
-    this.commitFields();
-    if (version === this.baseVersion) {
-      this.emit();
-      return;
+  /**
+   * Did one of the saves without a reply land? Then its changes are in the
+   * server's history already: take the version it produced as the base and
+   * keep only what came after it.
+   */
+  private resolveSends(theirs: Workspace, version: number, saves: SaveLog | undefined) {
+    if (this.sends.length === 0) return;
+    const sends = this.sends;
+    this.sends = [];
+    for (let i = sends.length - 1; i >= 0; i -= 1) {
+      const landed = landedVersion(saves, sends[i].saveId);
+      if (landed !== null) {
+        this.acceptSaved(sends[i].doc, sends[i].count, landed);
+        return;
+      }
     }
-
-    // Our own save that landed although its reply was lost: nothing to merge.
-    const own = this.uncertain;
-    this.uncertain = null;
-    if (own && version === own.baseVersion + 1 && diff(own.doc, theirs).length === 0) {
+    if (saves && logCovers(saves, sends[0].baseVersion)) return; // none of them landed
+    // A server without save ids (an older deploy), or a log that no longer
+    // reaches back that far: recognise our own save by its content.
+    const own = sends[sends.length - 1];
+    if (version === own.baseVersion + 1 && diff(own.doc, theirs).length === 0) {
       this.acceptSaved(own.doc, own.count, version);
-      if (this.segments.length === 0) this.status = "saved";
+    }
+  }
+
+  /** A version of the document from the server: merge local edits onto it. */
+  private applyRemote(theirs: Workspace, version: number, saves?: SaveLog) {
+    this.commitFields();
+    this.resolveSends(theirs, version, saves);
+    if (version === this.baseVersion) {
       this.emit();
       return;
     }
@@ -681,45 +816,75 @@ export class WorkspaceSync {
     this.history = breakCoalescing(this.history);
     this.rev += 1;
     if (this.segments.length === 0) {
-      this.base = theirs;
-      this.present = theirs;
+      // Share what did not change with what is on screen, so only the
+      // changed parts of the editor re-render.
+      const shared = shareWith(shown, theirs);
+      this.base = shared.doc;
+      this.present = shared.doc;
       this.baseVersion = version;
       this.status = "saved";
       this.emit();
-      if (diff(shown, theirs).length > 0) this.deps.onNotice?.("updatedElsewhere");
+      if (shared.changed) this.deps.onNotice?.("updatedElsewhere");
       return;
     }
 
     let rebased: { doc: Workspace; segments: Segment[]; report: MergeReport };
+    let doc: Workspace | null = null;
     try {
       rebased = this.rebaseOnto(theirs);
-      if (!safeParseWorkspace(rebased.doc).success) throw new Error("merge produced an invalid workspace");
+      doc = this.validOrRepaired(rebased.doc, rebased.report);
     } catch (error) {
       console.error("[StudyOS] could not merge with the newer version", error);
-      this.conflict = { kind: "remote", workspace: theirs, version };
+      doc = null;
+    }
+    if (!doc) {
+      this.conflict = {
+        kind: "remote",
+        workspace: theirs,
+        version,
+        discards: diff(this.base, theirs).length,
+      };
       this.status = "conflict";
       this.writeDraft();
       this.emit();
       return;
     }
-    this.base = theirs;
     this.baseVersion = version;
     this.sealed = 0;
-    if (diff(theirs, rebased.doc).length === 0) {
-      // Everything unsaved is already there (e.g. our lost-reply save).
-      this.present = theirs;
+    const present = shareWith(shown, doc).doc;
+    const base = shareWith(present, theirs);
+    this.base = base.doc;
+    if (diff(base.doc, present).length === 0) {
+      // Everything unsaved is already there (a save of ours that landed).
+      this.present = base.doc;
       this.segments = [];
       this.clearDraft();
       this.status = "saved";
     } else {
-      this.present = rebased.doc;
-      this.segments = rebased.segments;
+      this.present = present;
+      this.segments = rebased!.segments;
+      // The same content, sharing with what is shown.
+      this.segments[0].before = base.doc;
+      this.segments[this.segments.length - 1].after = present;
       this.status = "saving";
       this.writeDraft();
     }
-    if (reportHasNews(rebased.report)) this.merge = combine(this.merge, "remote", rebased.report);
+    if (reportHasNews(rebased!.report)) this.merge = combine(this.merge, "remote", rebased!.report);
     this.emit();
     if (diff(shown, this.present).length > 0) this.deps.onNotice?.("updatedElsewhere");
+  }
+
+  /**
+   * A merged document that breaks a schema limit (a deck over 200 cards, a
+   * text over its limit) is repaired the way stored documents are: a deck is
+   * split, nothing is dropped. Null if it cannot be repaired without loss.
+   */
+  private validOrRepaired(doc: Workspace, report: MergeReport): Workspace | null {
+    if (safeParseWorkspace(doc).success) return doc;
+    const repaired = repairWorkspace(doc, { id: this.id });
+    if (!repaired || repaired.issues.some((issue) => issue.startsWith("dropped"))) return null;
+    report.repaired += 1;
+    return repaired.workspace;
   }
 
   /** Replay the unsaved segments on `theirs`, each by its own rule. */
@@ -736,9 +901,9 @@ export class WorkspaceSync {
       } else {
         let next: Workspace;
         try {
-          const draft = structuredClone(cur);
-          for (const fn of seg.fns) fn(draft);
-          next = applyPatch(cur, diff(cur, draft), { mode: "undo" }).doc;
+          next = edit(cur, (d) => {
+            for (const fn of seg.fns) fn(d);
+          });
         } catch (error) {
           // A broken re-run must not block the merge: carry its effect over
           // as plain changes instead.
@@ -799,7 +964,7 @@ export class WorkspaceSync {
     this.commitFields();
     return this.enqueue(async () => {
       for (let attempt = 0; ; attempt += 1) {
-        let state: { workspace: Workspace; version: number } | null;
+        let state: RemoteState | null;
         try {
           state = await this.deps.fetchState(this.id);
         } catch {
@@ -821,31 +986,36 @@ export class WorkspaceSync {
 
   /**
    * Last-resort conflict (merging failed): keep this tab's version (saved over
-   * the newer one) or load the newer one (undoable: Undo brings mine back).
+   * the newer one) or load the newer one. Either is an undo step: Undo after
+   * "Keep my version" puts the other version's changes back, Undo after
+   * "Load the latest" brings this tab's version back.
    */
   resolveConflict(choice: "mine" | "theirs") {
+    this.checkHandedOver();
     const conflict = this.conflict;
     if (!conflict) return;
     this.commitFields();
     this.conflict = null;
     const mine = this.present;
-    this.base = conflict.workspace;
+    const theirs = conflict.workspace;
+    this.base = theirs;
     this.baseVersion = conflict.version;
     this.sealed = 0;
+    this.sends = [];
     this.rev += 1;
     if (choice === "mine") {
-      this.segments = [{ kind: "patch", before: conflict.workspace, after: mine }];
-      this.status = "saving";
-      this.emit();
+      this.segments = [];
+      this.present = theirs;
+      this.commitLocal(theirs, mine, { ops: diff(theirs, mine) });
       void this.flush();
       return;
     }
     this.segments = [];
-    this.present = conflict.workspace;
+    this.present = theirs;
     this.history = record(this.history, {
       before: mine,
-      after: conflict.workspace,
-      ops: diff(mine, conflict.workspace),
+      after: theirs,
+      ops: diff(mine, theirs),
       now: this.now(),
     }).history;
     this.clearDraft();
@@ -865,6 +1035,7 @@ export class WorkspaceSync {
    * elsewhere that the student's edits replaced (an undoable step).
    */
   restoreTheirs() {
+    this.checkHandedOver();
     const merge = this.merge;
     if (!merge) return;
     this.commitFields();
@@ -891,15 +1062,17 @@ export class WorkspaceSync {
   writeDraft() {
     const storage = this.deps.storage;
     if (!storage) return;
+    this.checkHandedOver();
     const key = draftKey(this.id, this.tabId);
     const ops = this.segments.length > 0 ? diff(this.base, this.present) : [];
     if (ops.length === 0) {
       this.removeKey(key);
       return;
     }
+    const sends = this.sends.map((s) => ({ saveId: s.saveId, ops: diff(s.doc, this.present) }));
     const find = lookupIn(this.present);
     const ctx: StoredDraft["ctx"] = {};
-    for (const op of ops) {
+    for (const op of [...ops, ...sends.flatMap((s) => s.ops)]) {
       for (const { arrayPath, id } of opContainers(op)) {
         const k = `${pathKey(arrayPath)}#${id}`;
         if (k in ctx) continue;
@@ -908,17 +1081,18 @@ export class WorkspaceSync {
       }
     }
     const draft: StoredDraft = {
-      v: 2,
+      v: 3,
       id: this.id,
       tabId: this.tabId,
       baseVersion: this.baseVersion,
       savedAt: this.now(),
       ops,
       ctx,
+      ...(sends.length ? { sends } : {}),
     };
     try {
       storage.setItem(key, JSON.stringify(draft));
-      storage.setItem(tabKey(this.tabId), String(draft.savedAt));
+      if (!this.released) storage.setItem(tabKey(this.tabId), String(draft.savedAt));
       this.storageFailed = false;
     } catch {
       // Quota or privacy mode: say so once, so the student keeps the tab open.
@@ -941,8 +1115,46 @@ export class WorkspaceSync {
     }
   }
 
+  /**
+   * Did another tab take this tab's draft over while this one was asleep
+   * (see takenKey)? Then the unsaved edits held here are in its hands, to be
+   * merged and saved there: this tab must neither save nor replay them (the
+   * text would come twice). It goes back to the last version it knows the
+   * server has, and the next read brings the other tab's save of them. Only
+   * edits made from now on are this tab's. Called first by every entry point
+   * that edits, saves or reads, before anything is built on top of them.
+   */
+  private checkHandedOver() {
+    const storage = this.deps.storage;
+    if (!storage) return;
+    const key = takenKey(this.id, this.tabId);
+    try {
+      if (storage.getItem(key) === null) return;
+      storage.removeItem(key);
+    } catch {
+      return;
+    }
+    if (this.segments.length === 0 && this.sends.length === 0) return;
+    this.epoch += 1;
+    this.present = this.base;
+    this.segments = [];
+    this.sealed = 0;
+    this.sends = [];
+    this.beaconed = null;
+    this.conflict = null;
+    this.history = breakCoalescing(this.history);
+    this.rev += 1; // fields show the stored values again
+    this.needsPull = true;
+    if (this.status !== "gone") this.status = "saving";
+    this.writeDraft();
+    this.scheduleFlush(0);
+    this.emit();
+  }
+
   /** Mark this tab alive (its draft must not be adopted by another tab). */
   heartbeat() {
+    this.checkHandedOver();
+    this.released = false;
     try {
       this.deps.storage?.setItem(tabKey(this.tabId), String(this.now()));
     } catch {
@@ -950,8 +1162,13 @@ export class WorkspaceSync {
     }
   }
 
-  /** This tab is closing: its draft may now be recovered by the next visit. */
+  /**
+   * This tab is closing (a clean exit): its draft may be recovered by the
+   * next tab at once. Nothing until the next `heartbeat` (the page shown
+   * again) marks it alive, not even the events that follow pagehide.
+   */
   releaseTab() {
+    this.released = true;
     this.removeKey(tabKey(this.tabId));
   }
 
@@ -986,7 +1203,7 @@ export class WorkspaceSync {
     const now = this.now();
     for (const key of keys) {
       try {
-        if (key.startsWith(TAB_PREFIX)) {
+        if (key.startsWith(TAB_PREFIX) || key.startsWith(TAKEN_PREFIX)) {
           if (now - Number(storage.getItem(key)) > 24 * 60 * 60 * 1000) storage.removeItem(key);
         } else if (key.startsWith(DRAFT_PREFIX)) {
           const savedAt = Number((JSON.parse(storage.getItem(key) ?? "null") as { savedAt?: number } | null)?.savedAt);
@@ -998,11 +1215,36 @@ export class WorkspaceSync {
     }
   }
 
+  /** Move a draft under a key of this tab (so no other tab takes it too). */
+  private claim(key: string): boolean {
+    const storage = this.deps.storage;
+    if (!storage) return false;
+    try {
+      const raw = storage.getItem(key);
+      if (raw === null) return false;
+      this.claimSeq += 1;
+      storage.setItem(draftKey(this.id, `${this.tabId}~${this.now().toString(36)}${this.claimSeq}`), raw);
+      storage.removeItem(key);
+      // If its tab was only asleep, it learns on waking that these edits
+      // are ours to save now.
+      const prefix = `${DRAFT_V2_PREFIX}${this.id}:`;
+      const owner = key.startsWith(prefix) ? key.slice(prefix.length).split("~")[0] : null;
+      if (owner && owner !== this.tabId) storage.setItem(takenKey(this.id, owner), String(this.now()));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private claimKeys(): string[] {
+    const prefix = draftKey(this.id, `${this.tabId}~`);
+    return this.storageKeys().filter((k) => k.startsWith(prefix));
+  }
+
   /**
-   * On open: merge in edits a closed (or crashed) tab left on this device
-   * that never reached the server. A draft whose edits the server already
-   * holds is cleared without asking; a draft of a tab that is still open is
-   * left alone. The merge is an undo step, announced with a notice.
+   * On open: take over edits a closed (or crashed) tab left on this device
+   * that never reached the server, this tab's own from before a reload, and
+   * a draft in the first editor's format, then merge them (see adoptOrphans).
    */
   recoverDraft() {
     const storage = this.deps.storage;
@@ -1010,97 +1252,142 @@ export class WorkspaceSync {
     this.draftChecked = true;
     this.heartbeat();
     this.sweep(this.storageKeys());
-
-    let legacyOps: Op[] | null = null;
-    let legacyLookup: Lookup | undefined;
-    const legacyKey = draftKey(this.id);
-    try {
-      const raw = storage.getItem(legacyKey);
-      const legacy = raw
-        ? (JSON.parse(raw) as { v?: number; baseVersion?: number; workspace?: unknown })
-        : null;
-      const repaired = legacy?.v === 1 ? repairWorkspace(legacy.workspace, { id: this.id }) : null;
-      if (legacy && repaired) {
-        const ops = diff(this.present, { ...repaired.workspace, id: this.id });
-        // A draft from before drafts were per tab (a whole document). Based on
-        // an older version it cannot tell its own edits from newer ones, so
-        // then only what it added is merged in.
-        legacyOps = legacy.baseVersion === this.baseVersion ? ops : ops.filter((op) => op.op === "ins");
-        legacyLookup = lookupIn(repaired.workspace);
-      }
-    } catch {
-      // unreadable: nothing to recover
-    }
-    this.removeKey(legacyKey);
-    this.adoptOrphans(legacyOps ? [{ ops: legacyOps, lookup: legacyLookup }] : []);
+    // Our own key is rewritten by our next edit: take what it holds now.
+    this.claim(draftKey(this.id, this.tabId));
+    this.claim(draftKey(this.id));
+    this.adoptOrphans();
   }
 
   /**
-   * Merge in the drafts of tabs that are no longer open (and this tab's own
-   * draft from before a reload). Also runs periodically, so a crashed tab's
-   * edits are picked up by a tab that was opened right after the crash.
+   * Take over the drafts of tabs that are no longer open and merge them in.
+   * Also runs periodically, so a crashed tab's edits are picked up by a tab
+   * that was opened right after the crash. Taking a draft over is immediate
+   * (two open tabs never both take one); the merge asks the server first
+   * which of the draft's saves already landed. The merge is an undo step,
+   * announced with a notice; a draft whose edits the server already holds is
+   * cleared without asking; a draft of a tab that is still open is left alone.
    */
-  adoptOrphans(extra: Array<{ ops: Op[]; lookup?: Lookup }> = []) {
-    const storage = this.deps.storage;
-    if (!storage) return;
-    const report = emptyReport();
-    let restored = false;
-    const mergeIn = (ops: Op[], lookup: Lookup | undefined): boolean => {
-      let next = applyPatch(this.present, ops, { mode: "rebase", lookup, report }).doc;
-      if (next === this.present || diff(this.present, next).length === 0) return true;
-      if (!restored) {
-        // Typing still in a field is written first; fields then show the merge.
-        this.commitFields();
-        next = applyPatch(this.present, ops, { mode: "rebase", lookup }).doc;
-      }
-      if (!safeParseWorkspace(next).success) return false;
-      const prev = this.present;
-      this.rev += 1;
-      this.commitLocal(prev, next, {});
-      restored = true;
-      return true;
-    };
-
-    const readDraft = (key: string): { ops: Op[]; lookup: Lookup } | null => {
-      let draft: StoredDraft | null = null;
-      try {
-        draft = JSON.parse(storage.getItem(key) ?? "null") as StoredDraft | null;
-      } catch {
-        draft = null;
-      }
-      if (!draft || draft.v !== 2 || !Array.isArray(draft.ops)) return null;
-      const ctx = draft.ctx ?? {};
-      return { ops: draft.ops, lookup: (arrayPath, id) => ctx[`${pathKey(arrayPath)}#${id}`] };
-    };
-
-    // 1. This tab's own draft from before a reload (first: merging anything
-    //    else rewrites that key). Once running, the key holds our own edits.
-    const ownKey = draftKey(this.id, this.tabId);
-    let ownLeft = false;
-    if (!this.draftAdoptedOwn) {
-      this.draftAdoptedOwn = true;
-      const own = readDraft(ownKey);
-      if (own) ownLeft = !mergeIn(own.ops, own.lookup);
-    }
-    // 2. What the caller found (an old-format draft).
-    for (const { ops, lookup } of extra) mergeIn(ops, lookup);
-    // 3. Drafts of tabs that are closed or crashed (no recent sign of life).
+  adoptOrphans() {
+    if (!this.deps.storage) return;
     const prefix = `${DRAFT_V2_PREFIX}${this.id}:`;
     for (const key of this.storageKeys()) {
-      if (!key.startsWith(prefix) || key === ownKey) continue;
-      if (this.tabAlive(key.slice(prefix.length))) continue;
-      const draft = readDraft(key);
-      if (!draft || mergeIn(draft.ops, draft.lookup)) this.removeKey(key);
+      if (!key.startsWith(prefix)) continue;
+      const owner = key.slice(prefix.length).split("~")[0];
+      if (owner === this.tabId || this.tabAlive(owner)) continue;
+      this.claim(key);
     }
+    if (this.claimKeys().length === 0 || this.merging) return;
+    this.merging = true;
+    void this.enqueue(() => this.mergeClaims()).finally(() => {
+      this.merging = false;
+    });
+  }
 
+  private async mergeClaims(): Promise<void> {
+    const storage = this.deps.storage;
+    const keys = this.claimKeys();
+    if (!storage || keys.length === 0) return;
+    let state: RemoteState | null;
+    try {
+      state = await this.deps.fetchState(this.id);
+    } catch {
+      return; // offline: tried again at the next periodic check
+    }
+    if (!state) return;
+    // Our own unsaved edits first, onto the latest version.
+    this.receive(state);
+
+    const report = emptyReport();
+    let restored = false;
+    for (const key of keys) {
+      let parsed: StoredDraft | LegacyDraft | null = null;
+      try {
+        parsed = JSON.parse(storage.getItem(key) ?? "null") as StoredDraft | LegacyDraft | null;
+      } catch {
+        parsed = null;
+      }
+      const plan = parsed ? this.planDraft(parsed, state) : null;
+      if (!plan) {
+        this.removeKey(key);
+        continue;
+      }
+      const result = this.mergeIn(plan.ops, plan.mode, plan.lookup, report, !restored);
+      if (result === "invalid") continue; // kept, tried again later
+      if (result === "merged") restored = true;
+      this.removeKey(key);
+    }
     if (restored) {
       this.writeDraft();
       if (reportHasNews(report)) this.merge = combine(this.merge, "draft", report);
       this.emit();
       this.deps.onNotice?.("draftRestored");
-    } else if (!ownLeft && this.segments.length === 0) {
-      this.clearDraft();
     }
+  }
+
+  /**
+   * What of a draft still has to be applied, and how sure we are of it:
+   *  - a save it sent landed: only what came after that save, as a rebase;
+   *  - it sent nothing, or the server shows none of its saves landed (or
+   *    nothing was saved since its base): all of it, as a rebase;
+   *  - otherwise (an old draft format, or a server log that cannot tell):
+   *    salvaged, never overwriting or deleting anything.
+   */
+  private planDraft(
+    draft: StoredDraft | LegacyDraft,
+    state: RemoteState,
+  ): { ops: Op[]; mode: ApplyMode; lookup: Lookup } | null {
+    if (draft.v === 1) {
+      const repaired = repairWorkspace(draft.workspace, { id: this.id });
+      if (!repaired) return null;
+      const doc = { ...repaired.workspace, id: this.id };
+      return {
+        ops: diff(state.workspace, doc),
+        mode: draft.baseVersion === state.version ? "rebase" : "salvage",
+        lookup: lookupIn(doc),
+      };
+    }
+    if ((draft.v !== 2 && draft.v !== 3) || !Array.isArray(draft.ops)) return null;
+    const ctx = draft.ctx ?? {};
+    const lookup: Lookup = (arrayPath, id) => ctx[`${pathKey(arrayPath)}#${id}`];
+    const sends = draft.v === 3 ? (draft.sends ?? []) : null;
+    if (sends) {
+      for (let i = sends.length - 1; i >= 0; i -= 1) {
+        if (landedVersion(state.saves, sends[i].saveId) !== null) {
+          return { ops: sends[i].ops, mode: "rebase", lookup };
+        }
+      }
+      const sure =
+        sends.length === 0 ||
+        draft.baseVersion === state.version ||
+        logCovers(state.saves, draft.baseVersion);
+      return { ops: draft.ops, mode: sure ? "rebase" : "salvage", lookup };
+    }
+    // v2 did not record its saves: sure only if nothing was saved since.
+    return { ops: draft.ops, mode: draft.baseVersion === state.version ? "rebase" : "salvage", lookup };
+  }
+
+  /** Merge a draft's changes into the present document (one undo step). */
+  private mergeIn(
+    ops: Op[],
+    mode: ApplyMode,
+    lookup: Lookup,
+    report: MergeReport,
+    commitFieldsFirst: boolean,
+  ): "merged" | "nothing" | "invalid" {
+    const probe = emptyReport();
+    let next = applyPatch(this.present, ops, { mode, lookup, report: probe }).doc;
+    if (next === this.present || diff(this.present, next).length === 0) return "nothing";
+    if (commitFieldsFirst) this.commitFields();
+    const local = emptyReport();
+    next = applyPatch(this.present, ops, { mode, lookup, report: local }).doc;
+    const valid = this.validOrRepaired(next, local);
+    if (!valid) return "invalid";
+    const prev = this.present;
+    this.rev += 1;
+    this.commitLocal(prev, valid, {});
+    const merged = combine({ source: "draft", report }, "draft", local).report;
+    Object.assign(report, merged);
+    return "merged";
   }
 
   /** (Re)start after mount: mark the tab alive and recover drafts once. */
@@ -1111,13 +1398,54 @@ export class WorkspaceSync {
   }
 
   /**
-   * Leaving (tab hidden or closing): write buffered typing and the local
-   * draft synchronously, then save right away.
+   * Leaving (tab hidden, or with `final` closing): write buffered typing and
+   * the local draft synchronously, then save right away. When closing, the
+   * unsaved edits are sent as a patch with a request that outlives the page
+   * (`deps.beacon`), so they reach the server and every other device, not
+   * only this browser's draft. Returns true when nothing unsaved is left
+   * without a way to the server (no leave prompt needed for the document).
    */
-  prepareToLeave() {
+  prepareToLeave(final = false): boolean {
+    this.checkHandedOver();
     this.commitFields();
     this.writeDraft();
-    if (this.segments.length > 0) void this.flush();
+    if (this.segments.length === 0) return true;
+    if (final && this.sendOnLeave()) return true;
+    void this.flush();
+    return false;
+  }
+
+  /** True while a field (or an exam in progress) holds work not yet written. */
+  hasBufferedWork(): boolean {
+    for (const field of this.fields) if (field.hasPending()) return true;
+    return false;
+  }
+
+  private sendOnLeave(): boolean {
+    if (!this.deps.beacon || this.paused || this.conflict) return false;
+    if (this.status === "gone" || this.status === "tooLarge" || this.deps.isOnline?.() === false) return false;
+    if (this.beaconed === this.present) return true;
+    const saveId = newSaveId();
+    const body = JSON.stringify({
+      id: this.id,
+      baseVersion: this.baseVersion,
+      saveId,
+      ops: diff(this.base, this.present),
+    });
+    if (body.length > BEACON_MAX_CHARS) return false;
+    let sent = false;
+    try {
+      sent = this.deps.beacon(body);
+    } catch {
+      sent = false;
+    }
+    if (!sent) return false;
+    // Like any save without a reply: its id tells later whether it landed.
+    this.sends.push({ saveId, doc: this.present, count: this.segments.length, baseVersion: this.baseVersion });
+    this.sealed = this.segments.length;
+    this.beaconed = this.present;
+    this.writeDraft();
+    return true;
   }
 
   /** Stop timers. Pending edits are already in the local draft. */

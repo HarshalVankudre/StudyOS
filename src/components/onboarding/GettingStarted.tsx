@@ -36,11 +36,38 @@ function seenBefore(): boolean {
 }
 
 /**
+ * The student came in through a link to a particular page, block or row (the
+ * Today plan, search, a shared link): they came to see that, not the guide.
+ */
+function arrivedByDeepLink(): boolean {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    return params.has("page") || params.has("block") || params.has("row");
+  } catch {
+    return false;
+  }
+}
+
+const GUIDE_ATTR = "data-getting-started";
+
+/** Dialogs other than this guide that are showing (a row's details, a study session, ...). */
+function openDialogs(): HTMLElement[] {
+  const dialogs = document.querySelectorAll<HTMLElement>('[role="dialog"], [role="alertdialog"]');
+  return Array.from(dialogs).filter(
+    (el) => !el.closest(`[${GUIDE_ATTR}]`) && el.getAttribute("data-state") !== "closed" && !el.closest("[hidden]"),
+  );
+}
+
+const otherDialogOpen = () => openDialogs().length > 0;
+
+/**
  * The first-run checklist, as a small progress button in the workspace
  * header that opens a non-modal panel. Items tick themselves as the student
  * does them; "Hide this guide" hides it on every device (it can be brought
  * back from the palette). It opens by itself once, on a large screen only,
- * and never covers the page on a phone unless tapped.
+ * and never covers the page on a phone unless tapped. It never opens by
+ * itself when the student arrived through a deep link, and it steps aside
+ * whenever a dialog opens, so it never sits on top of one.
  */
 export function GettingStarted({ onAskAi }: { onAskAi: () => void }) {
   const { dict, t } = useI18n();
@@ -62,13 +89,22 @@ export function GettingStarted({ onAskAi }: { onAskAi: () => void }) {
   // First load; open by itself the very first time on a large screen.
   useEffect(() => {
     let active = true;
+    // Read now: the editor rewrites the URL once the linked target is shown.
+    const linked = arrivedByDeepLink();
     getOnboardingStateAction()
       .catch(() => null)
       .then((state) => {
         if (!active || !state) return;
         setServer(state);
         if (state.done.length === CHECKLIST_ITEMS.length) setHiddenForGood(true);
-        else if (!state.dismissed && !seenBefore() && window.matchMedia?.("(min-width: 1024px)").matches) {
+        else if (
+          !state.dismissed &&
+          !linked &&
+          window.matchMedia?.("(min-width: 1024px)").matches &&
+          !otherDialogOpen() &&
+          // Last: this records the one automatic opening as used.
+          !seenBefore()
+        ) {
           setOpen(true);
         }
       });
@@ -76,6 +112,25 @@ export function GettingStarted({ onAskAi }: { onAskAi: () => void }) {
       active = false;
     };
   }, []);
+
+  // Never sit on top of a dialog: step aside as soon as one opens.
+  useEffect(() => {
+    if (!open) return;
+    // A dialog already showing when the guide was asked for (the palette it
+    // was opened from, closing) is not one it would cover.
+    const before = new Set(openDialogs());
+    const check = () => {
+      if (openDialogs().some((el) => !before.has(el))) setOpen(false);
+    };
+    const observer = new MutationObserver(check);
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["data-state", "role"],
+    });
+    return () => observer.disconnect();
+  }, [open]);
 
   // Studying and agent runs are recorded on the server: re-read afterwards.
   const wasBusy = useRef(agentBusy);
@@ -211,6 +266,7 @@ export function GettingStarted({ onAskAi }: { onAskAi: () => void }) {
           // the guide. A tap or click outside still does.
           onFocusOutside={(e) => e.preventDefault()}
           aria-label={G.title}
+          {...{ [GUIDE_ATTR]: "" }}
           className="z-50 w-[min(22rem,calc(100vw-1rem))] rounded-xl border border-line-strong bg-card p-4 text-ink shadow-pop outline-none"
         >
           <div className="flex items-start gap-2">

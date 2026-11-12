@@ -15,6 +15,8 @@ export interface FocusTarget {
 export interface RowHandle {
   focusText: (caret?: Caret) => void;
   focusHandle: () => void;
+  /** Focus the block handle and open its menu (Ctrl/⌘+/ from the text). */
+  openMenu?: () => void;
 }
 
 /**
@@ -37,6 +39,8 @@ export interface EditorApi {
   shortcut: (id: string, match: ShortcutMatch) => boolean;
   slashPick: (id: string, item: InsertItem, text: string, caret: number) => void;
   escape: (id: string) => void;
+  /** Open the block's options menu from its text (the handle is not a Tab stop). */
+  openOptions: (id: string) => void;
 
   // Menu actions (return where focus should go once the menu has closed)
   convert: (id: string, kind: TextKind) => FocusTarget | null;

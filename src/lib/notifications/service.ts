@@ -90,19 +90,48 @@ export async function saveNotificationPreferences(userId: string, input: unknown
   return { ok: true, preferences: next };
 }
 
+/**
+ * "added": the device is on for this student. "taken": the endpoint belongs
+ * to another student's device record; the browser must make a fresh
+ * subscription (a new endpoint, see push-client) before it can be added.
+ */
+export type AddSubscriptionResult = "added" | "taken";
+
+function isUniqueViolation(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && (error as { code?: unknown }).code === "P2002");
+}
+
 export async function addPushSubscription(
   userId: string,
   subscription: Extract<SubscriptionCheck, { ok: true }>,
   context: { timeZone?: string; locale?: string; label: string },
-): Promise<void> {
+): Promise<AddSubscriptionResult> {
   const hash = endpointHash(subscription.endpoint);
   const keys = { p256dh: subscription.p256dh, auth: subscription.auth };
-  // The same browser signed in as someone else now belongs to this student.
-  await prisma.pushSubscription.upsert({
-    where: { endpointHash: hash },
-    create: { userId, endpoint: subscription.endpoint, endpointHash: hash, ...keys, label: context.label },
-    update: { userId, ...keys, label: context.label, failures: 0 },
+  // An endpoint is never moved from one student to another. Presenting an
+  // endpoint proves nothing about who owns the device (it could be copied),
+  // and a reassignment would silently stop the first student's reminders and
+  // send the second student's titles to the first student's lock screen.
+  // The browser proves it is the device by subscribing afresh, which yields
+  // an endpoint nobody has stored. The old record then dies on its own: the
+  // push service answers 404/410 for the unsubscribed endpoint and the
+  // channel deletes it.
+  const updated = await prisma.pushSubscription.updateMany({
+    where: { endpointHash: hash, userId },
+    data: { ...keys, label: context.label, failures: 0 },
   });
+  if (updated.count === 0) {
+    try {
+      await prisma.pushSubscription.create({
+        data: { userId, endpoint: subscription.endpoint, endpointHash: hash, ...keys, label: context.label },
+      });
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error;
+      // Lost a race: fine if the winner was this student's own other request.
+      const owner = await prisma.pushSubscription.findUnique({ where: { endpointHash: hash }, select: { userId: true } });
+      if (owner?.userId !== userId) return "taken";
+    }
+  }
 
   const extra = await prisma.pushSubscription.findMany({
     where: { userId },
@@ -124,6 +153,7 @@ export async function addPushSubscription(
     update: { ...(timeZone ? { timeZone } : {}), ...(locale ? { locale } : {}) },
   });
   await refreshNextCheck(userId);
+  return "added";
 }
 
 /** Turn off one device (by its endpoint) or every device of the student. */

@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { en } from "@/lib/i18n/dictionaries/en";
 import { fmt } from "@/lib/i18n/interpolate";
-import { pluralizer } from "@/lib/i18n/plural";
+import { plural, pluralizer } from "@/lib/i18n/plural";
 import type { KitEvent, KitResult, MaterialSummary } from "@/lib/materials/types";
 import type { Workspace } from "@/lib/workspace/types";
 
@@ -31,7 +31,7 @@ const material: MaterialSummary = {
   title: "Lecture 3: Enzymes",
   kind: "pdf",
   pageCount: 30,
-  pageChars: Array.from({ length: 30 }, () => 3000),
+  pageChars: Array.from({ length: 30 }, () => 2900),
   charCount: 90_000,
   sourcePages: 30,
   truncated: false,
@@ -104,14 +104,14 @@ describe("StudyKitDialog", () => {
     render(<StudyKitDialog intent={{ mode: "material" }} afterPageId="p1" onClose={() => {}} onCreated={onCreated} />);
 
     expect(await screen.findByText("Lecture 3: Enzymes")).toBeInTheDocument();
-    // 30 pages of 3,000 characters: 8 sections of 4 pages (the last has 2).
-    expect(screen.getByText(fmt(M.coverage, { from: 1, to: 30, sections: 8 }))).toBeInTheDocument();
-    expect(screen.getByText(fmt(M.cost, { estimate: 72, max: 160 }))).toBeInTheDocument();
+    // 30 pages of 2,900 characters (plus page markers): 8 sections of 4 pages (the last has 2).
+    expect(screen.getByText(plural("en", M.coverage, 8, { from: 1, to: 30 }))).toBeInTheDocument();
+    expect(screen.getByText(plural("en", M.cost, 72, { max: 160 }))).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: M.start }));
     expect(await screen.findByText(M.doneTitle)).toBeInTheDocument();
-    expect(screen.getByText(fmt(M.doneSummary, { cards: 1, questions: 0 }), { exact: false })).toBeInTheDocument();
-    expect(screen.getByText(fmt(M.doneDropped, { count: 2 }))).toBeInTheDocument();
+    expect(screen.getByText("Added a page with 1 flashcard and 0 practice questions.", { exact: false })).toBeInTheDocument();
+    expect(screen.getByText(plural("en", M.doneDropped, 2))).toBeInTheDocument();
 
     const request = JSON.parse(String(fetchMock.mock.calls.find((c) => c[0] === "/api/materials/generate")![1].body));
     expect(request).toMatchObject({ workspaceId: "ws-1", materialId: "mat-1", amount: "standard", range: { from: 1, to: 30 }, language: "material" });
@@ -126,11 +126,11 @@ describe("StudyKitDialog", () => {
 
   it("a long document is cut to one run and the dialog says where to continue", async () => {
     material.pageCount = 80;
-    material.pageChars = Array.from({ length: 80 }, () => 6000);
+    material.pageChars = Array.from({ length: 80 }, () => 5900);
     render(<StudyKitDialog intent={{ mode: "material" }} onClose={() => {}} onCreated={() => {}} />);
     expect(await screen.findByText(fmt(M.cutShort, { next: 21 }))).toBeInTheDocument();
     material.pageCount = 30;
-    material.pageChars = Array.from({ length: 30 }, () => 3000);
+    material.pageChars = Array.from({ length: 30 }, () => 2900);
   });
 
   it("asks before deleting a material", async () => {

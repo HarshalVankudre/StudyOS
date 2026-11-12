@@ -69,10 +69,11 @@ describe("plan text is rendered in the student's language", () => {
       const w = workloadText(
         { overloaded: true, days: 4, neededMinutes: 400, availableMinutes: 180, startToday: ["Essay"] },
         T,
+        locale,
       );
       expect(`${w.title} ${w.body} ${w.start}`).not.toMatch(/\{\w+\}/);
       expect(w.start).toContain("Essay");
-      expect(runSummaryText({ v: 2, items: 3, minutes: 75, workspaces: 1 }, T)).not.toMatch(/\{\w+\}/);
+      expect(runSummaryText({ v: 2, items: 3, minutes: 75, workspaces: 1 }, T, locale)).not.toMatch(/\{\w+\}/);
     });
   }
 
@@ -93,9 +94,23 @@ describe("plan text is rendered in the student's language", () => {
     expect(formatDuration(95, en)).toBe("1 h 35 min");
     expect(formatDuration(118, en)).toBe("2 h");
     const exam = { id: "e", title: "Bio", workspaceName: "HQ", date: "2026-11-20", major: false, target: { workspaceId: "ws" } };
-    expect(examCountdownLabel({ ...exam, days: 0 }, en)).toBe("today");
-    expect(examCountdownLabel({ ...exam, days: 1 }, en)).toBe("tomorrow");
-    expect(examCountdownLabel({ ...exam, days: 8 }, en)).toBe("in 8 days");
+    expect(examCountdownLabel({ ...exam, days: 0 }, en, "en")).toBe("today");
+    expect(examCountdownLabel({ ...exam, days: 1 }, en, "en")).toBe("tomorrow");
+    expect(examCountdownLabel({ ...exam, days: 8 }, en, "en")).toBe("in 8 days");
+  });
+
+  it("uses each language's plural forms for counts", () => {
+    const en = getDictionary("en").today;
+    const ar = getDictionary("ar").today;
+    const one = item("cards_due", { kind: "flashcards", reason: { code: "cards_due", count: 1 } });
+    expect(itemReason(one, en, "en")).toBe("1 card is ready for review.");
+    const two = item("cards_due", { kind: "flashcards", reason: { code: "cards_due", count: 2 } });
+    expect(itemReason(two, ar, "ar")).toBe("بطاقتان جاهزتان للمراجعة.");
+    const soon = item("due_soon", { reason: { code: "due_soon", days: 3 } });
+    expect(itemReason(soon, en, "en")).toBe("Due in 3 days. Starting early keeps it small.");
+    expect(runSummaryText({ v: 2, items: 1, minutes: 25, workspaces: 1 }, en, "en")).toBe("Planned 1 item · 25 min");
+    expect(workloadText({ overloaded: true, days: 1, neededMinutes: 90, availableMinutes: 60, startToday: [] }, en, "en").title)
+      .toBe("Heads-up: the next day is full");
   });
 
   it("builds deep links from the stored target", () => {

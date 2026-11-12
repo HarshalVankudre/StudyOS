@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useI18n } from "@/lib/i18n/client";
 import { deleteAccountAction } from "@/app/app/account-actions";
+import { clearPushBeforeSignOut } from "@/components/notifications/push-client";
 
 /**
  * The danger-zone control: confirms (destructive, irreversible), then deletes
@@ -20,6 +21,10 @@ export function DeleteAccountButton() {
     if (!window.confirm(S.deleteAccountConfirm)) return;
     setError(null);
     startTransition(async () => {
+      // This device stops getting the student's notifications first (the
+      // server erases every device record with the account, but the browser
+      // subscription lives on the device). Bounded: deletion always proceeds.
+      await clearPushBeforeSignOut();
       const result = await deleteAccountAction();
       if (result?.error) setError(S.deleteAccountError);
     });

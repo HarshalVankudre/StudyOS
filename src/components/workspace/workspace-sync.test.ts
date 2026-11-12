@@ -390,7 +390,7 @@ describe("finding 2: replayed edits never vanish or overwrite silently", () => {
     expect(a.getSnapshot().status).toBe("saved");
   });
 
-  it("the same paragraph changed by the agent and the student keeps both versions", async () => {
+  it("an agent rewrite and words the student added right after it are combined", async () => {
     const fake = fakeServer();
     const a = openTab(fake);
     a.setAgentBusy(true);
@@ -400,9 +400,27 @@ describe("finding 2: replayed edits never vanish or overwrite silently", () => {
     await drain();
 
     expect(texts(fake.server.workspace)).toEqual([
-      "Hello (agent fixed grammar, added summary)",
-      "hi and my new sentence",
+      "Hello (agent fixed grammar, added summary) and my new sentence",
     ]);
+    expect(a.getSnapshot().merge).toBeNull();
+  });
+
+  it("the same words rewritten by the agent and the student keep both versions, the other one marked", async () => {
+    const fake = fakeServer();
+    const a = openTab(fake);
+    a.setAgentBusy(true);
+    a.update(setText("b1", "hey"));
+    fake.write(setText("b1", "Hello"));
+    a.setAgentBusy(false);
+    await drain();
+
+    // The student's version stays where it is (their cursor is not moved);
+    // the other one follows, marked as a kept copy of it.
+    expect(texts(fake.server.workspace)).toEqual(["hey", "Hello"]);
+    const [mine, copy] = fake.server.workspace.pages[0].blocks as Array<{ id: string; keptFrom?: string }>;
+    expect(mine.id).toBe("b1");
+    expect(mine.keptFrom).toBeUndefined();
+    expect(copy.keptFrom).toBe("b1");
     expect(a.getSnapshot().merge?.report.keptBoth).toBe(1);
   });
 
@@ -454,8 +472,8 @@ describe("finding 3: recovering a draft merges, never replaces", () => {
     fake.write((d) => d.pages[0].blocks.push(para("phone", "PHONE NOTES")));
 
     const b = openTab(fake, { storage, tabId: "B" });
+    await drain(); // the server is asked which of the draft's saves landed
     expect(b.notices).toContain("draftRestored");
-    await drain();
     expect(texts(fake.server.workspace)).toEqual(["laptop text", "PHONE NOTES"]);
     // The merge is one undoable step.
     b.undo();
@@ -794,5 +812,106 @@ describe("finding 17: smaller gaps", () => {
     a.setAgentBusy(false);
     await drain();
     expect(texts(fake.server.workspace)).toEqual(["Z", "B", "C", "A"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Second review (F5, F8) and the browser QA (closing a tab)
+// ---------------------------------------------------------------------------
+
+describe("F5: a merge that breaks a limit is repaired, not offered as a conflict", () => {
+  const card = (i: number) => ({ id: `c${i}`, front: `Q${i}`, back: `A${i}` });
+  const deck = (n: number): Workspace => ({
+    ...ws(),
+    pages: [{ id: "p1", title: "Home", blocks: [{ id: "deck", type: "flashcards", cards: Array.from({ length: n }, (_, i) => card(i)) } as Block] }],
+  });
+  const cardsIn = (w: Workspace) =>
+    w.pages[0].blocks.flatMap((b) => ("cards" in b ? (b.cards as Array<{ id: string }>).map((c) => c.id) : []));
+
+  it("two tabs filling a deck past 200 cards: the deck is split, every card kept", async () => {
+    const fake = fakeServer(deck(199));
+    const a = openTab(fake);
+    a.setAgentBusy(true);
+    a.update((d) => void (d.pages[0].blocks[0] as { cards: unknown[] }).cards.push(card(500)));
+    fake.write((d) => void (d.pages[0].blocks[0] as { cards: unknown[] }).cards.push(card(600)));
+    a.setAgentBusy(false);
+    await drain();
+    expect(a.getSnapshot().conflict).toBeNull();
+    expect(a.getSnapshot().merge?.report.repaired).toBe(1);
+    const ids = cardsIn(fake.server.workspace);
+    expect(ids).toHaveLength(201);
+    expect(ids).toEqual(expect.arrayContaining(["c500", "c600"]));
+  });
+
+  it("the last-resort choice says what Keep my version replaces, and Undo brings it back", async () => {
+    const fake = fakeServer();
+    const a = openTab(fake);
+    a.setAgentBusy(true);
+    a.update(setText("b1", "hi there"));
+    // A newer client wrote a block this one cannot read: merging cannot keep it.
+    fake.write((d) => {
+      d.name = "Renamed";
+      d.pages[0].blocks.push({ id: "holo", type: "hologram" } as unknown as Block);
+    });
+    a.setAgentBusy(false);
+    await drain();
+    const conflict = a.getSnapshot().conflict;
+    expect(conflict?.discards).toBeGreaterThan(0);
+    a.resolveConflict("mine");
+    await drain();
+    expect(fake.server.workspace.name).toBe("W");
+    expect(texts(fake.server.workspace)).toEqual(["hi there"]);
+    expect(a.undo()).toBe(true); // the other version's changes come back
+    expect(a.workspace.name).toBe("Renamed");
+  });
+});
+
+describe("F8: an old-format draft never loses typing", () => {
+  it("recovered onto a newer version: the text it held is kept beside the saved one", async () => {
+    const fake = fakeServer();
+    const storage = new MemoryStorage();
+    const old = structuredClone(fake.server.workspace);
+    setText("b1", "hi, typed in the old editor")(old);
+    storage.setItem(draftKey("w1"), JSON.stringify({ v: 1, baseVersion: 1, savedAt: Date.now(), workspace: old }));
+    fake.write(setText("b1", "hi, saved elsewhere"));
+    const a = openTab(fake, { storage });
+    await drain();
+    expect(texts(a.workspace)).toEqual(["hi, saved elsewhere", "hi, typed in the old editor"]);
+    expect((a.workspace.pages[0].blocks[1] as { keptFrom?: string }).keptFrom).toBe("b1");
+    expect(a.getSnapshot().merge?.report.keptBoth).toBe(1);
+    expect(storage.data.has(draftKey("w1"))).toBe(false);
+  });
+});
+
+describe("closing a tab (browser QA)", () => {
+  it("a tab that said goodbye leaves its draft to the next tab at once", async () => {
+    const fake = fakeServer();
+    const storage = new MemoryStorage();
+    const a = openTab(fake, { storage, tabId: "A", deps: { isOnline: () => false } });
+    a.update(setText("b1", "hi, offline"));
+    a.prepareToLeave(true); // nothing can be sent: the draft is the fallback
+    a.releaseTab();
+    // Events that follow pagehide do not mark it alive again.
+    a.writeDraft();
+    crash(a, true);
+    const b = openTab(fake, { storage, tabId: "B" });
+    await drain();
+    expect(texts(b.workspace)).toEqual(["hi, offline"]);
+    expect(texts(fake.server.workspace)).toEqual(["hi, offline"]);
+  });
+
+  it("a tab that vanished without goodbye is recovered only once it is provably gone", async () => {
+    const fake = fakeServer();
+    const storage = new MemoryStorage();
+    const a = openTab(fake, { storage, tabId: "A", deps: { isOnline: () => false } });
+    a.update(setText("b1", "hi, crashed"));
+    crash(a);
+    const b = openTab(fake, { storage, tabId: "B" });
+    await drain();
+    expect(texts(b.workspace)).toEqual(["hi"]); // A might still be open
+    await vi.advanceTimersByTimeAsync(TAB_ALIVE_MS);
+    b.adoptOrphans();
+    await drain();
+    expect(texts(b.workspace)).toEqual(["hi, crashed"]);
   });
 });

@@ -10,7 +10,7 @@ export default function manifest(): MetadataRoute.Manifest {
     id: "/app",
     name: "StudyOS",
     short_name: "StudyOS",
-    description: "Your whole semester set up in two minutes, and it maintains itself.",
+    description: "Your whole semester, set up in about a minute, and it maintains itself.",
     start_url: "/app",
     scope: "/",
     display: "standalone",

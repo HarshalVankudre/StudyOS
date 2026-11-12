@@ -24,8 +24,11 @@ function isOperator(request: Request): boolean {
  * bare `{ ok }` and nothing else (which features are switched on is not
  * public information). An operator presenting the maintenance secret
  * (`Authorization: Bearer $MAINTENANCE_SECRET`) also gets the secret-free
- * configuration view: required variable NAMES that are missing, and feature
- * on/off flags. Never values.
+ * configuration view: required variable NAMES that are missing, feature
+ * on/off flags, and first of all the startup WARNINGS (features switched off
+ * because an optional secret is missing, with what that means). Never values.
+ * Warnings never make the probe fail: only missing required configuration or
+ * an unreachable database do.
  */
 export async function GET(request: Request) {
   const config = publicConfigStatus();
@@ -43,8 +46,9 @@ export async function GET(request: Request) {
     return Response.json({ ok }, { status, headers: NO_STORE });
   }
   const reason = !database ? "db" : !config.ok ? "config" : undefined;
+  const { warnings, ...rest } = config;
   return Response.json(
-    { ok, ...(reason ? { reason } : {}), config },
+    { ok, ...(reason ? { reason } : {}), warnings, config: rest },
     { status, headers: NO_STORE },
   );
 }

@@ -105,6 +105,17 @@ describe("planQuestionsAction", () => {
     expect(mocks.releaseCreditHold).toHaveBeenCalledWith(HOLD);
   });
 
+  it("fallback questions skip what the description already answers", async () => {
+    mocks.planQuestionsDetailed.mockResolvedValue({ questions: QUESTIONS, fromModel: false });
+    const result = await planQuestionsAction(
+      "I'm taking Intro Microeconomics and Renaissance Art History this semester.",
+    );
+    expect(result.ok).toBe(true);
+    const ids = result.ok ? result.questions.map((q) => q.id) : [];
+    expect(ids).not.toContain("load");
+    expect(ids).toContain("level");
+  });
+
   it("gives the hold back when the model call throws", async () => {
     mocks.planQuestionsDetailed.mockRejectedValue(new Error("provider down"));
     await expect(planQuestionsAction("CS student")).rejects.toThrow("provider down");

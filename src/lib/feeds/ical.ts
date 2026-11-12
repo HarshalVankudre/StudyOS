@@ -46,7 +46,40 @@ export const ICS_LIMITS = {
   maxEvents: 2_500,
   maxTextChars: 500,
   maxDescriptionChars: 4_000,
+  /**
+   * Distinct TZID names resolved per calendar. Real calendars use a handful;
+   * a TZID beyond this is treated as unknown without being looked up, so a
+   * file of hundreds of junk zone names cannot cost a zone lookup per date.
+   */
+  maxZonesPerCalendar: 100,
+  /** EXDATE values read per event and per calendar (real feeds: a few each). */
+  maxExdatesPerComponent: 1_000,
+  maxExdatesPerCalendar: 20_000,
+  /**
+   * Wall-clock budget for reading one calendar (parse and expansion). Reading
+   * runs synchronously on the server's event loop, so this is the backstop
+   * for any shape the counts above miss; past it the calendar is refused as
+   * too large (a partial read would make a sync flag the missing events).
+   */
+  timeBudgetMs: 2_500,
 } as const;
+
+/** Thrown inside the reader when the time budget runs out. */
+export class IcsBudgetError extends Error {
+  constructor() {
+    super("calendar took too long to read");
+    this.name = "IcsBudgetError";
+  }
+}
+
+/** A deadline check that reads the clock only every `every` calls. */
+export function budgetClock(deadline: number, every = 256): () => void {
+  let n = 0;
+  return () => {
+    n += 1;
+    if (n % every === 0 && Date.now() > deadline) throw new IcsBudgetError();
+  };
+}
 
 export interface ContentLine {
   name: string;
@@ -81,6 +114,12 @@ export interface ParsedComponent {
   recurrenceId?: ICalTime;
   rrule?: string;
   exdates: ICalTime[];
+  /**
+   * Calendar days the event covers, from DTEND or DURATION (all-day: DTEND
+   * is exclusive; timed: rounded up). Set only when more than one, so a
+   * "Reading week" can be told apart from a single deadline.
+   */
+  spanDays?: number;
 }
 
 export interface ParsedCalendar {
@@ -260,6 +299,37 @@ export function instantOf(time: ICalTime): number {
   return wallToUtcMs(time.wall);
 }
 
+const SPAN_DAY_MS = 86_400_000;
+
+/** A DURATION value ("P5D", "P1W", "PT2H30M", "P1DT12H") in milliseconds, or null. */
+export function parseDurationMs(value: string): number | null {
+  const m = /^\s*([+-])?P(?:(\d{1,4})W)?(?:(\d{1,5})D)?(?:T(?:(\d{1,6})H)?(?:(\d{1,7})M)?(?:(\d{1,9})S)?)?\s*$/i.exec(value);
+  if (!m || m[1] === "-") return null;
+  const [w, d, h, min, sec] = [m[2], m[3], m[4], m[5], m[6]].map((x) => Number(x ?? 0));
+  return (((w * 7 + d) * 24 + h) * 60 + min) * 60_000 + sec * 1000;
+}
+
+/**
+ * How many calendar days an event covers (at least 1). All-day events count
+ * their dates (DTEND is exclusive); timed events count started days of
+ * length, so a 2-hour exam is 1 and a 3-day field trip is 3.
+ */
+export function eventSpanDays(start: ICalTime, end: ICalTime | null, duration: string | undefined): number {
+  let ms: number | null = null;
+  if (end) {
+    if (start.kind === "date" && end.kind === "date") {
+      const a = Date.UTC(start.wall.year, start.wall.month - 1, start.wall.day);
+      const b = Date.UTC(end.wall.year, end.wall.month - 1, end.wall.day);
+      return Math.max(1, Math.min(4000, Math.round((b - a) / SPAN_DAY_MS)));
+    }
+    ms = instantOf(end) - instantOf(start);
+  } else if (duration) {
+    ms = parseDurationMs(duration);
+  }
+  if (ms === null || !Number.isFinite(ms) || ms <= SPAN_DAY_MS) return 1;
+  return Math.min(4000, Math.ceil(ms / SPAN_DAY_MS));
+}
+
 function compactUtc(ms: number): string {
   const d = new Date(ms);
   return `${pad(d.getUTCFullYear(), 4)}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}Z`;
@@ -282,8 +352,12 @@ interface VTimezoneInfo {
   standardOffset?: number;
 }
 
-/** Parse the calendar's text into components. Null when it is not iCalendar. */
-export function parseIcs(text: string): ParsedCalendar | null {
+/**
+ * Parse the calendar's text into components. Null when it is not iCalendar.
+ * Throws IcsBudgetError once `options.deadline` (epoch ms) has passed.
+ */
+export function parseIcs(text: string, options: { deadline?: number } = {}): ParsedCalendar | null {
+  const tick = budgetClock(options.deadline ?? Date.now() + ICS_LIMITS.timeBudgetMs);
   const warnings = new Set<IcsWarning>();
   const lines = unfoldLines(text, warnings);
   const firstReal = lines.find((l) => l.trim() !== "");
@@ -299,6 +373,7 @@ export function parseIcs(text: string): ParsedCalendar | null {
   let componentsSeen = 0;
 
   for (const line of lines) {
+    tick();
     if (!line.trim()) continue;
     const cl = parseContentLine(line);
     if (!cl) continue;
@@ -351,18 +426,26 @@ export function parseIcs(text: string): ParsedCalendar | null {
     }
   }
 
+  // Every TZID is resolved at most once per calendar, and only the first
+  // `maxZonesPerCalendar` distinct names are resolved at all: later new names
+  // count as unknown zones (no lookup), so no date ever pays for a resolution
+  // beyond those.
   const zoneCache = new Map<string, ZoneRef | null>();
   const zone = (tzid: string): ZoneRef | null => {
-    if (zoneCache.has(tzid)) return zoneCache.get(tzid)!;
+    const cached = zoneCache.get(tzid);
+    if (cached !== undefined) return cached;
+    if (zoneCache.size >= ICS_LIMITS.maxZonesPerCalendar) return null;
     const ref = resolveZone(tzid, timezones.get(tzid));
-    if (zoneCache.size < 200) zoneCache.set(tzid, ref);
+    zoneCache.set(tzid, ref);
     return ref;
   };
   const calTz = calendarProps["X-WR-TIMEZONE"]?.trim();
   const ctx: TimeContext = { zone, calendarZone: calTz ? zone(calTz) : null, warnings };
 
   const components: ParsedComponent[] = [];
+  let exdatesLeft: number = ICS_LIMITS.maxExdatesPerCalendar;
   for (const raw of rawComponents) {
+    tick();
     const one = (name: string) => raw.props.get(name)?.[0];
     const text = (name: string, max: number = ICS_LIMITS.maxTextChars) => {
       const cl = one(name);
@@ -377,8 +460,20 @@ export function parseIcs(text: string): ParsedCalendar | null {
       continue;
     }
     const exdates: ICalTime[] = [];
-    for (const cl of raw.props.get("EXDATE") ?? []) {
+    let ownLeft: number = ICS_LIMITS.maxExdatesPerComponent;
+    exdateLines: for (const cl of raw.props.get("EXDATE") ?? []) {
+      if (ownLeft <= 0 || exdatesLeft <= 0) {
+        warnings.add("truncated");
+        break;
+      }
       for (const value of splitList(cl.value)) {
+        if (ownLeft <= 0 || exdatesLeft <= 0) {
+          warnings.add("truncated");
+          break exdateLines;
+        }
+        ownLeft -= 1;
+        exdatesLeft -= 1;
+        tick();
         const t = parseTimeValue(value, cl.params, ctx);
         if (t) exdates.push(t);
       }
@@ -393,6 +488,7 @@ export function parseIcs(text: string): ParsedCalendar | null {
     const status = text("STATUS", 40).toUpperCase();
     const rrule = one("RRULE")?.value.trim();
     const recurrenceId = time(one("RECURRENCE-ID"));
+    const spanDays = raw.type === "VEVENT" ? eventSpanDays(start, time(one("DTEND")), one("DURATION")?.value) : 1;
     components.push({
       type: raw.type,
       uid: clip(one("UID")?.value.trim() ?? "", 400),
@@ -407,6 +503,7 @@ export function parseIcs(text: string): ParsedCalendar | null {
       ...(recurrenceId ? { recurrenceId } : {}),
       ...(rrule ? { rrule } : {}),
       exdates,
+      ...(spanDays > 1 ? { spanDays } : {}),
     });
   }
 
@@ -621,7 +718,9 @@ export function hashText(text: string): string {
 export function expandCalendar(
   cal: ParsedCalendar,
   window: { start: number; end: number },
+  options: { deadline?: number } = {},
 ): { occurrences: Occurrence[]; warnings: Set<IcsWarning> } {
+  const tick = budgetClock(options.deadline ?? Date.now() + ICS_LIMITS.timeBudgetMs, 16);
   const warnings = new Set(cal.warnings);
   const ctx: TimeContext = { zone: () => null, calendarZone: null, warnings };
   const overrides = new Map<string, Map<string, ParsedComponent>>();
@@ -653,6 +752,7 @@ export function expandCalendar(
   const budget = { steps: ICS_LIMITS.maxTotalIterations };
 
   for (const c of masters) {
+    tick();
     if (c.status === "CANCELLED") continue;
     const uid = c.uid || `nouid-${hashText(`${c.summary}|${compactTime(c.start)}`)}`;
     if (!c.rrule) {

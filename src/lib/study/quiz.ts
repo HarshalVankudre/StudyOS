@@ -264,10 +264,14 @@ export interface QuestionResult extends QuestionRef {
 /**
  * Add one answer to a question's running stats, built on the stats as they
  * are in the document it runs on. Idempotent: `at` (the run's moment) becomes
- * `lastAnsweredAt`, so an answer already recorded at `at` is not counted again.
+ * `lastAnsweredAt`, and an answer at or before the last recorded one is not
+ * counted again. Monotonic, not "is it the latest one": a question answered
+ * in two runs before a save is confirmed is still counted once per run when
+ * both runs are replayed onto a document that already holds them.
  */
 export function recordAnswer(q: QuizQuestion, correct: boolean, at: string): void {
-  if (q.stats?.lastAnsweredAt === at) return;
+  const last = q.stats?.lastAnsweredAt ? Date.parse(q.stats.lastAnsweredAt) : NaN;
+  if (Number.isFinite(last) && last >= Date.parse(at)) return;
   const prev = q.stats ?? { attempts: 0, correct: 0 };
   q.stats = {
     attempts: prev.attempts + 1,

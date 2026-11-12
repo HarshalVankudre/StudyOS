@@ -219,7 +219,8 @@ export default async function Home() {
             <h2 className="max-w-2xl font-display text-3xl font-semibold tracking-[-0.02em] sm:text-4xl">{L.trust.title}</h2>
             <ul className="mt-8 grid gap-4 sm:grid-cols-2">
               {L.trust.items.map((item) => (
-                <li key={item.title} className="rounded-xl border border-line bg-card p-5">
+                // An odd last card spans both columns instead of leaving a gap.
+                <li key={item.title} className="rounded-xl border border-line bg-card p-5 sm:last:odd:col-span-2">
                   <h3 className="flex items-center gap-2 font-semibold text-ink">
                     <Check className="h-4 w-4 shrink-0 text-lime-deep" aria-hidden />
                     {item.title}

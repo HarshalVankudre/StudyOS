@@ -4,6 +4,7 @@ import "../tools/register-sandbox"; // run_in_sandbox (gated by AGENT_SANDBOX)
 import "../tools/component-tools";  // check_component (interactive artifacts)
 import { skillRegistry, type SkillRegistry } from "./registry";
 import { agentSandboxEnabled } from "@/lib/flags";
+import { PRACTICE_INTEGRITY_NOTE, SKILL_INTEGRITY_NOTE } from "../integrity";
 
 const INSPECT = ["summarize_workspace", "find_entities", "read_area", "inspect_workspace"];
 
@@ -12,7 +13,7 @@ export function registerStage1Skills(registry: SkillRegistry = skillRegistry): v
     id: "precise-edit",
     version: "1.0.0",
     instructions:
-      "Make the smallest correct change. When the outline and focus areas already show the exact ids, call apply_ops right away (with a reply when that completes the request); otherwise locate the target with find_entities/read_area first. Never touch unrelated areas. Reuse existing ids exactly.",
+      "Make the smallest correct change. When the outline and focus areas already show the exact ids, call apply_ops right away (with a reply when that completes the request); otherwise locate the target with find_entities/read_area first. Never touch unrelated areas. Reuse existing ids exactly. Before adding coursework, look for the same item among the existing rows (an undated \"Midterm\" is the midterm the student now gives a date for): update that row instead of adding a second one. A weight many items share (\"homework is 30%\") is a grading category set with set_grades_block `categories`, never a row; a weight for one item goes on its row. " + SKILL_INTEGRITY_NOTE,
     toolIds: [...INSPECT, "apply_ops"],
   });
 
@@ -20,7 +21,7 @@ export function registerStage1Skills(registry: SkillRegistry = skillRegistry): v
     id: "study-planner",
     version: "1.0.0",
     instructions:
-      "Build or update study/revision/exam/assignment plans. Inspect existing courses, deadlines, and trackers first; coordinate changes across the relevant databases and pages; express each as a minimal apply_ops operation. Keep dates ISO and leave unknown facts as TBD.",
+      "Build or update study/revision/exam/assignment plans. Inspect existing courses, deadlines, and trackers first; coordinate changes across the relevant databases and pages; express each as a minimal apply_ops operation. Keep dates ISO and leave unknown facts as TBD. For an assignment, plan the student's own steps toward it (research, outline, draft, revise) with dates before it is due; do not write the deliverable. " + SKILL_INTEGRITY_NOTE,
     toolIds: [...INSPECT, "apply_ops"],
   });
 
@@ -44,7 +45,7 @@ export function registerStage1Skills(registry: SkillRegistry = skillRegistry): v
     id: "flashcard-maker",
     version: "1.0.0",
     instructions:
-      "Create or extend a spaced-repetition flashcard deck. If the user points at existing material (a page, notes, a course, a topic in the workspace), inspect it first with find_entities/read_area and ground the cards in that content; otherwise generate from your own knowledge of the topic. Then apply_ops with set_page_blocks appending (or updating) a block of shape { id, type:'flashcards', title:<short topic>, cards:[{ id:<uuid>, front:<question/term>, back:<answer/definition> }, ...] }. Write clear, atomic Q&A pairs — one fact per card, question on the front, concise answer on the back. Default to 10-20 cards unless the user asks for a specific count. NEVER set the scheduling fields (ease, intervalDays, reps, dueAt, lastReviewedAt) — new cards omit them. Reuse existing ids exactly; generate a fresh uuid for each new card.",
+      "Create or extend a spaced-repetition flashcard deck. If the user points at existing material (a page, notes, a course, a topic in the workspace), inspect it first with find_entities/read_area and ground the cards in that content; otherwise generate from your own knowledge of the topic. Then apply_ops with set_page_blocks appending (or updating) a block of shape { id, type:'flashcards', title:<short topic>, cards:[{ id:<uuid>, front:<question/term>, back:<answer/definition> }, ...] }. Write clear, atomic Q&A pairs — one fact per card, question on the front, concise answer on the back. Default to 10-20 cards unless the user asks for a specific count. NEVER set the scheduling fields (ease, intervalDays, reps, dueAt, lastReviewedAt) — new cards omit them. Reuse existing ids exactly; generate a fresh uuid for each new card. " + PRACTICE_INTEGRITY_NOTE,
     toolIds: [...INSPECT, "apply_ops"],
   });
 
@@ -52,7 +53,7 @@ export function registerStage1Skills(registry: SkillRegistry = skillRegistry): v
     id: "quiz-maker",
     version: "1.0.0",
     instructions:
-      "Create or extend a practice quiz (a quiz block the student can take in practice or exam mode). If the user points at existing material (a page, notes, a course, a deck), inspect it first with find_entities/read_area and ground every question in that content; otherwise use your own knowledge of the topic. Then apply_ops with set_page_blocks appending (or updating) a block of shape { id, type:'quiz', title:<short topic>, questions:[...] } where each question is one of { id:<uuid>, kind:'mcq', prompt, choices:[2-6 strings], answerIndex:<0-based index of the correct choice>, explanation? } | { id, kind:'true_false', prompt, answerBool:<true|false>, explanation? } | { id, kind:'short', prompt, answerText:<a concise model answer>, explanation? }. Mix kinds (mostly mcq), one idea per question, plausible distractors, a one-sentence explanation of why the answer is right, and an optional short `topic`. Default to 8-12 questions unless the user asks for a count. Prompts, choices and explanations may use Markdown and $math$. NEVER write `stats` or `attempts`; when updating an existing quiz, reuse existing question ids exactly and leave those fields as they are.",
+      "Create or extend a practice quiz (a quiz block the student can take in practice or exam mode). If the user points at existing material (a page, notes, a course, a deck), inspect it first with find_entities/read_area and ground every question in that content; otherwise use your own knowledge of the topic. Then apply_ops with set_page_blocks appending (or updating) a block of shape { id, type:'quiz', title:<short topic>, questions:[...] } where each question is one of { id:<uuid>, kind:'mcq', prompt, choices:[2-6 strings], answerIndex:<0-based index of the correct choice>, explanation? } | { id, kind:'true_false', prompt, answerBool:<true|false>, explanation? } | { id, kind:'short', prompt, answerText:<a concise model answer>, explanation? }. Mix kinds (mostly mcq), one idea per question, plausible distractors, a one-sentence explanation of why the answer is right, and an optional short `topic`. Default to 8-12 questions unless the user asks for a count. Prompts, choices and explanations may use Markdown and $math$. NEVER write `stats` or `attempts`; when updating an existing quiz, reuse existing question ids exactly and leave those fields as they are. " + PRACTICE_INTEGRITY_NOTE,
     toolIds: [...INSPECT, "apply_ops"],
   });
 

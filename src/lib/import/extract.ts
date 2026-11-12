@@ -88,6 +88,12 @@ export interface ExtractLimits {
   maxChars?: number;
   /** Cap on the decoded size of all streams in a PDF. */
   maxPdfInflatedBytes?: number;
+  /**
+   * The account the extraction is for. One account gets at most
+   * `maxPerOwner` extractions at once on this instance (running or waiting),
+   * across every route, so it cannot occupy the whole pool.
+   */
+  owner?: string;
 }
 
 /** Extract plain text from an uploaded file, or throw an ExtractError. */
@@ -95,10 +101,11 @@ export async function extractSourceText(
   bytes: Uint8Array,
   fileName: string,
   mimeType: string,
-  options: { timeoutMs?: number } = {},
+  options: { timeoutMs?: number; owner?: string } = {},
 ): Promise<ExtractedSource> {
   return (await runIsolated("text", bytes, fileName, mimeType, {
     timeoutMs: options.timeoutMs,
+    owner: options.owner,
   })) as ExtractedSource;
 }
 
@@ -142,6 +149,8 @@ export interface ExtractionIsolation {
   maxConcurrent: number;
   /** Requests that may wait for a free child; more are refused as "busy". */
   maxQueued: number;
+  /** Extractions one account may have running or waiting at once. */
+  maxPerOwner: number;
   /** Longest wait for a free child before "busy". */
   maxWaitMs: number;
   /** Resident memory of the child process at which it is killed. */
@@ -166,6 +175,7 @@ export interface ExtractionIsolation {
 export const DEFAULT_EXTRACTION_ISOLATION: Readonly<ExtractionIsolation> = {
   maxConcurrent: 2,
   maxQueued: 8,
+  maxPerOwner: 1,
   maxWaitMs: 10_000,
   rssLimitMb: 1024,
   heapLimitMb: 768,
@@ -178,13 +188,21 @@ interface PoolState {
   config: ExtractionIsolation;
   active: number;
   waiting: Array<() => void>;
+  /** Extractions running or waiting, per owner. */
+  owners: Map<string, number>;
 }
 
 // On globalThis so every route bundle (and dev hot reloads) share one pool.
 const POOL_KEY = Symbol.for("studyos.extractionPool");
 function pool(): PoolState {
   const holder = globalThis as unknown as Record<symbol, PoolState | undefined>;
-  holder[POOL_KEY] ??= { config: { ...DEFAULT_EXTRACTION_ISOLATION }, active: 0, waiting: [] };
+  holder[POOL_KEY] ??= {
+    config: { ...DEFAULT_EXTRACTION_ISOLATION },
+    active: 0,
+    waiting: [],
+    owners: new Map(),
+  };
+  holder[POOL_KEY]!.owners ??= new Map();
   return holder[POOL_KEY]!;
 }
 
@@ -204,9 +222,45 @@ export function extractionLoad(): { active: number; waiting: number } {
   return { active: state.active, waiting: state.waiting.length };
 }
 
-/** Take a slot or wait for one (bounded); throws ExtractError("busy"). */
-async function acquireSlot(): Promise<() => void> {
+/**
+ * Claim the owner's share of the pool (running or waiting counts); throws
+ * ExtractError("busy") when the account already has its share.
+ */
+function claimOwner(owner: string | undefined): () => void {
+  if (!owner) return () => {};
   const state = pool();
+  const mine = state.owners.get(owner) ?? 0;
+  if (mine >= state.config.maxPerOwner) {
+    throw new ExtractError("busy", "this account already has an extraction running");
+  }
+  state.owners.set(owner, mine + 1);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const left = (state.owners.get(owner) ?? 1) - 1;
+    if (left <= 0) state.owners.delete(owner);
+    else state.owners.set(owner, left);
+  };
+}
+
+/** Take a slot or wait for one (bounded); throws ExtractError("busy"). */
+async function acquireSlot(owner?: string): Promise<() => void> {
+  const state = pool();
+  const releaseOwner = claimOwner(owner);
+  try {
+    const releaseSlot = await acquirePoolSlot(state);
+    return () => {
+      releaseSlot();
+      releaseOwner();
+    };
+  } catch (error) {
+    releaseOwner();
+    throw error;
+  }
+}
+
+async function acquirePoolSlot(state: PoolState): Promise<() => void> {
   let released = false;
   const release = () => {
     if (released) return;
@@ -269,7 +323,7 @@ async function runIsolated(
   const mime = String(mimeType).slice(0, 200);
   if (!detectSourceKind(bytes, name, mime)) throw new ExtractError("unsupported");
 
-  const release = await acquireSlot();
+  const release = await acquireSlot(limits.owner);
   try {
     const { config } = pool();
     const timeoutMs = Math.min(

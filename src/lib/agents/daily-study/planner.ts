@@ -62,6 +62,18 @@ const EXAM_COUNTDOWN_DAYS = 45;
 const WORKLOAD_HORIZON_DAYS = 10;
 const RESTART_MINUTES = 15;
 const MAX_LEDGER_KEYS = 300;
+/** Share of the day held for flashcard sessions before other work is fitted. */
+const REVIEW_SHARE = 0.35;
+/** Days shorter than this keep plain priority order (no held share). */
+const REVIEW_SHARE_MIN_BUDGET = 30;
+/** Decks that get the held share. */
+const MAX_REVIEW_ITEMS = 2;
+/** Longest one work session grows to when the day has time left over. */
+const MAX_SESSION_MINUTES = 90;
+/** Minutes per card, for sizing a review session (and counting what fits). */
+const MINUTES_PER_REVIEW = 0.6;
+const MINUTES_PER_NEW_CARD = 1.5;
+const MAX_DECK_MINUTES = 30;
 
 export interface PreviousPlan {
   localDate: string;
@@ -89,6 +101,12 @@ export interface PlannerInput {
   /** Today's plan when rebuilding: items already done are kept as done. */
   current?: { items: DailyStudyPlanItem[]; progress?: Record<string, number> } | null;
   /**
+   * Refreshing today's plan because the workspaces changed (not because the
+   * student asked): time already spent on items checked off comes out of
+   * today's budget, so the day does not grow behind the student's back.
+   */
+  refresh?: boolean;
+  /**
    * Optional weight source (e.g. the grades module). Returning a number
    * overrides the row's own weight column; undefined falls back to it.
    */
@@ -104,9 +122,83 @@ export interface BuiltDailyStudyPlan {
 
 type PlanItemDraft = Omit<DailyStudyPlanItem, "completed">;
 
+/**
+ * A short fingerprint of what a plan was built from: which workspaces exist
+ * and which rows their dated databases hold. A stored plan whose fingerprint
+ * no longer matches is out of date: a workspace was created, duplicated,
+ * restored or trashed, or rows were added or removed (a deadline import).
+ * Edits inside a row (a status, a date) do not change it; reconcile handles
+ * those without re-planning.
+ */
+export function planSourcesKey(workspaces: Workspace[]): string {
+  const parts: string[] = [];
+  for (const workspace of [...workspaces].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
+    parts.push(`w:${workspace.id}`);
+    for (const database of workspace.databases) {
+      if (!database.properties.some((property) => property.type === "date")) continue;
+      parts.push(`d:${database.id}`, ...database.rows.map((row) => row.id).sort());
+    }
+  }
+  // FNV-1a, 32-bit, twice with different seeds: compact and stable.
+  const hash = (seed: number) => {
+    let h = seed >>> 0;
+    for (const part of parts) {
+      for (let i = 0; i < part.length; i += 1) {
+        h ^= part.charCodeAt(i);
+        h = Math.imul(h, 0x01000193) >>> 0;
+      }
+      h ^= 0x1f;
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return h.toString(16).padStart(8, "0");
+  };
+  return `${workspaces.length}-${hash(0x811c9dc5)}${hash(0x9747b28c)}`;
+}
+
+/**
+ * The items a student should see: never anything from a workspace that is
+ * not in `workspaces` (the trash, or gone). Stored check-offs are kept, so a
+ * workspace restored the same day brings its done items back.
+ */
+export function visiblePlanItems(
+  items: DailyStudyPlanItem[],
+  workspaces: Workspace[],
+): DailyStudyPlanItem[] {
+  const ids = new Set(workspaces.map((workspace) => workspace.id));
+  return items.filter((item) => ids.has(item.target.workspaceId));
+}
+
+/**
+ * The plan details a student should see beside `visiblePlanItems`. A plan
+ * built from these same workspaces is shown as it is. A stale one (the
+ * refresh after a workspace was trashed lost a race or failed) must not
+ * contradict its own list: exam countdowns from workspaces no longer there
+ * are dropped, and so is the workload heads-up, which cannot be split by
+ * workspace and would otherwise cite work from the trash.
+ */
+export function visiblePlanDetails(details: PlanDetails, workspaces: Workspace[]): PlanDetails {
+  if (details.sources !== undefined && details.sources === planSourcesKey(workspaces)) return details;
+  const ids = new Set(workspaces.map((workspace) => workspace.id));
+  return {
+    ...details,
+    exams: details.exams.filter((exam) => ids.has(exam.target.workspaceId)),
+    workload: null,
+  };
+}
+
 interface Candidate {
   item: PlanItemDraft;
   score: number;
+  /** A plain review session's deck, so the session can be resized honestly. */
+  deck?: DeckLoad;
+}
+
+/** What a deck has for today: reviews due, new cards to introduce, all cards ready. */
+interface DeckLoad {
+  reviewsDue: number;
+  newPlanned: number;
+  /** Reviews due plus every new card (what the deck's own "Study N due" offers). */
+  ready: number;
 }
 
 interface DeckInfo {
@@ -306,22 +398,27 @@ export function buildDailyStudyPlan(input: PlannerInput): BuiltDailyStudyPlan {
         newPlanned,
         studyable,
       });
-      const planned = reviewsDue + newPlanned;
-      if (planned === 0 || !deckTitle) return;
+      if (reviewsDue + newPlanned === 0 || !deckTitle) return;
+      const deck: DeckLoad = { reviewsDue, newPlanned, ready: reviewsDue + fresh };
+      const minutes = deckMinutes(reviewsDue, newPlanned);
       candidates.push({
         score: reviewsDue > 0 ? 600 + Math.min(reviewsDue, 50) * 4 : 360 + newPlanned * 2,
-        item: {
-          id: `flashcards:${workspace.id}:${page.id}:${block.id}`,
-          kind: "flashcards",
-          mode: "study",
-          title: deckTitle,
-          workspaceName: cleanText(workspace.name),
-          section: cleanText(page.title),
-          target: { workspaceId: workspace.id, pageId: page.id, blockId: block.id },
-          minutes: deckMinutes(reviewsDue, newPlanned),
-          reason: { code: reviewsDue > 0 ? "cards_due" : "new_cards", count: planned },
-          dueCount: planned,
-        },
+        deck,
+        item: deckItem(
+          {
+            id: `flashcards:${workspace.id}:${page.id}:${block.id}`,
+            kind: "flashcards",
+            mode: "study",
+            title: deckTitle,
+            workspaceName: cleanText(workspace.name),
+            section: cleanText(page.title),
+            target: { workspaceId: workspace.id, pageId: page.id, blockId: block.id },
+            minutes,
+            reason: { code: reviewsDue > 0 ? "cards_due" : "new_cards" },
+          },
+          deck,
+          minutes,
+        ),
       });
       return;
     }
@@ -364,33 +461,69 @@ export function buildDailyStudyPlan(input: PlannerInput): BuiltDailyStudyPlan {
     .slice()
     .sort((a, b) => a.date.localeCompare(b.date) || a.title.localeCompare(b.title))
     .slice(0, 6)
-    .map((exam) => ({
-      id: `exam:${exam.ledgerKey}`,
-      title: exam.title,
-      workspaceName: cleanText(exam.workspace.name),
-      date: exam.date,
-      days: exam.days,
-      major: exam.major,
-      target: exam.target,
-    }));
+    .map((exam) => {
+      // "Final exam" alone does not say which one: name the course, unless
+      // the title already does.
+      const course =
+        exam.course && !exam.title.toLowerCase().includes(exam.course.toLowerCase())
+          ? exam.course.slice(0, 180)
+          : undefined;
+      return {
+        id: `exam:${exam.ledgerKey}`,
+        title: exam.title,
+        workspaceName: cleanText(exam.workspace.name),
+        ...(course ? { course } : {}),
+        date: exam.date,
+        days: exam.days,
+        major: exam.major,
+        target: exam.target,
+      };
+    });
 
+  /**
+   * Exams in the workload window with no review session today: if the
+   * workload check says to start one of them today, its notes session is
+   * added then, so the heads-up never names work the plan leaves out.
+   */
+  const examFallbacks = new Map<string, Candidate>();
   const usedDecks = new Set<string>();
   for (const exam of exams) {
     const prepTotal = examPrepMinutes(exam.major, exam.weight);
     const prepLeft = Math.max(0, prepTotal - (ledger[exam.ledgerKey] ?? 0));
-    if (exam.days >= 1 && exam.days <= WORKLOAD_HORIZON_DAYS && prepLeft > 0) {
-      workload.push({
-        candidateId: null,
-        title: exam.title,
-        due: exam.days,
-        minutes: prepLeft,
-      });
-    }
+    const baseId = `exam:${exam.ledgerKey}`;
+    const inWorkload = exam.days >= 1 && exam.days <= WORKLOAD_HORIZON_DAYS && prepLeft > 0;
+    const workloadEntry: WorkloadEntry | null = inWorkload
+      ? { candidateId: null, title: exam.title, due: exam.days, minutes: prepLeft }
+      : null;
+    if (workloadEntry) workload.push(workloadEntry);
     if (exam.days > EXAM_PREP_WINDOW_DAYS) continue;
 
-    const baseId = `exam:${exam.ledgerKey}`;
     const wasCarried = [...carried.keys()].some((id) => id.startsWith(`${baseId}:`));
-    if (!isReviewDay(exam.days, exam.major) && !wasCarried) continue;
+    if (!isReviewDay(exam.days, exam.major) && !wasCarried) {
+      if (workloadEntry) {
+        const id = `${baseId}:notes`;
+        workloadEntry.candidateId = id;
+        examFallbacks.set(id, {
+          score: 700 - exam.days * 8 + (exam.major ? 40 : 0),
+          item: {
+            id,
+            kind: "exam",
+            mode: "session",
+            title: exam.title,
+            workspaceName: cleanText(exam.workspace.name),
+            section: cleanText(exam.database.name),
+            target: exam.target,
+            minutes: clampRound(Math.ceil(prepLeft / Math.max(exam.days, 1)), 20, 45),
+            reason: { code: "exam_review", days: exam.days, examTitle: exam.title },
+            ...(exam.weight !== null ? { weight: exam.weight } : {}),
+            dueDate: exam.date,
+            ledgerKey: exam.ledgerKey,
+          },
+        });
+      }
+      continue;
+    }
+    const firstCandidate = candidates.length;
 
     const sameWorkspaceExams = exams.filter((e) => e.workspace.id === exam.workspace.id);
     const singleCourse =
@@ -482,6 +615,10 @@ export function buildDailyStudyPlan(input: PlannerInput): BuiltDailyStudyPlan {
         },
       });
     }
+    // Starting this exam's prep early (workload) boosts its first session.
+    if (workloadEntry && candidates[firstCandidate]) {
+      workloadEntry.candidateId = candidates[firstCandidate].item.id;
+    }
   }
 
   // A deck used for exam prep replaces its plain review item.
@@ -497,6 +634,10 @@ export function buildDailyStudyPlan(input: PlannerInput): BuiltDailyStudyPlan {
   const capacity = Math.max(dailyBudget - Math.min(deckLoad, dailyBudget / 2), dailyBudget / 2);
   const overload = checkWorkload(workload, capacity);
   if (overload) {
+    for (const id of overload.startIds) {
+      const fallback = examFallbacks.get(id);
+      if (fallback && !pool.some((c) => c.item.id === id)) pool.push(fallback);
+    }
     for (const c of pool) {
       if (overload.startIds.has(c.item.id)) {
         c.score += 250;
@@ -524,20 +665,72 @@ export function buildDailyStudyPlan(input: PlannerInput): BuiltDailyStudyPlan {
   // ---- Fit today's time ------------------------------------------------------
   const kept = (input.current?.items ?? []).filter((item) => item.completed);
   const keptIds = new Set(kept.map((item) => item.id));
-  const items: DailyStudyPlanItem[] = [];
-  let remaining = budget;
-  let tasks = 0;
+  const open = pool.filter((c) => !keptIds.has(c.item.id));
+  let remaining = input.refresh
+    ? budget - kept.reduce((sum, item) => sum + item.minutes, 0)
+    : budget;
+  const placed: { c: Candidate; minutes: number }[] = [];
+  const isPlaced = (c: Candidate) => placed.some((p) => p.c === c);
+  const place = (c: Candidate, minutes: number) => {
+    const rounded = roundDown5(minutes);
+    placed.push({ c, minutes: rounded });
+    remaining -= rounded;
+  };
 
-  for (const c of pool) {
-    if (items.length >= MAX_PLAN_ITEMS || remaining < MIN_SESSION_MINUTES) break;
-    if (keptIds.has(c.item.id)) continue;
+  // Due reviews first get a bounded share of the day, so a big deadline
+  // cannot crowd the cards out (a skipped review day makes the next longer).
+  // Very short days keep the plain priority order.
+  if (remaining >= REVIEW_SHARE_MIN_BUDGET) {
+    let share = Math.max(MIN_SESSION_MINUTES, roundDown5(remaining * REVIEW_SHARE));
+    for (const c of open) {
+      if (!c.deck) continue;
+      if (share < MIN_SESSION_MINUTES || placed.length >= MAX_REVIEW_ITEMS) break;
+      const minutes = Math.min(c.item.minutes, share);
+      place(c, minutes);
+      share -= roundDown5(minutes);
+    }
+  }
+
+  let tasks = 0;
+  for (const c of open) {
+    if (placed.length >= MAX_PLAN_ITEMS || remaining < MIN_SESSION_MINUTES) break;
+    if (isPlaced(c)) continue;
     if (c.item.kind === "task" && tasks >= MAX_TASK_ITEMS) continue;
     const minutes = Math.min(c.item.minutes, remaining);
     if (minutes < MIN_SESSION_MINUTES) continue;
     if (c.item.kind === "task") tasks += 1;
-    items.push({ ...c.item, minutes: roundDown5(minutes), completed: false });
-    remaining -= roundDown5(minutes);
+    place(c, minutes);
   }
+
+  // Time still free: give it back to what was shortened (a review session cut
+  // to its share, a deadline due tomorrow), then let work sessions run longer
+  // toward their remaining effort, so the plan uses the time the student has.
+  const byPriority = [...placed].sort((a, b) => compareCandidates(a.c, b.c));
+  for (const p of byPriority) {
+    if (remaining < 5) break;
+    const grow = Math.min(p.c.item.minutes - p.minutes, remaining);
+    if (grow >= 5) {
+      p.minutes += roundDown5(grow);
+      remaining -= roundDown5(grow);
+    }
+  }
+  for (const p of byPriority) {
+    if (remaining < 5) break;
+    if (p.c.item.kind !== "deadline") continue;
+    // Waiting a while: the small restart step stays small.
+    if ((p.c.item.carry?.count ?? 0) >= RESTART_AFTER_CARRIES) continue;
+    const effort = p.c.item.reason.effortMinutes ?? p.minutes;
+    const grow = Math.min(Math.min(effort, MAX_SESSION_MINUTES) - p.minutes, remaining);
+    if (grow >= 5) {
+      p.minutes += roundDown5(grow);
+      remaining -= roundDown5(grow);
+    }
+  }
+
+  const items: DailyStudyPlanItem[] = byPriority.map(({ c, minutes }) => ({
+    ...(c.deck ? deckItem(c.item, c.deck, minutes) : { ...c.item, minutes }),
+    completed: false,
+  }));
   if (items[0]) items[0] = { ...items[0], startHere: true };
 
   const progress: Record<string, number> = {};
@@ -556,6 +749,7 @@ export function buildDailyStudyPlan(input: PlannerInput): BuiltDailyStudyPlan {
     progress,
     ...(previous ? { previousDate: previous.localDate } : {}),
     ...(previous ? { carried: all.filter((i) => i.carry).length } : {}),
+    sources: planSourcesKey(workspaces),
   };
 
   return {
@@ -647,7 +841,43 @@ function deadlineCode(days: number): PlanReason["code"] {
 }
 
 function deckMinutes(reviewsDue: number, newPlanned: number): number {
-  return clampRound(Math.ceil(reviewsDue * 0.6 + newPlanned * 1.5), 10, 30);
+  return clampRound(
+    Math.ceil(reviewsDue * MINUTES_PER_REVIEW + newPlanned * MINUTES_PER_NEW_CARD),
+    10,
+    MAX_DECK_MINUTES,
+  );
+}
+
+/** How many cards fit in `minutes`: reviews first, then new cards. */
+export function cardsForMinutes(
+  minutes: number,
+  reviewsDue: number,
+  newPlanned: number,
+): { reviews: number; fresh: number } {
+  const reviews = Math.min(reviewsDue, Math.floor(minutes / MINUTES_PER_REVIEW + 1e-9));
+  const left = minutes - reviews * MINUTES_PER_REVIEW;
+  const fresh = Math.min(newPlanned, Math.max(0, Math.floor(left / MINUTES_PER_NEW_CARD + 1e-9)));
+  // A session always has at least one card (the minimum session is ten minutes).
+  if (reviews + fresh === 0) return reviewsDue > 0 ? { reviews: 1, fresh: 0 } : { reviews: 0, fresh: Math.min(1, newPlanned) };
+  return { reviews, fresh };
+}
+
+/**
+ * A review session sized to `minutes`: the cards planned are what fits, and
+ * when that is fewer than the deck has ready the item says so (`readyCount`),
+ * so "20 cards" never hides that 64 are waiting.
+ */
+function deckItem(item: PlanItemDraft, deck: DeckLoad, minutes: number): PlanItemDraft {
+  const fit = cardsForMinutes(minutes, deck.reviewsDue, deck.newPlanned);
+  const count = fit.reviews + fit.fresh;
+  const reason: PlanReason = {
+    ...item.reason,
+    code: fit.reviews > 0 ? "cards_due" : "new_cards",
+    count,
+  };
+  if (count < deck.ready) reason.readyCount = deck.ready;
+  else delete reason.readyCount;
+  return { ...item, minutes, reason, dueCount: count };
 }
 
 function isPlayableQuestion(q: QuizQuestion): boolean {

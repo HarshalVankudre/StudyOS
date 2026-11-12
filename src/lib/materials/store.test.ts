@@ -12,7 +12,13 @@ const m = vi.hoisted(() => ({
     deleteMany: vi.fn(),
   },
 }));
-vi.mock("@/lib/db", () => ({ prisma: m }));
+vi.mock("@/lib/db", () => ({
+  prisma: {
+    ...m,
+    // createMaterial checks the caps and inserts under an advisory lock.
+    $transaction: async (fn: (tx: unknown) => unknown) => fn({ ...m, $queryRaw: async () => [] }),
+  },
+}));
 
 import { createMaterial, deleteMaterial, getMaterial, listMaterials } from "./store";
 import { MAX_STORED_CHARS_PER_USER } from "./limits";

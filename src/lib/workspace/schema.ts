@@ -119,6 +119,28 @@ const databaseView = z.object({
   filterMatch: z.enum(["all", "any"]).optional(),
 });
 
+/** Bounds for a grading scheme (types.ts GradingScheme). */
+export const MAX_GRADE_CATEGORIES = 100;
+export const MAX_GRADE_ASSIGNMENTS = 2_000;
+
+const gradeCategory = z.object({
+  id: z.string().min(1).max(100),
+  course: z.string().max(200),
+  name: z.string().max(200),
+  weight: z.number().min(0).max(1000),
+  dropLowest: z.number().int().min(0).max(50).optional(),
+  expectedCount: z.number().int().min(1).max(200).optional(),
+});
+
+const gradingScheme = z.object({
+  categories: z.array(gradeCategory).max(MAX_GRADE_CATEGORIES),
+  assign: z
+    .record(z.string(), z.string().max(100))
+    .refine((a) => Object.keys(a).length <= MAX_GRADE_ASSIGNMENTS, "too many assignments")
+    .optional(),
+  keptRows: z.array(z.string().max(200)).max(MAX_GRADE_ASSIGNMENTS).optional(),
+});
+
 const database = z.object({
   id: z.string(),
   name: z.string(),
@@ -127,6 +149,7 @@ const database = z.object({
   properties: z.array(databaseProperty),
   rows: z.array(databaseRow),
   views: z.array(databaseView),
+  grading: gradingScheme.optional(),
 });
 
 /** Where a card or question came from in the student's own material. */
@@ -222,36 +245,48 @@ const gradesBlock = z.object({
   defaultTarget: z.number().min(-1000).max(1000).optional(),
 });
 
+/**
+ * On a text block the sync engine kept as a second version: the id of the
+ * block it was kept next to (that paragraph was changed in two places at
+ * once). The editor marks it and offers to use it or discard it.
+ */
+const keptFrom = z.string().max(200).optional();
+
 const block = z.discriminatedUnion("type", [
   z.object({
     id: z.string(),
     type: z.literal("heading"),
     level: z.union([z.literal(1), z.literal(2), z.literal(3)]),
     text: z.string(),
+    keptFrom,
   }),
-  z.object({ id: z.string(), type: z.literal("paragraph"), text: z.string() }),
+  z.object({ id: z.string(), type: z.literal("paragraph"), text: z.string(), keptFrom }),
   z.object({
     id: z.string(),
     type: z.literal("todo"),
     text: z.string(),
     checked: z.boolean(),
+    keptFrom,
   }),
   z.object({
     id: z.string(),
     type: z.literal("bulleted_list_item"),
     text: z.string(),
+    keptFrom,
   }),
   z.object({
     id: z.string(),
     type: z.literal("numbered_list_item"),
     text: z.string(),
+    keptFrom,
   }),
-  z.object({ id: z.string(), type: z.literal("quote"), text: z.string() }),
+  z.object({ id: z.string(), type: z.literal("quote"), text: z.string(), keptFrom }),
   z.object({
     id: z.string(),
     type: z.literal("callout"),
     text: z.string(),
     emoji: z.string().optional(),
+    keptFrom,
   }),
   z.object({ id: z.string(), type: z.literal("divider") }),
   z.object({
@@ -337,4 +372,6 @@ export {
   gradesBlock as gradesBlockSchema,
   gradesColumns as gradesColumnsSchema,
   gradeBand as gradeBandSchema,
+  gradeCategory as gradeCategorySchema,
+  gradingScheme as gradingSchemeSchema,
 };

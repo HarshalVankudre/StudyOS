@@ -13,8 +13,11 @@ export const dynamic = "force-dynamic";
  * dashboard), stop its billing and erase that user's StudyOS data. Register
  * this URL in the Clerk dashboard (Webhooks) with the `user.deleted` event
  * and put the endpoint's signing secret in CLERK_WEBHOOK_SIGNING_SECRET.
- * With billing configured the secret is required: without it a user who
- * deletes their account in Clerk would keep being charged.
+ * The secret is optional for starting the server: without it this route stays
+ * off (404, or 503 plus a reported error once billing is live so the failed
+ * deliveries show in Clerk), and the startup log and the operator view of
+ * /api/health warn that accounts deleted from Clerk's own profile screen keep
+ * their data and subscription (lib/ops/env.ts).
  *
  * The Svix signature (id + timestamp + body, 5-minute tolerance) is verified by
  * Clerk's own verifyWebhook. Every step is idempotent, so Clerk's retries and

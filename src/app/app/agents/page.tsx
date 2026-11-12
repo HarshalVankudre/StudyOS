@@ -299,7 +299,7 @@ function ActivityRow({
             {run.status === "failed"
               ? today.runFailed
               : run.result
-                ? runSummaryText(run.result, today)
+                ? runSummaryText(run.result, today, locale)
                 : statusLabel}
           </p>
         </div>

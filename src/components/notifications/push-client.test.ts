@@ -4,9 +4,20 @@
  * server's key, and the server gets the device with its zone and language.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { disablePush, enablePush, pushSupport, syncPush } from "./push-client";
+import {
+  clearPushBeforeSignOut,
+  disablePush,
+  dropPushWhenSignedOut,
+  enablePush,
+  pushSupport,
+  syncPush,
+} from "./push-client";
 
 const KEY = "BOVvZP3DuGCyCDuV0sRrG_oKqDuUBr2XtDGXGRLhJB8fm0ES5jc1X0bM0zS5CbDjW9bQsGrlkXcVjRnApGHnwEU";
+
+function keyFromBase64(value: string): Uint8Array {
+  return new Uint8Array(Buffer.from(value, "base64url"));
+}
 
 function fakeSubscription(endpoint: string, key: Uint8Array) {
   return {
@@ -95,6 +106,62 @@ describe("push-client", () => {
     const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(init.method).toBe("DELETE");
     expect(JSON.parse(String(init.body))).toEqual({ endpoint: "https://fcm.googleapis.com/fcm/send/mine" });
+  });
+
+  it("re-subscribes once when the server says the endpoint is another student's", async () => {
+    const old = fakeSubscription("https://fcm.googleapis.com/fcm/send/left-behind", new Uint8Array(65));
+    // Same key as the server's, so only the 409 can cause a fresh subscription.
+    old.options.applicationServerKey = keyFromBase64(KEY).buffer as ArrayBuffer;
+    current = old;
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error: "endpoint_taken" }), { status: 409 }));
+    const result = await enablePush(KEY, "en");
+    expect(result).toEqual({ ok: true, devices: 1 });
+    expect(old.unsubscribe).toHaveBeenCalled();
+    expect(subscribe).toHaveBeenCalledTimes(1);
+    const bodies = fetchMock.mock.calls.map((c) => JSON.parse(String((c as unknown as [string, RequestInit])[1].body)));
+    expect(bodies.map((b) => b.subscription.endpoint)).toEqual([
+      "https://fcm.googleapis.com/fcm/send/left-behind",
+      "https://fcm.googleapis.com/fcm/send/new",
+    ]);
+  });
+
+  it("before signing out: unsubscribes this browser and deletes the endpoint on the server", async () => {
+    current = fakeSubscription("https://fcm.googleapis.com/fcm/send/mine", new Uint8Array(65));
+    const sub = current;
+    await clearPushBeforeSignOut();
+    expect(sub.unsubscribe).toHaveBeenCalled();
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/notifications/subscriptions");
+    expect(init.method).toBe("DELETE");
+    expect(JSON.parse(String(init.body))).toEqual({ endpoint: "https://fcm.googleapis.com/fcm/send/mine" });
+  });
+
+  it("before signing out: gives up after the time bound when the server does not answer", async () => {
+    current = fakeSubscription("https://fcm.googleapis.com/fcm/send/mine", new Uint8Array(65));
+    fetchMock.mockImplementationOnce(() => new Promise(() => {}) as never);
+    const t0 = Date.now();
+    await clearPushBeforeSignOut(50);
+    expect(Date.now() - t0).toBeLessThan(2_000);
+    expect(current.unsubscribe).toHaveBeenCalled();
+  });
+
+  it("before signing out: never throws, also without push support", async () => {
+    fetchMock.mockRejectedValueOnce(new Error("offline"));
+    current = fakeSubscription("https://fcm.googleapis.com/fcm/send/mine", new Uint8Array(65));
+    await expect(clearPushBeforeSignOut()).resolves.toBeUndefined();
+    vi.stubGlobal("PushManager", undefined);
+    // @ts-expect-error simulate a browser without push
+    delete window.PushManager;
+    await expect(clearPushBeforeSignOut()).resolves.toBeUndefined();
+  });
+
+  it("a signed-out browser drops a subscription left behind", async () => {
+    current = fakeSubscription("https://fcm.googleapis.com/fcm/send/left", new Uint8Array(65));
+    expect(await dropPushWhenSignedOut()).toBe(true);
+    expect(current.unsubscribe).toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    current = null;
+    expect(await dropPushWhenSignedOut()).toBe(false);
   });
 
   it("needs the home screen on an iPhone", () => {

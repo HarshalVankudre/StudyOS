@@ -8,7 +8,7 @@ import type {
   Workspace,
 } from "@/lib/workspace/types";
 import { addDays } from "@/lib/workspace/view-logic";
-import { buildDailyStudyPlan, isReviewDay, type PreviousPlan } from "./planner";
+import { buildDailyStudyPlan, isReviewDay, planSourcesKey, visiblePlanItems, type PreviousPlan } from "./planner";
 import { classifyExam } from "./classify";
 import type { DailyStudyPlanItem } from "./types";
 
@@ -426,5 +426,223 @@ describe("planner: exams", () => {
       expect(isExam(title), title).toBe(false);
     }
     expect(classifyExam(db, { ...row, cells: { ...row.cells, type: "exam" } }, "Unit 3", null).isExam).toBe(true);
+  });
+
+  it("an explicit non-exam type wins over a heavy weight and an exam-like title", () => {
+    const db = assignments([{ id: "x", title: "x", due: TODAY }]);
+    const row = db.rows[0];
+    const typed = (type: string | null, title: string, weight: number | null) =>
+      classifyExam(db, { ...row, cells: { ...row.cells, type } }, title, weight);
+    // A 25 % homework is big homework, not an exam.
+    expect(typed("hw", "Homework 5", 25)).toEqual({ isExam: false, major: false });
+    expect(typed("hw", "Final problem set", 30).isExam).toBe(false);
+    // Without a type, a heavy weight still marks a major assessment.
+    expect(typed(null, "Unit 5 assessment", 25)).toEqual({ isExam: true, major: true });
+    expect(typed("exam", "Unit 5", 25)).toEqual({ isExam: true, major: true });
+  });
+});
+
+describe("planner: knowing when a plan is out of date", () => {
+  const base = () =>
+    workspace({
+      pages: [trackerPage()],
+      databases: [
+        assignments([
+          { id: "a", title: "Essay", due: TODAY },
+          { id: "b", title: "Lab", due: addDays(TODAY, 2) },
+        ]),
+      ],
+    });
+
+  it("changes when workspaces come and go or rows are added, not when a row is edited", () => {
+    const key = planSourcesKey([base()]);
+    expect(planSourcesKey([base()])).toBe(key);
+    // Order of workspaces and rows does not matter.
+    const reordered = base();
+    reordered.databases[0].rows.reverse();
+    expect(planSourcesKey([reordered])).toBe(key);
+    expect(planSourcesKey([base(), workspace({ id: "ws-2" })])).toBe(
+      planSourcesKey([workspace({ id: "ws-2" }), base()]),
+    );
+    // Created / duplicated / restored, and trashed.
+    expect(planSourcesKey([base(), workspace({ id: "ws-2" })])).not.toBe(key);
+    expect(planSourcesKey([])).not.toBe(key);
+    // A deadline import adds rows.
+    const imported = base();
+    imported.databases[0].rows.push({ id: "c", cells: { title: "Quiz", due: TODAY, status: "todo" } });
+    expect(planSourcesKey([imported])).not.toBe(key);
+    // Ticking a row off or moving its date is reconcile's job, not a re-plan.
+    const edited = base();
+    edited.databases[0].rows[0].cells.status = "done";
+    edited.databases[0].rows[1].cells.due = addDays(TODAY, 5);
+    expect(planSourcesKey([edited])).toBe(key);
+  });
+
+  it("records the fingerprint on the plan it builds", () => {
+    expect(plan([base()]).details.sources).toBe(planSourcesKey([base()]));
+  });
+
+  it("a refresh counts what is already done against today's time", () => {
+    const done: DailyStudyPlanItem = {
+      ...plan([base()]).items[0],
+      id: "task:elsewhere",
+      completed: true,
+      minutes: 50,
+    };
+    const fresh = plan([base()], { dailyMinutes: 60, current: { items: [done] } });
+    const refreshed = plan([base()], { dailyMinutes: 60, current: { items: [done] }, refresh: true });
+    const open = (items: DailyStudyPlanItem[]) =>
+      items.filter((i) => !i.completed).reduce((sum, i) => sum + i.minutes, 0);
+    expect(open(fresh.items)).toBeGreaterThan(10);
+    expect(open(refreshed.items)).toBeLessThanOrEqual(10);
+    expect(refreshed.items.find((i) => i.id === "task:elsewhere")).toMatchObject({ completed: true });
+  });
+
+  it("shows nothing from workspaces that are not in the list", () => {
+    const items = plan([base(), workspace({ id: "ws-2", pages: [trackerPage()], databases: [assignments([{ id: "x", title: "Old", due: TODAY }])] })]).items;
+    expect(items.some((i) => i.target.workspaceId === "ws-2")).toBe(true);
+    expect(visiblePlanItems(items, [base()]).every((i) => i.target.workspaceId === "ws-1")).toBe(true);
+  });
+});
+
+describe("planner: due reviews share the day with deadlines (QA round 2)", () => {
+  const hwDueTomorrow = () =>
+    workspace({
+      pages: [trackerPage()],
+      databases: [assignments([{ id: "hw9", title: "Homework 9 (eigenvalues)", due: addDays(TODAY, 1), weight: 10 }])],
+    });
+  const deckPage = (cards: Flashcard[]): Page => ({
+    id: "kit",
+    title: "Lecture 7 kit",
+    blocks: [{ id: "deck", type: "flashcards", title: "Lecture 7 cards", cards }],
+  });
+
+  it("a one-hour day with homework due tomorrow and 20 new cards includes the cards", () => {
+    const ws = hwDueTomorrow();
+    ws.pages.push(deckPage(Array.from({ length: 20 }, (_, i) => card(`n${i}`))));
+    const result = plan([ws], { dailyMinutes: 60 });
+    const kinds = result.items.map((i) => i.kind);
+    expect(kinds).toContain("deadline");
+    expect(kinds).toContain("flashcards");
+    // The homework still comes first.
+    expect(result.items[0].kind).toBe("deadline");
+    expect(result.items[0].startHere).toBe(true);
+    const total = result.items.reduce((sum, i) => sum + i.minutes, 0);
+    expect(total).toBeLessThanOrEqual(60);
+    expect(total).toBeGreaterThanOrEqual(55);
+  });
+
+  it("a one-hour day with 60 reviews due holds about a third of the day for them", () => {
+    const ws = hwDueTomorrow();
+    ws.pages.push(deckPage(Array.from({ length: 60 }, (_, i) => reviewed(`r${i}`, TODAY))));
+    const result = plan([ws], { dailyMinutes: 60 });
+    const deck = result.items.find((i) => i.kind === "flashcards")!;
+    expect(deck).toBeDefined();
+    expect(deck.minutes).toBeGreaterThanOrEqual(10);
+    expect(deck.minutes).toBeLessThanOrEqual(20);
+    expect(deck.reason.code).toBe("cards_due");
+    // Bounded and honest: the cards planned are what fits, and the rest are named.
+    expect(deck.dueCount).toBe(deck.reason.count);
+    expect(deck.dueCount!).toBeLessThan(60);
+    expect(deck.reason.readyCount).toBe(60);
+  });
+
+  it("a deck that fits completely carries no 'more waiting' count", () => {
+    const ws = workspace({ pages: [deckPage([reviewed("a", TODAY), reviewed("b", TODAY)])] });
+    const deck = plan([ws], { dailyMinutes: 60 }).items.find((i) => i.kind === "flashcards")!;
+    expect(deck.dueCount).toBe(2);
+    expect(deck.reason.readyCount).toBeUndefined();
+  });
+
+  it("a huge backlog is bounded to one session", () => {
+    const ws = workspace({ pages: [deckPage(Array.from({ length: 400 }, (_, i) => reviewed(`r${i}`, TODAY)))] });
+    const deck = plan([ws], { dailyMinutes: 240 }).items.find((i) => i.kind === "flashcards")!;
+    expect(deck.minutes).toBeLessThanOrEqual(30);
+    expect(deck.dueCount!).toBeLessThanOrEqual(50);
+    expect(deck.reason.readyCount).toBe(400);
+  });
+
+  it("very short days keep plain priority (the homework due tomorrow wins)", () => {
+    const ws = hwDueTomorrow();
+    ws.pages.push(deckPage(Array.from({ length: 24 }, (_, i) => reviewed(`r${i}`, TODAY))));
+    const result = plan([ws], { dailyMinutes: 15 });
+    expect(result.items[0].kind).toBe("deadline");
+  });
+
+  it("uses the time the student has: a session grows toward its remaining effort", () => {
+    const ws = workspace({
+      pages: [trackerPage()],
+      databases: [assignments([{ id: "proj", title: "Research essay", due: addDays(TODAY, 6), weight: 10 }])],
+    });
+    const result = plan([ws], { dailyMinutes: 90 });
+    const project = result.items.find((i) => i.kind === "deadline")!;
+    const spread = plan([ws], { dailyMinutes: 15 }).items[0];
+    expect(project.minutes).toBeGreaterThan(spread.minutes);
+    expect(project.minutes).toBeLessThanOrEqual(90);
+    expect(project.minutes).toBeLessThanOrEqual(project.reason.effortMinutes ?? 0);
+  });
+});
+
+describe("planner: exam countdowns and the heads-up (QA round 2)", () => {
+  function examsDb(): Database {
+    return {
+      id: "exams",
+      name: "Exams",
+      properties: [
+        { id: "title", name: "Name", type: "text" },
+        { id: "due", name: "Date", type: "date" },
+        {
+          id: "course",
+          name: "Course",
+          type: "select",
+          options: [
+            { id: "math", label: "MATH 221" },
+            { id: "chem", label: "CHEM 210" },
+          ],
+        },
+        { id: "type", name: "Type", type: "select", options: [{ id: "exam", label: "Exam" }] },
+      ],
+      rows: [
+        { id: "f1", cells: { title: "Final exam", due: addDays(TODAY, 29), course: "math", type: "exam" } },
+        { id: "f2", cells: { title: "Final exam", due: addDays(TODAY, 34), course: "chem", type: "exam" } },
+        { id: "m2", cells: { title: "CHEM 210 Midterm 2", due: addDays(TODAY, 21), course: "chem", type: "exam" } },
+      ],
+      views: [{ id: "t", name: "Table", type: "table" }],
+    };
+  }
+
+  it("names the course on each exam chip, unless the title already does", () => {
+    const { exams } = plan([workspace({ databases: [examsDb()] })]).details;
+    const byId = Object.fromEntries(exams.map((e) => [e.id.split(":").pop(), e]));
+    expect(byId.f1.course).toBe("MATH 221");
+    expect(byId.f2.course).toBe("CHEM 210");
+    expect(byId.m2.course).toBeUndefined();
+  });
+
+  it("an exam the heads-up says to start today is on the plan", () => {
+    const db = examsDb();
+    db.rows = [{ id: "mid", cells: { title: "Midterm", due: addDays(TODAY, 4), course: "math", type: "exam" } }];
+    const result = plan([workspace({ databases: [db] })], { dailyMinutes: 15 });
+    const workload = result.details.workload;
+    if (workload?.overloaded) {
+      for (const title of workload.startToday) {
+        expect(result.items.some((i) => i.title === title || i.reason.examTitle === title)).toBe(true);
+      }
+    }
+    expect(result.items.length).toBeGreaterThan(0);
+  });
+});
+
+describe("visiblePlanDetails (QA round 2: Today contradicted itself after a trash)", () => {
+  it("keeps a plan built from these workspaces as it is, and strips a stale one", async () => {
+    const { visiblePlanDetails } = await import("./planner");
+    const kept = workspace({ id: "ws-1", pages: [trackerPage()], databases: [assignments([{ id: "m", title: "Midterm", due: addDays(TODAY, 4), type: "exam" }])] });
+    const trashed = workspace({ id: "ws-2", pages: [trackerPage()], databases: [assignments([{ id: "f", title: "Final exam", due: addDays(TODAY, 9), type: "exam" }, { id: "h", title: "Huge project", due: addDays(TODAY, 3), weight: 20 }])] });
+    const built = plan([kept, trashed], { dailyMinutes: 15 });
+    expect(built.details.exams.some((e) => e.target.workspaceId === "ws-2")).toBe(true);
+    expect(visiblePlanDetails(built.details, [kept, trashed])).toBe(built.details);
+    const shown = visiblePlanDetails(built.details, [kept]);
+    expect(shown.exams.every((e) => e.target.workspaceId === "ws-1")).toBe(true);
+    expect(shown.workload).toBeNull();
   });
 });

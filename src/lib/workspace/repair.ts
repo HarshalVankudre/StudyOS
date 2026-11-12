@@ -40,6 +40,10 @@ import {
   databaseSchema,
   databaseViewSchema,
   flashcardSchema,
+  gradeCategorySchema,
+  gradingSchemeSchema,
+  MAX_GRADE_ASSIGNMENTS,
+  MAX_GRADE_CATEGORIES,
   pageSchema,
   safeParseWorkspace,
   selectOptionSchema,
@@ -451,9 +455,42 @@ class Repairer {
           this.list(v, (p, j) => this.property(p, `${label} property ${j}`)),
         rows: (v) => this.list(v, (r, j) => this.row(r, `${label} row ${j}`)),
         views: (v) => this.list(v, (w, j) => this.view(w, `${label} view ${j}`)),
+        grading: (v) => this.grading(v, `${label} grading`),
       },
       label,
     );
+  }
+
+  /**
+   * A grading scheme: a damaged category is dropped on its own, as is a
+   * damaged hand assignment; a scheme left with nothing is removed.
+   */
+  grading(raw: unknown, label: string) {
+    if (!isObj(raw)) return undefined;
+    const categories = this.list(raw.categories, (c, j) => {
+      const parsed = gradeCategorySchema.safeParse(c);
+      if (parsed.success) return parsed.data;
+      this.note(`dropped ${label} category ${j}`);
+      return null;
+    }).slice(0, MAX_GRADE_CATEGORIES);
+    const assign = isObj(raw.assign)
+      ? Object.fromEntries(
+          Object.entries(raw.assign)
+            .filter(([, id]) => typeof id === "string" && id.length <= 100)
+            .slice(0, MAX_GRADE_ASSIGNMENTS),
+        )
+      : undefined;
+    const keptRows = Array.isArray(raw.keptRows)
+      ? raw.keptRows.filter((id): id is string => typeof id === "string" && id.length <= 200).slice(0, MAX_GRADE_ASSIGNMENTS)
+      : undefined;
+    const scheme = {
+      categories,
+      ...(assign && Object.keys(assign).length > 0 ? { assign } : {}),
+      ...(keptRows && keptRows.length > 0 ? { keptRows } : {}),
+    };
+    const parsed = gradingSchemeSchema.safeParse(scheme);
+    if (!parsed.success || (categories.length === 0 && !scheme.assign && !scheme.keptRows)) return undefined;
+    return parsed.data;
   }
 
   property(raw: unknown, label: string) {
@@ -601,9 +638,79 @@ function restoreUnknownKeys(schema: z.ZodType, raw: unknown, out: unknown): void
 }
 
 /**
+ * Fields `into` lost that `from` had and this version of the schema does not
+ * know (pages, blocks, rows... paired by id). For a result that went through
+ * schema parsing, which drops unknown keys: the AI agent's workspace is
+ * parsed before it is applied, and without this every agent change would
+ * delete fields a newer version of the app wrote. Mutates and returns `into`.
+ */
+export function keepUnknownFields<T>(from: unknown, into: T): T {
+  restoreUnknownKeys(workspaceSchema, from, into);
+  return into;
+}
+
+type IdList = { id: string }[];
+
+/** Every list whose items are addressed by id (ids must be unique in each). */
+function idLists(ws: Workspace): IdList[] {
+  const out: IdList[] = [ws.pages, ws.databases];
+  for (const page of ws.pages) {
+    out.push(page.blocks);
+    for (const block of page.blocks) {
+      if (block.type === "flashcards") out.push(block.cards);
+      else if (block.type === "quiz") out.push(block.questions);
+    }
+  }
+  for (const db of ws.databases) {
+    out.push(db.properties, db.rows, db.views);
+    for (const prop of db.properties) if (prop.options) out.push(prop.options);
+  }
+  return out;
+}
+
+function hasDuplicateIds(ws: Workspace): boolean {
+  for (const list of idLists(ws)) {
+    if (list.length < 2) continue;
+    const seen = new Set<string>();
+    for (const item of list) {
+      if (seen.has(item.id)) return true;
+      seen.add(item.id);
+    }
+  }
+  return false;
+}
+
+/**
+ * Give the second and later items sharing an id in a list a new id of their
+ * own ("x~2", "x~3"...), the same on every load. Two items with one id make
+ * every edit to either ambiguous (the sync engine then has to treat the whole
+ * list as one value). Mutates `ws`.
+ */
+function renameDuplicateIds(ws: Workspace, note: (message: string) => void): void {
+  for (const list of idLists(ws)) {
+    if (list.length < 2) continue;
+    const used = new Set(list.map((item) => item.id));
+    const seen = new Set<string>();
+    for (const item of list) {
+      if (!seen.has(item.id)) {
+        seen.add(item.id);
+        continue;
+      }
+      let n = 2;
+      while (used.has(`${item.id}~${n}`)) n += 1;
+      const fresh = `${item.id}~${n}`;
+      note(`renamed a duplicate id ${item.id} to ${fresh}`);
+      used.add(fresh);
+      seen.add(fresh);
+      item.id = fresh;
+    }
+  }
+}
+
+/**
  * Recover a workspace from stored JSON. Returns null only when the input is
  * not a workspace at all (not an object). The result always passes the strict
- * schema.
+ * schema, and no list in it holds an id twice.
  *
  * A document that already passes is returned as it is (same object, same key
  * order, fields this version does not know kept), so loading and saving a
@@ -616,7 +723,13 @@ export function repairWorkspace(
   options: RepairOptions = {},
 ): RepairResult | null {
   const strict = safeParseWorkspace(input);
-  if (strict.success) return { workspace: input as Workspace, issues: [] };
+  if (strict.success) {
+    if (!hasDuplicateIds(input as Workspace)) return { workspace: input as Workspace, issues: [] };
+    const copy = structuredClone(input) as Workspace;
+    const issues: string[] = [];
+    renameDuplicateIds(copy, (m) => issues.length < 50 && issues.push(m));
+    return { workspace: copy, issues };
+  }
   if (!isObj(input)) return null;
 
   const r = new Repairer();
@@ -643,6 +756,7 @@ export function repairWorkspace(
   const final = safeParseWorkspace(workspace);
   if (!final.success) return null;
   restoreUnknownKeys(workspaceSchema, input, final.data);
+  renameDuplicateIds(final.data, (m) => r.note(m));
   return { workspace: final.data, issues: r.issues };
 }
 

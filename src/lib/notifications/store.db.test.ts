@@ -115,4 +115,21 @@ describe.skipIf(!enabled)("notifications store on Postgres", () => {
     pref = await prisma.notificationPreference.findUnique({ where: { userId } });
     expect(pref?.nextCheckAt).toBeNull();
   });
+
+  it("never moves a device record from one student to another", async () => {
+    const prisma = await db();
+    const service = await import("./service");
+    const first = user("ownerA");
+    const second = user("ownerB");
+    const endpoint = `https://fcm.googleapis.com/fcm/send/${run}-shared`;
+    const sub = { ok: true as const, endpoint, p256dh: "p", auth: "a" };
+    expect(await service.addPushSubscription(first, sub, { label: "Chrome" })).toBe("added");
+    // Refreshing one's own device is fine, also from parallel requests.
+    const again = await Promise.all([1, 2, 3].map(() => service.addPushSubscription(first, sub, { label: "Chrome" })));
+    expect(again).toEqual(["added", "added", "added"]);
+    expect(await service.addPushSubscription(second, { ...sub, p256dh: "q" }, { label: "Chrome" })).toBe("taken");
+    const rows = await prisma.pushSubscription.findMany({ where: { userId: { in: [first, second] } } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ userId: first, p256dh: "p" });
+  });
 });

@@ -10,7 +10,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import type { FeedMapping } from "./mapping";
 import type { FeedPlatform } from "./normalize";
-import { feedUrlHash, openFeedUrl, sealFeedUrl } from "./secret";
+import { FeedKeyMissingError, feedLinksAvailable, feedUrlHash, needsReseal, openFeedUrl, sealFeedUrl } from "./secret";
 import {
   MAX_FEEDS_PER_WORKSPACE,
   MAX_SEEN_KEYS,
@@ -154,17 +154,27 @@ export async function connectFeed(input: {
   mapping: Partial<FeedMapping>;
   series: string[];
 }): Promise<{ ok: true; feed: FeedInfo } | { ok: false; error: FeedErrorCode }> {
+  // Production without FEED_URL_KEY: connecting links is switched off.
+  if (!feedLinksAvailable()) return { ok: false, error: "links_unavailable" };
   const count = await prisma.calendarFeed.count({ where: { userId: input.userId, workspaceId: input.workspaceId } });
   if (count >= MAX_FEEDS_PER_WORKSPACE) return { ok: false, error: "too_many_feeds" };
   if (await findFeedByUrl(input.userId, input.workspaceId, input.url)) return { ok: false, error: "already_connected" };
   const settings: StoredSettings = { mapping: input.mapping, series: input.series.slice(0, MAX_SERIES) };
+  let urlSealed: string;
+  try {
+    urlSealed = sealFeedUrl(input.url);
+  } catch (error) {
+    // Production without FEED_URL_KEY: never store the link unencrypted.
+    if (error instanceof FeedKeyMissingError) return { ok: false, error: "links_unavailable" };
+    throw error;
+  }
   try {
     const row = await prisma.calendarFeed.create({
       data: {
         userId: input.userId,
         workspaceId: input.workspaceId,
         databaseId: input.databaseId,
-        urlSealed: sealFeedUrl(input.url),
+        urlSealed,
         urlHash: feedUrlHash(input.url),
         label: feedLabel(input.url).slice(0, 200),
         platform: input.platform,
@@ -182,7 +192,7 @@ export async function connectFeed(input: {
 
 export type ClaimResult =
   | { ok: true; url: string; databaseId: string; seen: string[]; series: string[]; mapping: Partial<FeedMapping> | null }
-  | { ok: false; error: "not_found" | "busy" | "fresh" | "reconnect" };
+  | { ok: false; error: "not_found" | "busy" | "fresh" | "reconnect" | "links_unavailable" };
 
 /**
  * Take the feed for one sync. `auto` (on open) only proceeds when the last
@@ -224,9 +234,22 @@ export async function claimFeedForSync(
   });
   if (!row) return { ok: false, error: "not_found" };
   const url = openFeedUrl(row.urlSealed);
+  if (!url && !feedLinksAvailable()) {
+    // The key is missing, not wrong: pause (the link opens again once it is
+    // set) instead of asking the student to reconnect.
+    await releaseFeed(userId, feedId, "links_unavailable");
+    return { ok: false, error: "links_unavailable" };
+  }
   if (!url) {
     await releaseFeed(userId, feedId, "reconnect");
     return { ok: false, error: "reconnect" };
+  }
+  // A link stored merely encoded (before FEED_URL_KEY was set) is sealed now.
+  if (needsReseal(row.urlSealed)) {
+    await prisma.calendarFeed.updateMany({
+      where: { id: feedId, userId, urlSealed: row.urlSealed },
+      data: { urlSealed: sealFeedUrl(url) },
+    });
   }
   const settings = parseSettings(row.settings);
   return {

@@ -102,7 +102,8 @@ describe("budget enforcement and graceful stop", () => {
     expect(result.changed).toBe(true);
     expect(result.workspace?.pages[0].title).toBe("Dashboard");
     expect(result.stopReason).toBe("budget");
-    expect(result.reply).toMatch(/kept the 1 change/);
+    // One change reads as a singular (no "the 1 change").
+    expect(result.reply).toMatch(/kept the change I had already made/);
     expect(result.changeNote).toContain("update page [p1]");
     expect(usage.costUsd!).toBeLessThanOrEqual(0.05);
     // Far fewer calls than the 40 step allowance: the money ran out first.

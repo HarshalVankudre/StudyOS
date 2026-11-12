@@ -110,6 +110,14 @@ export function createPushChannel(options: PushChannelOptions): NotificationChan
             await subscriptions.succeeded(sub.id, now());
           } else if (outcome.kind === "gone") {
             await subscriptions.remove(sub.id);
+          } else if (outcome.kind === "too_large") {
+            // The message was too big, not the device's fault: keep it, and
+            // do not count a rejection (pushPayload keeps messages in budget).
+            reportError(new Error("push payload too large"), {
+              source: "notifications.push",
+              userId,
+              status: outcome.status,
+            });
           } else if (outcome.kind === "rejected") {
             const count = await subscriptions.rejected(sub.id);
             if (count >= MAX_REJECTIONS) await subscriptions.remove(sub.id);

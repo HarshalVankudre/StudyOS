@@ -230,7 +230,7 @@ describe("table", () => {
     renderDb(assignments());
     const header = screen.getByRole("columnheader", { name: "Assignment" });
     expect(header.className).toMatch(/\bsticky\b/);
-    expect(header.className).toMatch(/min-w-52/);
+    expect(header.className).toMatch(/min-w-48/);
     expect(screen.getByTestId("table-scroll").className).toMatch(/overflow-x-auto/);
   });
 
@@ -371,14 +371,76 @@ describe("fields panel", () => {
     await user.click(screen.getByRole("button", { name: "Fields" }));
     const panel = screen.getByRole("region", { name: "Fields" });
     await user.click(within(panel).getByRole("checkbox", { name: "Link" }));
-    expect(db0().views[0].visiblePropertyIds).toEqual(["name", "course", "status", "due", "weight"]);
+    expect(db0().views[0].visiblePropertyIds).toEqual(["name", "due", "status", "course", "weight"]);
     expect(screen.queryByRole("columnheader", { name: "Link" })).toBeNull();
     await user.click(within(panel).getByRole("button", { name: "Move Weight up" }));
-    expect(db0().views[0].visiblePropertyIds).toEqual(["name", "course", "status", "weight", "due"]);
+    expect(db0().views[0].visiblePropertyIds).toEqual(["name", "due", "status", "weight", "course"]);
     const headers = screen.getAllByRole("columnheader").map((h) => h.textContent);
-    expect(headers.slice(1, -1)).toEqual(["Assignment", "Course", "Status", "Weight", "Due"]);
+    expect(headers.slice(1, -1)).toEqual(["Assignment", "Due", "Status", "Weight", "Course"]);
     await user.click(within(panel).getByRole("checkbox", { name: "Link" }));
-    expect(db0().views[0].visiblePropertyIds).toEqual(["name", "course", "status", "weight", "due", "link"]);
+    expect(db0().views[0].visiblePropertyIds).toEqual(["name", "due", "status", "weight", "course", "link"]);
+  });
+
+  it("puts the due date and status next to the title when the view has no order of its own", () => {
+    renderDb(assignments());
+    const headers = screen.getAllByRole("columnheader").map((h) => h.textContent);
+    expect(headers.slice(1, 4)).toEqual(["Assignment", "Due", "Status"]);
+    // The database's own field order is untouched.
+    expect(db0().properties.map((p) => p.id)).toEqual(["name", "course", "status", "due", "weight", "link"]);
+  });
+});
+
+describe("database name label", () => {
+  function renderOnPage(pageTitle: string) {
+    latest = {
+      id: "w",
+      name: "W",
+      pages: [{ id: "p", title: pageTitle, blocks: [{ id: "b", type: "database_view", databaseId: "db", viewId: "v" }] }],
+      databases: [assignments()],
+    };
+    function OnPage() {
+      const [workspace, setWorkspace] = useState(latest);
+      const update = useCallback((mutator: (draft: Workspace) => void) => {
+        setWorkspace((prev) => {
+          const next = structuredClone(prev);
+          mutator(next);
+          latest = next;
+          return next;
+        });
+      }, []);
+      return (
+        <I18nProvider locale="en" dictionary={en}>
+          <WorkspaceProvider
+            value={{ workspace, update, status: "saved", rev: 0, agentBusy: false, setAgentBusy: () => {} }}
+          >
+            <DatabaseView databaseId="db" viewId="v" pageId="p" />
+          </WorkspaceProvider>
+        </I18nProvider>
+      );
+    }
+    return render(<OnPage />);
+  }
+
+  it("is hidden when it only repeats the page title, and can still be renamed in the settings", async () => {
+    const user = userEvent.setup();
+    renderOnPage("📝 assignments");
+    // Only the field inside "Customize fields & views" is left.
+    const [field, ...others] = screen.getAllByRole("textbox", { name: "Database name" });
+    expect(others).toHaveLength(0);
+    expect(field.closest("details")).not.toBeNull();
+    await user.click(screen.getByText(en.dbSettings.customize));
+    await user.clear(field);
+    await user.type(field, "Coursework");
+    expect(db0().name).toBe("Coursework");
+    // No longer the same as the title: the label is back.
+    expect(screen.getAllByRole("textbox", { name: "Database name" })).toHaveLength(2);
+  });
+
+  it("is shown when the database is named differently from the page", () => {
+    renderOnPage("Dashboard");
+    const [label] = screen.getAllByRole("textbox", { name: "Database name" });
+    expect(label.closest("details")).toBeNull();
+    expect(label).toHaveValue("Assignments");
   });
 });
 

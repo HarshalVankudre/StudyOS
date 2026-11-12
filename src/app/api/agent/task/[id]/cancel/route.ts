@@ -1,3 +1,4 @@
+import { rejectCrossSite } from "@/lib/http/same-origin";
 import { auth } from "@clerk/nextjs/server";
 import { abortActiveTask } from "@/lib/ai/tasks/cancellation";
 import { cancelTask, getTask } from "@/lib/ai/tasks/store";
@@ -9,7 +10,9 @@ export const runtime = "nodejs";
 type Props = { params: Promise<{ id: string }> };
 
 /** Cancel a running, owner-scoped task; the route refuses to apply afterwards. */
-export async function POST(_request: Request, { params }: Props) {
+export async function POST(request: Request, { params }: Props) {
+  const crossSite = rejectCrossSite(request);
+  if (crossSite) return crossSite;
   const T = getDictionary(await getLocale());
   const { userId } = await auth();
   if (!userId) {

@@ -9,6 +9,7 @@ const m = vi.hoisted(() => ({
   usageCreate: vi.fn(),
   workspaceCount: vi.fn(),
   subFindUnique: vi.fn(),
+  configFindUnique: vi.fn(),
 }));
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
@@ -31,6 +32,10 @@ vi.mock("@/lib/db", () => ({
     usageEvent: { count: m.usageCount, create: m.usageCreate },
     workspace: { count: m.workspaceCount },
     subscription: { findUnique: m.subFindUnique },
+    dailyStudyAgentConfig: { findUnique: m.configFindUnique },
+    // Usage limits count and record under an advisory lock in a transaction.
+    $transaction: async (fn: (tx: unknown) => unknown) =>
+      fn({ $queryRaw: async () => [], usageEvent: { count: m.usageCount, create: m.usageCreate } }),
   },
 }));
 
@@ -38,6 +43,7 @@ import { duplicateWorkspaceAction, loadDemoAction } from "./actions";
 import { en } from "@/lib/i18n/dictionaries/en";
 import { fmt } from "@/lib/i18n/interpolate";
 import { MAX_WORKSPACES_PER_USER, USAGE_LIMITS } from "@/lib/usage-limits";
+import type { Workspace } from "@/lib/workspace/types";
 
 beforeEach(() => {
   m.auth.mockResolvedValue({ userId: "user_1" });
@@ -47,6 +53,7 @@ beforeEach(() => {
   m.usageCreate.mockResolvedValue({});
   m.workspaceCount.mockResolvedValue(3);
   m.subFindUnique.mockResolvedValue(null);
+  m.configFindUnique.mockResolvedValue(null);
 });
 
 describe("duplicateWorkspaceAction", () => {
@@ -94,5 +101,23 @@ describe("loadDemoAction", () => {
 
   it("opens the demo below the cap", async () => {
     await expect(loadDemoAction()).rejects.toMatchObject({ url: "/app/demo-1" });
+  });
+
+  it("dates the demo around the student's own today, so nothing starts out overdue", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    // 23:30 UTC on 12 November is already 13 November in Tokyo.
+    vi.setSystemTime(new Date("2026-11-12T23:30:00.000Z"));
+    try {
+      m.configFindUnique.mockResolvedValue({ timeZone: "Asia/Tokyo" });
+      await expect(loadDemoAction()).rejects.toMatchObject({ url: "/app/demo-1" });
+      const saved = m.saveNewWorkspace.mock.calls.at(-1)![0] as Workspace;
+      const due = saved.databases
+        .find((d) => d.id === "db-assignments")!
+        .rows.map((r) => r.cells["a-due"] as string);
+      expect(due).toContain("2026-11-17"); // Problem Set 3: four days after the 13th
+      expect(m.configFindUnique).toHaveBeenCalledWith({ where: { userId: "user_1" }, select: { timeZone: true } });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

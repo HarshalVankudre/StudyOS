@@ -295,7 +295,7 @@ export function docxXmlToText(xml, maxChars) {
  * with nothing but whitespace between them count once: Word often records a
  * hard page break and the rendered break right after it.
  */
-function splitDocxPages(text) {
+function splitDocxPages(text, maxPages = Infinity) {
   const pages = text.split("\f");
   const out = [];
   for (const page of pages) {
@@ -304,6 +304,29 @@ function splitDocxPages(text) {
   }
   // A leading break (document starting on a new page) leaves an empty first page.
   if (out.length > 1 && out[0].trim() === "") out.shift();
+  return packPages(out, maxPages);
+}
+
+/**
+ * At most `maxPages` pages: a document with more (a .docx of thousands of
+ * one-character pages, from rendered page breaks it declares itself) has
+ * consecutive pages joined into groups of equal count, so no text is lost
+ * and the page count never depends on what the file claims. Linear.
+ */
+export function packPages(pages, maxPages) {
+  const max = Math.max(1, Math.floor(maxPages));
+  if (!(pages.length > max)) return pages;
+  const group = Math.ceil(pages.length / max);
+  const out = [];
+  for (let i = 0; i < pages.length; i += group) {
+    out.push(
+      pages
+        .slice(i, i + group)
+        .map((page) => page.trim())
+        .filter(Boolean)
+        .join("\n\n"),
+    );
+  }
   return out;
 }
 
@@ -542,7 +565,10 @@ const STAGES = {
  * null when /Filter is there but not written as names (an indirect
  * reference PDF.js would resolve).
  */
-function streamFilters(dictionary) {
+function streamFilters(rawDictionary) {
+  // PDF names may spell any character as #xx ("/Fl#61teDecode" is
+  // FlateDecode to PDF.js, "/F#69lter" is /Filter): decode before matching.
+  const dictionary = decodeNameEscapes(rawDictionary);
   const at = dictionary.lastIndexOf("/Filter");
   if (at === -1) return [];
   const rest = dictionary.slice(at + 7, at + 7 + 600);
@@ -551,6 +577,16 @@ function streamFilters(dictionary) {
   const names = match[1].match(/\/[A-Za-z0-9#]{1,64}/g) ?? [];
   if (match[1].startsWith("[") && /\bR\b/.test(match[1])) return null;
   return names.map((name) => name.slice(1));
+}
+
+/**
+ * Replace the #xx escapes PDF allows inside names with the characters they
+ * stand for. Applied to a whole (bounded) dictionary window: an escape-like
+ * sequence inside a string only makes the check stricter, never looser.
+ */
+function decodeNameEscapes(text) {
+  if (!text.includes("#")) return text;
+  return text.replace(/#([0-9A-Fa-f]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
 }
 
 /** True when `data` starts with a zlib header PDF.js's FlateStream accepts. */
@@ -649,6 +685,52 @@ export function assertPdfStreamsBounded(bytes, maxBytes) {
 // PDF text
 // ---------------------------------------------------------------------------
 
+/**
+ * A page's text, read as PDF.js produces it (streamTextContent, in chunks)
+ * and stopped as soon as `maxChars` characters are in hand or the deadline
+ * passes: cancelling the stream stops PDF.js from evaluating the rest of
+ * the page's content. getTextContent would build every item of the page
+ * first (a 58 KB PDF drawing one form 5,000 times took 19 s and 625 MB).
+ */
+async function readPageText(page, maxChars, deadline) {
+  const reader = page.streamTextContent().getReader();
+  const parts = [];
+  let length = 0;
+  let stopped = false;
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      for (const item of value?.items ?? []) {
+        const text = (item.str ?? "") + (item.hasEOL ? "\n" : "");
+        if (!text) continue;
+        parts.push(text);
+        length += text.length;
+        if (length >= maxChars) break;
+      }
+      if (length >= maxChars) {
+        stopped = true;
+        break;
+      }
+      if (Date.now() > deadline) {
+        stopped = true;
+        throw new ExtractError("timeout");
+      }
+    }
+  } finally {
+    if (stopped) await reader.cancel(new Error("page text cap reached")).catch(() => {});
+    else {
+      try {
+        reader.releaseLock();
+      } catch {
+        // Already released.
+      }
+    }
+  }
+  const text = parts.join("");
+  return text.length > maxChars ? text.slice(0, maxChars) : text;
+}
+
 async function extractPdf(bytes, deadline, limits) {
   if (!limits.skipPdfPrecheck) assertPdfStreamsBounded(bytes, limits.maxPdfInflatedBytes);
 
@@ -685,17 +767,17 @@ async function extractPdf(bytes, deadline, limits) {
     const readPages = Math.min(pages, limits.maxPdfPages);
     const parts = [];
     let length = 0;
+    const maxTotal = limits.maxChars * 2;
     for (let number = 1; number <= readPages; number += 1) {
       if (Date.now() > deadline) throw new ExtractError("timeout");
       const page = await document.getPage(number);
-      const content = await page.getTextContent();
-      const pageText = content.items
-        .map((item) => (item.str ?? "") + (item.hasEOL ? "\n" : ""))
-        .join("");
+      // Never more than the room left: a page that draws one form thousands
+      // of times is cut at the cap instead of being built whole first.
+      const pageText = await readPageText(page, Math.max(1, maxTotal - length), deadline);
       page.cleanup();
       parts.push(pageText);
       length += pageText.length;
-      if (length > limits.maxChars * 2) break;
+      if (length >= maxTotal) break;
     }
     return { pageTexts: parts, pages, pagesRead: readPages, pagesTruncated: pages > readPages };
   })();
@@ -727,7 +809,11 @@ async function extractRaw(bytes, fileName, mimeType, limits) {
   if (kind === "docx") {
     const xml = readZipEntry(bytes, "word/document.xml", limits.maxDocxXmlBytes);
     if (xml === null) throw new ExtractError("unreadable", "no word/document.xml");
-    const pages = splitDocxPages(docxXmlToText(new TextDecoder("utf-8").decode(xml), limits.maxChars));
+    // The page cap applies to every format (PDF reads at most maxPdfPages).
+    const pages = splitDocxPages(
+      docxXmlToText(new TextDecoder("utf-8").decode(xml), limits.maxChars),
+      limits.maxPdfPages,
+    );
     return { kind, pages, paginated: pages.length > 1, pdfInfo: {} };
   }
   return { kind, pages: [decodeText(bytes)], paginated: false, pdfInfo: {} };

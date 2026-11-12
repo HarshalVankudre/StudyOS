@@ -1,3 +1,4 @@
+import { isSameOriginRequest } from "@/lib/http/same-origin";
 import { clientAddress } from "@/lib/ops/client-ip";
 import { reportError } from "@/lib/ops/report-error";
 import { createMemoryRateLimiter } from "@/lib/ops/memory-rate-limit";
@@ -21,15 +22,7 @@ const str = (v: unknown, max: number) =>
  * caller ignores every response, so nothing is retried or surfaced.
  */
 export async function POST(req: Request) {
-  const origin = req.headers.get("origin");
-  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
-  if (origin && host) {
-    try {
-      if (new URL(origin).host !== host) return new Response(null, { status: 403 });
-    } catch {
-      return new Response(null, { status: 403 });
-    }
-  }
+  if (!isSameOriginRequest(req)) return new Response(null, { status: 403 });
 
   // The entry our own proxies appended (see lib/ops/client-ip); earlier
   // entries are client-supplied and could be forged to dodge the limit.

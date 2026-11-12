@@ -23,7 +23,8 @@ vi.mock("./actions", () => ({
 vi.mock("@/lib/i18n/client", async () => {
   const { en } = await import("@/lib/i18n/dictionaries/en");
   const { fmt } = await import("@/lib/i18n/interpolate");
-  return { useI18n: () => ({ dict: en, t: fmt, dir: "ltr", locale: "en" }) };
+  const { pluralizer } = await import("@/lib/i18n/plural");
+  return { useI18n: () => ({ dict: en, t: fmt, plural: pluralizer("en"), dir: "ltr", locale: "en" }) };
 });
 
 if (!window.matchMedia) {
@@ -64,7 +65,7 @@ describe("TrashList", () => {
   it("restores a workspace", async () => {
     const user = userEvent.setup();
     render(<TrashList items={items} />);
-    await user.click(screen.getByText("Trash (1)"));
+    await user.click(screen.getByText("Trash (1 workspace)"));
     await user.click(screen.getByRole("button", { name: "Restore Fall semester" }));
     await waitFor(() => expect(mocks.restoreWorkspaceAction).toHaveBeenCalledWith("w1"));
     await waitFor(() => expect(mocks.refresh).toHaveBeenCalled());
@@ -74,7 +75,7 @@ describe("TrashList", () => {
     const user = userEvent.setup();
     const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false);
     render(<TrashList items={items} />);
-    await user.click(screen.getByText("Trash (1)"));
+    await user.click(screen.getByText("Trash (1 workspace)"));
     const button = screen.getByRole("button", { name: "Delete Fall semester forever" });
 
     await user.click(button);

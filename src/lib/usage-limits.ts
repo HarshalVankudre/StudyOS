@@ -5,11 +5,12 @@
  * FAST anyone can spend (abuse, runaway clients, cost spikes). Counts live in
  * the database (UsageEvent), so limits hold across serverless instances.
  *
- * The check is count-then-insert without a transaction: two racing requests
- * can each pass at the boundary. That's fine — the limit is a throttle, not a
- * ledger, and being off by one request is harmless.
+ * The check counts and records in one transaction holding a per-user,
+ * per-kind advisory lock (lib/db-lock), so parallel requests cannot all pass
+ * at the boundary: each sees the events the others recorded.
  */
 import { prisma } from "@/lib/db";
+import { userLockKey, withKeyLock } from "@/lib/db-lock";
 
 export type LimitedKind =
   | "generate"
@@ -23,7 +24,8 @@ export type LimitedKind =
   | "generate_failed"
   | "study_kit_failed"
   | "workspace_duplicate"
-  | "syllabus_upload";
+  | "syllabus_upload"
+  | "daily_plan";
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
@@ -66,6 +68,9 @@ export const USAGE_LIMITS: Record<
   // Syllabus file uploads (POST /api/import/syllabus): each starts a capped
   // extraction process. A student uploads a handful; retries fit easily.
   syllabus_upload: { free: 20, pro: 60, windowMs: HOUR },
+  // "Plan my day" / "Rebuild from today": no model call, but each one loads
+  // and plans across every workspace the student owns.
+  daily_plan: { free: 30, pro: 30, windowMs: HOUR },
 };
 
 /**
@@ -91,9 +96,9 @@ async function isProUser(userId: string): Promise<boolean> {
 
 /**
  * Enforce a usage limit: returns { allowed: true } and records the event, or
- * { allowed: false } when the window is exhausted. Never throws on DB hiccups
- * in the recording step — the action proceeds (fail-open keeps limits from
- * becoming an outage).
+ * { allowed: false } when the window is exhausted. Count and record happen
+ * atomically per user and kind, so N parallel requests at the boundary let
+ * exactly the remaining number through. Fails open when the database errors.
  */
 export async function checkUsageLimit(
   userId: string,
@@ -101,15 +106,35 @@ export async function checkUsageLimit(
 ): Promise<{ allowed: boolean; remaining: number }> {
   const cfg = USAGE_LIMITS[kind];
   const limit = (await isProUser(userId)) ? cfg.pro : cfg.free;
-  const since = new Date(Date.now() - cfg.windowMs);
-  const used = await prisma.usageEvent.count({
-    where: { userId, kind, createdAt: { gte: since } },
+  try {
+    return await claimWithinLimit(userId, kind, limit, cfg.windowMs);
+  } catch {
+    // Fail open on a database hiccup: the limit is a throttle, and an outage
+    // of it must not become an outage of the product. Credits still bound spend.
+    return { allowed: true, remaining: 0 };
+  }
+}
+
+/**
+ * Record one `kind` event for the user if fewer than `limit` were recorded in
+ * the last `windowMs`, atomically (see lib/db-lock). For limits that are not
+ * in USAGE_LIMITS (the agent's free-failure allowance, for one).
+ */
+export async function claimWithinLimit(
+  userId: string,
+  kind: string,
+  limit: number,
+  windowMs: number,
+): Promise<{ allowed: boolean; remaining: number }> {
+  return withKeyLock(userLockKey(`usage:${kind}`, userId), async (tx) => {
+    const since = new Date(Date.now() - windowMs);
+    const used = await tx.usageEvent.count({
+      where: { userId, kind, createdAt: { gte: since } },
+    });
+    if (used >= limit) return { allowed: false, remaining: 0 };
+    await tx.usageEvent.create({ data: { userId, kind } });
+    return { allowed: true, remaining: limit - used - 1 };
   });
-  if (used >= limit) return { allowed: false, remaining: 0 };
-  await prisma.usageEvent
-    .create({ data: { userId, kind } })
-    .catch(() => {});
-  return { allowed: true, remaining: limit - used - 1 };
 }
 
 /**
@@ -124,6 +149,40 @@ export async function isUsageLimitReached(userId: string, kind: LimitedKind): Pr
     where: { userId, kind, createdAt: { gte: new Date(Date.now() - cfg.windowMs) } },
   });
   return used >= limit;
+}
+
+/**
+ * For outcome limits (generate_failed, study_kit_failed): claim one slot of
+ * `kind` up front, before the work starts, and return its event id, or null
+ * when the window is already full. Counted and recorded atomically, so work
+ * in flight counts as a possible failure and parallel requests cannot all
+ * start past the quota. Withdraw the claim with releaseOutcomeSlot when the
+ * work ends any other way than the outcome being limited. Fails open.
+ */
+export async function claimOutcomeSlot(
+  userId: string,
+  kind: LimitedKind,
+): Promise<{ allowed: boolean; slot: string | null }> {
+  const cfg = USAGE_LIMITS[kind];
+  const limit = (await isProUser(userId)) ? cfg.pro : cfg.free;
+  try {
+    return await withKeyLock(userLockKey(`usage:${kind}`, userId), async (tx) => {
+      const used = await tx.usageEvent.count({
+        where: { userId, kind, createdAt: { gte: new Date(Date.now() - cfg.windowMs) } },
+      });
+      if (used >= limit) return { allowed: false, slot: null };
+      const row = await tx.usageEvent.create({ data: { userId, kind }, select: { id: true } });
+      return { allowed: true, slot: row.id };
+    });
+  } catch {
+    return { allowed: true, slot: null };
+  }
+}
+
+/** Withdraw a slot claimed with claimOutcomeSlot (the limited outcome did not happen). Never throws. */
+export async function releaseOutcomeSlot(slot: string | null): Promise<void> {
+  if (!slot) return;
+  await prisma.usageEvent.deleteMany({ where: { id: slot } }).catch(() => {});
 }
 
 /** Record one event of a limited kind. Never throws. */

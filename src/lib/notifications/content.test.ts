@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { LOCALES } from "@/lib/i18n/config";
-import { dailyPlanMessage, deadlineMessage, pushPayload, streakMessage, topicFor, type DeadlineReminder } from "./content";
+import {
+  PUSH_PAYLOAD_BUDGET,
+  dailyPlanMessage,
+  deadlineMessage,
+  pushPayload,
+  streakMessage,
+  topicFor,
+  type DeadlineReminder,
+} from "./content";
 import { deadlineRemindersFor } from "./reminders";
 import { MAX_PAYLOAD_BYTES } from "./webpush";
 import { planItem, semester } from "./test-fakes";
@@ -63,6 +71,26 @@ describe("notification text", () => {
     expect(m.body.length).toBeLessThanOrEqual(300);
     expect(Buffer.byteLength(pushPayload(m))).toBeLessThan(MAX_PAYLOAD_BYTES);
     expect(topicFor(m.tag)).toMatch(/^[A-Za-z0-9_-]{1,32}$/);
+  });
+
+  it("falls back to a short link when very long page or row ids would make it too big", () => {
+    const id = "😀".repeat(2_000);
+    const m = deadlineMessage(
+      { ...reminder, target: { workspaceId: id, pageId: id, databaseId: id, rowId: id } },
+      getDictionary("en"),
+      "en",
+    );
+    expect(m.url.length).toBeGreaterThan(PUSH_PAYLOAD_BUDGET);
+    const payload = pushPayload(m);
+    expect(Buffer.byteLength(payload)).toBeLessThanOrEqual(PUSH_PAYLOAD_BUDGET);
+    expect(JSON.parse(payload)).toMatchObject({ title: m.title, body: m.body, url: "/app" });
+    // A normal message keeps its deep link.
+    expect(JSON.parse(pushPayload(deadlineMessage(reminder, getDictionary("en"), "en"))).url).not.toBe("/app");
+  });
+
+  it("never exceeds the budget even for a message built by hand", () => {
+    const m = { ...deadlineMessage(reminder, getDictionary("en"), "en"), title: "😀".repeat(5_000), url: "/x".repeat(3_000) };
+    expect(Buffer.byteLength(pushPayload(m))).toBeLessThanOrEqual(PUSH_PAYLOAD_BUDGET);
   });
 });
 

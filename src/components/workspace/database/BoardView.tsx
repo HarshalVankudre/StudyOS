@@ -192,6 +192,7 @@ export function BoardView(props: ViewBodyProps) {
             )}
             <button
               type="button"
+              data-print="hide"
               onClick={() => onAdd(opt.id === NONE ? {} : { [groupProp.id]: opt.id })}
               className="mt-2 min-h-10 w-full rounded-md border border-dashed border-line px-3 py-2 text-start text-xs text-ink-faint transition hover:border-line-strong hover:text-ink-soft"
             >

@@ -3,8 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import { recordUsage, withUsageMeter } from "@/lib/ai/usage-meter";
 import { pageSchema } from "@/lib/workspace/schema";
 import { buildKitPage } from "./kit";
-import { planRun } from "./limits";
-import { KitCancelledError, KitFailedError, runStudyKit, shuffleChoices, type KitComplete } from "./pipeline";
+import { PAGE_MARKER_CHARS, planRun } from "./limits";
+import { FREE_FAILED_ATTEMPTS, KitCancelledError, KitFailedError, runStudyKit, shuffleChoices, type KitComplete } from "./pipeline";
 import type { KitEvent } from "./types";
 
 // Twelve pages, each with two distinct, quotable facts about a different subject.
@@ -19,7 +19,8 @@ const MATERIAL = { id: "mat-1", title: "Biochem lecture", pages: PAGES };
 const PLAN = planRun(
   PAGES.map(() => 2000),
   undefined,
-  { target: 8000 },
+  // 8,000 characters of text plus four page markers.
+  { target: 8000 + 4 * PAGE_MARKER_CHARS },
 );
 
 function pagesIn(user: string): number[] {
@@ -112,6 +113,22 @@ describe("runStudyKit", () => {
     expect(calls).toBe(2);
     expect(result.cards.length).toBeGreaterThan(0);
     expect(usage.promptTokens).toBe(1000);
+  });
+
+  it("bills failed attempts past the run's free allowance once the run delivers something", async () => {
+    // Sections 2 and 3 never give anything usable (two attempts each: four
+    // failed attempts); section 1 works. The first FREE_FAILED_ATTEMPTS are
+    // free, the rest are billed with the run.
+    const good = fakeModel({ usage: 1000 });
+    const complete: KitComplete = async (system, user, options) => {
+      if (pagesIn(user)[0] === 1) return good(system, user, options);
+      recordUsage({ prompt_tokens: 7000, completion_tokens: 0 });
+      return JSON.stringify({ cards: [{ front: "Q?", back: "A", page: 5, quote: "An invented sentence that is on no page at all" }] });
+    };
+    const { result, usage } = await withUsageMeter(() => runStudyKit({ ...base, complete, concurrency: 1 }));
+    expect(result.stats.failedSections).toBe(2);
+    const billedFailures = 4 - FREE_FAILED_ATTEMPTS;
+    expect(usage.promptTokens).toBe(1000 + billedFailures * 7000);
   });
 
   it("skips a section that keeps failing, reports its pages, and keeps the rest", async () => {

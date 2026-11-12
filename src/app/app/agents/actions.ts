@@ -1,5 +1,6 @@
 "use server";
 
+import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 import {
   runDailyStudyAgent,
@@ -7,6 +8,7 @@ import {
   updateDailyStudyAgentConfig,
   type SetItemResult,
 } from "@/lib/agents/daily-study/store";
+import { checkUsageLimit } from "@/lib/usage-limits";
 
 export async function ensureDailyStudyPlanAction(
   timeZone: string,
@@ -31,6 +33,11 @@ export async function rebuildTodayAction(input: {
   const minutes = typeof input?.minutes === "number" && Number.isFinite(input.minutes)
     ? input.minutes
     : undefined;
+  // A rebuild loads and plans across every workspace the student owns:
+  // throttled per user (generous for a person, a wall for a loop).
+  const { userId } = await auth();
+  if (!userId) return { ok: false };
+  if (!(await checkUsageLimit(userId, "daily_plan")).allowed) return { ok: false };
   try {
     await runDailyStudyAgent({
       trigger: "manual",

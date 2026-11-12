@@ -30,8 +30,10 @@ ARG NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL
 ARG NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL
 ARG NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
 # Not a secret: next.config.ts scopes the CSP img-src to this bucket's path
-# (headers are fixed at build time). Without it img-src allows the whole
-# storage.googleapis.com host.
+# (headers are fixed at build time). Without it img-src allows no storage
+# host at all; where assets are in use at runtime (ASSETS_BUCKET or
+# AGENT_SANDBOX) such an image still starts, with remote asset images and the
+# render sandbox switched off and a warning in the startup log (check-env.cjs).
 ARG ASSETS_BUCKET
 ENV ASSETS_BUCKET=$ASSETS_BUCKET
 ENV NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY \

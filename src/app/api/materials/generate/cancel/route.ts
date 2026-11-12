@@ -1,3 +1,4 @@
+import { rejectCrossSite } from "@/lib/http/same-origin";
 import { auth } from "@clerk/nextjs/server";
 import { z } from "zod";
 import { abortActiveTask } from "@/lib/ai/tasks/cancellation";
@@ -17,6 +18,8 @@ const requestSchema = z.object({
  * only ever cancel their own run.
  */
 export async function POST(request: Request) {
+  const crossSite = rejectCrossSite(request);
+  if (crossSite) return crossSite;
   const { userId } = await auth();
   if (!userId) return Response.json({ cancelled: false }, { status: 401 });
   if (!allowMaterialWrite(userId)) return Response.json({ cancelled: false }, { status: 429 });

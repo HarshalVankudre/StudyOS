@@ -25,7 +25,7 @@ import { MAX_SECTIONS_PER_RUN, SECTION_TARGET_CHARS } from "@/lib/materials/limi
 import { TURN_CREDIT_CAP } from "@/lib/ai/budgets";
 import { modelForPlan } from "@/lib/ai/plans";
 import { USAGE_LIMITS } from "@/lib/usage-limits";
-import { formatUsd, proPricing } from "@/lib/plan-pricing";
+import { formatPrice, formatUsd, getProPricing, type PriceAmount } from "@/lib/plan-pricing";
 import { supportEmail } from "@/lib/site";
 import {
   buyCreditsAction,
@@ -52,7 +52,7 @@ export default async function PricingPage({
   searchParams: Promise<{ billing?: string | string[] }>;
 }) {
   const billingNotice = parseBillingNotice((await searchParams).billing);
-  const { dict, t, locale } = await getI18n();
+  const { dict, t, locale, plural } = await getI18n();
   const P = dict.pricing;
   const { userId } = await auth();
   const signedIn = Boolean(userId);
@@ -60,8 +60,10 @@ export default async function PricingPage({
   const credits = userId ? await getCreditBalance(userId) : 0;
 
   const n = (value: number) => value.toLocaleString(locale);
-  const pricing = proPricing();
-  const monthlyPrice = formatUsd(pricing.monthlyUsd, locale);
+  // What Stripe charges, in its currency (lib/plan-pricing.ts).
+  const pricing = await getProPricing();
+  const price = (p: PriceAmount) => formatPrice(p.amount, p.currency, locale);
+  const monthlyPrice = price(pricing.monthly);
   const annual = pricing.annual;
   const email = supportEmail();
   const sameModel = modelForPlan("free") === modelForPlan("pro");
@@ -132,8 +134,8 @@ export default async function PricingPage({
       monthly: n(FREE_MONTHLY_CREDITS),
       email,
       count: n(PRO_MONTHLY_CREDITS),
-      total: annual ? formatUsd(annual.totalUsd, locale) : "",
-      perMonth: annual ? formatUsd(annual.perMonthUsd, locale) : "",
+      total: annual ? price(annual.total) : "",
+      perMonth: annual ? price(annual.perMonth) : "",
     }),
   }));
 
@@ -193,7 +195,7 @@ export default async function PricingPage({
               {P.free.name}
             </h2>
             <p className="mt-3.5 flex items-baseline gap-1 font-display text-5xl font-extrabold tracking-tight">
-              {formatUsd(0, locale)}
+              {formatPrice(0, pricing.monthly.currency, locale)}
               <span className="text-base font-medium text-ink-faint">{P.free.perMonth}</span>
             </p>
             <p className="mt-1.5 text-sm text-ink-soft">{P.free.tagline}</p>
@@ -243,15 +245,15 @@ export default async function PricingPage({
                   billedMonthly: P.pro.billedMonthly,
                   billedYearly: annual
                     ? t(P.pro.billedYearly, {
-                        total: formatUsd(annual.totalUsd, locale),
-                        perMonth: formatUsd(annual.perMonthUsd, locale),
+                        total: price(annual.total),
+                        perMonth: price(annual.perMonth),
                       })
                     : "",
                   upgrade: P.pro.upgrade,
                   signedOut: P.pro.ctaSignedOut,
                 }}
                 monthlyPrice={monthlyPrice}
-                annualPrice={annual ? formatUsd(annual.totalUsd, locale) : null}
+                annualPrice={annual ? price(annual.total) : null}
                 checkout={signedIn ? startCheckoutAction : null}
                 signUpHref={signUpForPro}
               />
@@ -329,7 +331,7 @@ export default async function PricingPage({
               {signedIn && (
                 <p className="mt-5 inline-flex items-center gap-2 rounded-full bg-hover px-3.5 py-1.5 text-sm font-semibold text-ink">
                   <span className="text-lime-deep" aria-hidden>●</span>
-                  {t(P.credits.balance, { count: n(credits) })}
+                  {plural(dict.counts.balance, credits)}
                 </p>
               )}
             </div>

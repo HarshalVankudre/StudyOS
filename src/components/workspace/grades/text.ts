@@ -16,11 +16,19 @@ import {
 type T = (template: string, vars?: Record<string, string | number>) => string;
 type G = Dictionary["grades"];
 
-/** "B+ (87%)" for a banded scale, "85%" for percentages. */
-export function targetText(target: number, scale: ScaleDefinition, locale: string): string {
+/**
+ * A target as the student chose it. A grade of the scale ("First", "B+",
+ * "1,7") is named with its own threshold: "First (70%)". A raw percentage is
+ * named as the percentage, with the grade it falls in only as information:
+ * "80% (a First on your scale)", never "First (80%)", which would claim the
+ * grade needs 80%. The arithmetic always uses the stored target itself.
+ */
+export function targetText(target: number, scale: ScaleDefinition, locale: string, g?: G, t?: T): string {
   const band = bandFor(target, scale);
-  if (!band || scale.display === "percent") return formatPercent(target, locale);
-  return `${bandName(band, scale, locale)} (${formatPercent(target, locale)})`;
+  if (!band || scale.display === "percent" || scale.bands.length === 0) return formatPercent(target, locale);
+  if (Math.abs(band.min - target) < 1e-9) return `${bandName(band, scale, locale)} (${formatPercent(band.min, locale)})`;
+  const percent = formatPercent(target, locale);
+  return g && t ? t(g.targetAside, { percent, grade: bandName(band, scale, locale) }) : percent;
 }
 
 /** "82.1% (B-)" or "82.1%". */
@@ -40,7 +48,7 @@ export function outlookText(
 ): string {
   const o = grade.outlook;
   if (target === null || !o) return grade.totalWeight > 0 ? g.outlook.pick : "";
-  const goal = targetText(target, scale, locale);
+  const goal = targetText(target, scale, locale, g, t);
   switch (o.kind) {
     case "needed":
       return grade.decidedWeight > 0
@@ -86,5 +94,7 @@ export function noteText(note: GradeNote, locale: string, g: G, t: T): string {
       return g.notes.extraCredit;
     case "invalid_max":
       return t(g.notes.invalidMax, { count: note.count });
+    case "uncategorized":
+      return t(g.notes.uncategorized, { count: note.count });
   }
 }

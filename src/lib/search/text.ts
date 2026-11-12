@@ -18,17 +18,45 @@ export function queryWords(query: string): string[] {
 }
 
 /**
+ * Most characters of one block, card side or cell that search reads. Search
+ * matches words and shows a short snippet, so a bounded prefix is enough, and
+ * it keeps indexing time proportional to this cap rather than to whatever a
+ * pasted or imported block happens to contain.
+ */
+export const MAX_SEARCH_TEXT = 4000;
+
+/** `text` cut to at most `max` characters, never splitting a surrogate pair. */
+export function clipText(text: string, max = MAX_SEARCH_TEXT): string {
+  if (text.length <= max) return text;
+  const code = text.charCodeAt(max - 1);
+  return text.slice(0, code >= 0xd800 && code <= 0xdbff ? max - 1 : max);
+}
+
+// Every pattern below runs in linear time on any input: no pattern has a
+// repeat that can rescan text another attempt already scanned. Bracketed
+// text stops at the next bracket, URLs stop at the next parenthesis or
+// whitespace, inline spans stop at the next marker or line end, and every
+// repeat is bounded. (The old patterns rescanned the rest of the text from
+// every "[" or "*", which made a long hostile paragraph take minutes.)
+const IMAGE = /!\[([^[\]\n]{0,300})\]\([^()\s]{0,1000}\)/g;
+const LINK = /\[([^[\]\n]{1,300})\]\([^()\s]{0,1000}\)/g;
+const CODE = /`{1,3}([^`\n]{0,500})`{1,3}/g;
+const EMPHASIS = /(\*\*|__|\*|_|~~)(?=[^\s*_~])([^*_~\n]{0,300}?[^\s*_~])\1/g;
+const BLOCK_PREFIX = /^[ \t]{0,3}(?:#{1,6}|>|[-*+]|\d{1,9}[.)])[ \t]+/gm;
+
+/**
  * Block text is Markdown with $math$. For search and snippets, reduce it to
  * what a person reads: link text without URLs, no emphasis markers, no
- * heading/list/quote prefixes, single spaces.
+ * heading/list/quote prefixes, single spaces. Reads at most `max` input
+ * characters (see MAX_SEARCH_TEXT).
  */
-export function plainText(markdown: string): string {
-  return markdown
-    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1") // images → alt
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1") // links → text
-    .replace(/`{1,3}([^`]*)`{1,3}/g, "$1") // code spans
-    .replace(/(\*\*|__|\*|_|~~)(?=\S)([^*_~]*?\S)\1/g, "$2") // emphasis
-    .replace(/^\s{0,3}(#{1,6}|>|[-*+]|\d+[.)])\s+/gm, "") // block prefixes
+export function plainText(markdown: string, max = MAX_SEARCH_TEXT): string {
+  return clipText(markdown, max)
+    .replace(IMAGE, "$1") // images → alt
+    .replace(LINK, "$1") // links → text
+    .replace(CODE, "$1") // code spans
+    .replace(EMPHASIS, "$2") // emphasis
+    .replace(BLOCK_PREFIX, "") // block prefixes
     .replace(/\$+/g, "") // math delimiters
     .replace(/\s+/g, " ")
     .trim();

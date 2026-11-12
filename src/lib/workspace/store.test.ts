@@ -155,7 +155,7 @@ describe("version-checked saves", () => {
   it("rejects a stale-version save without writing", async () => {
     seed("a", { version: 3 });
     const result = await saveWorkspace("a", ws("a", "Stale"), 2);
-    expect(result).toEqual({ status: "conflict", version: 3 });
+    expect(result).toMatchObject({ status: "conflict", version: 3 });
     expect((await getWorkspace("a"))?.name).toBe("a");
   });
 

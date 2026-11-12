@@ -95,15 +95,19 @@ export function windowHistory(
   for (let i = rows.length - 1; i >= 0 && picked.length < limits.maxMessages; i -= 1) {
     const row = rows[i];
     if (row.role !== "user" && row.role !== "assistant") continue;
-    let content = clip((row.modelContent ?? row.content).trim(), limits.perMessageChars);
+    const content = clip((row.modelContent ?? row.content).trim(), limits.perMessageChars);
     if (!content) continue;
+    // The change note quotes workspace text (row labels, page titles), so it
+    // travels separately and the agent loop fences it as data.
+    let note: string | undefined;
     if (row.role === "assistant" && row.changeNote) {
       const undone = row.changeId && undo[row.changeId] === "undone" ? " (the student later undid this)" : "";
-      content += `\n[Changed: ${clip(row.changeNote, 600)}${undone}]`;
+      note = `${clip(row.changeNote, 600)}${undone}`;
     }
-    if (chars + content.length > limits.maxChars && picked.length > 0) break;
-    chars += content.length;
-    picked.unshift({ role: row.role, content });
+    const size = content.length + (note?.length ?? 0);
+    if (chars + size > limits.maxChars && picked.length > 0) break;
+    chars += size;
+    picked.unshift(note ? { role: row.role, content, note } : { role: row.role, content });
   }
   return picked;
 }

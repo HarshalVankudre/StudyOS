@@ -1,16 +1,27 @@
 import { describe, expect, it } from "vitest";
 import { studyKitCost } from "@/lib/credits-info";
-import { kitTargets, planRun, sectionQuotas, MAX_SECTIONS_PER_RUN, SECTION_TARGET_CHARS } from "./limits";
+import {
+  kitTargets,
+  planRun,
+  sectionQuotas,
+  MAX_SECTION_PAGES,
+  MAX_SECTIONS_PER_RUN,
+  PAGE_MARKER_CHARS,
+  SECTION_TARGET_CHARS,
+} from "./limits";
 
 describe("planRun", () => {
   it("packs whole pages into sections of about the target size", () => {
-    const plan = planRun([5000, 5000, 5000, 5000, 5000], undefined, { target: 10_000 });
+    // 4,900 text + 16 marker characters per page: two pages fit in 10,000.
+    const plan = planRun([4900, 4900, 4900, 4900, 4900], undefined, { target: 10_000 });
     expect(plan.sections.map((s) => [s.from, s.to])).toEqual([
       [1, 2],
       [3, 4],
       [5, 5],
     ]);
-    expect(plan).toMatchObject({ from: 1, to: 5, cutShort: false, chars: 25_000 });
+    expect(plan).toMatchObject({ from: 1, to: 5, cutShort: false, chars: 24_500 });
+    // Exactly half the target per page no longer fits twice: the markers count.
+    expect(planRun([5000, 5000], undefined, { target: 10_000 }).sections).toHaveLength(2);
   });
 
   it("never splits a page and gives an oversized page its own section", () => {
@@ -38,6 +49,20 @@ describe("planRun", () => {
     expect(plan).toMatchObject({ from: 1, to: MAX_SECTIONS_PER_RUN, cutShort: true });
     const next = planRun(pages, { from: plan.to + 1 });
     expect(next.sections[0].from).toBe(MAX_SECTIONS_PER_RUN + 1);
+  });
+
+  it("counts page markers, so thousands of tiny pages cannot inflate a section's prompt", () => {
+    // The hostile .docx: 266,667 one-character pages (sec2/materials/probe-plan.ts).
+    const tiny = Array.from({ length: 266_667 }, () => 1);
+    const t0 = performance.now();
+    const plan = planRun(tiny);
+    expect(performance.now() - t0).toBeLessThan(2000);
+    for (const section of plan.sections) {
+      expect(section.to - section.from + 1).toBeLessThanOrEqual(MAX_SECTION_PAGES);
+      expect(section.promptChars).toBeLessThanOrEqual(SECTION_TARGET_CHARS + 2 * PAGE_MARKER_CHARS);
+    }
+    expect(plan.sections).toHaveLength(MAX_SECTIONS_PER_RUN);
+    expect(plan.cutShort).toBe(true);
   });
 
   it("respects and clamps the chosen page range", () => {

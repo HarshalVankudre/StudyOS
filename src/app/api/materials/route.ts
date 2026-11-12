@@ -1,3 +1,4 @@
+import { rejectCrossSite } from "@/lib/http/same-origin";
 import { auth } from "@clerk/nextjs/server";
 import { z } from "zod";
 import { ExtractError, extractSourcePages } from "@/lib/import/extract";
@@ -60,9 +61,24 @@ function titleFromFileName(name: string): string {
 }
 
 export async function POST(request: Request) {
+  const crossSite = rejectCrossSite(request);
+  if (crossSite) return crossSite;
   const { userId } = await auth();
   if (!userId) return Response.json({ code: "not_authenticated" }, { status: 401 });
 
+  // A couple of adds at a time per student (upload or paste), before the
+  // body is even read: each holds up to 10 MB and ends in a locked
+  // storage check (lib/materials/store createMaterial).
+  const release = acquireHeavySlot("material", userId);
+  if (!release) return Response.json({ code: "busy" }, { status: 429 });
+  try {
+    return await addMaterial(request, userId);
+  } finally {
+    release();
+  }
+}
+
+async function addMaterial(request: Request, userId: string): Promise<Response> {
   const contentType = request.headers.get("content-type") ?? "";
   let workspaceId: string;
   let title: string;
@@ -106,7 +122,7 @@ export async function POST(request: Request) {
     if (text.replace(/\s+/g, "").length < 20) {
       return Response.json({ code: "no_text" }, { status: 422 });
     }
-    pages = paginateText(text.slice(0, MAX_MATERIAL_CHARS));
+    pages = capPages(paginateText(text.slice(0, MAX_MATERIAL_CHARS)));
     sourcePages = pages.length;
     truncated = text.length > MAX_MATERIAL_CHARS;
   }
@@ -120,7 +136,8 @@ export async function POST(request: Request) {
   }
 
   if (file) {
-    // Extraction is CPU and memory heavy: a couple at a time per student.
+    // Extraction is CPU and memory heavy: one at a time per student (the
+    // extraction pool enforces the same across the syllabus import).
     const release = acquireHeavySlot("extract", userId);
     if (!release) return Response.json({ code: "busy" }, { status: 429 });
     try {
@@ -131,11 +148,14 @@ export async function POST(request: Request) {
         maxChars: MAX_MATERIAL_CHARS,
         timeoutMs: MATERIAL_EXTRACTION_TIMEOUT_MS,
         maxPdfInflatedBytes: 250 * 1024 * 1024,
+        owner: userId,
       });
       kind = extracted.kind;
-      pages = extracted.paginated
-        ? capPages(extracted.pages)
-        : paginateText(extracted.pages.join("\n\n"));
+      // At most MAX_MATERIAL_PAGES pages of at most MAX_PAGE_CHARS each,
+      // whatever the format (a .docx can declare thousands of tiny pages).
+      pages = capPages(
+        extracted.paginated ? extracted.pages : paginateText(extracted.pages.join("\n\n")),
+      );
       sourcePages = extracted.paginated ? extracted.sourcePages : pages.length;
       truncated = extracted.truncated;
     } catch (error) {

@@ -88,15 +88,41 @@ export async function currentSubscription(): Promise<PushSubscription | null> {
   }
 }
 
-async function send(method: "POST" | "DELETE", body: unknown): Promise<{ ok: boolean; devices?: number }> {
+async function send(
+  method: "POST" | "DELETE",
+  body: unknown,
+  signal?: AbortSignal,
+): Promise<{ ok: boolean; devices?: number; taken?: boolean }> {
   const res = await fetch(SUBSCRIPTIONS_URL, {
     method,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    signal,
   });
-  if (!res.ok) return { ok: false };
+  if (!res.ok) return { ok: false, taken: res.status === 409 };
   const json = (await res.json().catch(() => ({}))) as { devices?: number };
   return { ok: true, devices: json.devices };
+}
+
+/**
+ * Register `subscription` with the server. When the server says the endpoint
+ * is another student's device (409: this browser was used by someone else
+ * who never signed out cleanly), drop it and subscribe afresh: a new endpoint
+ * is the proof that this browser is the device, and the old record dies when
+ * the push service reports the old endpoint gone.
+ */
+async function register(
+  reg: ServiceWorkerRegistration,
+  subscription: PushSubscription,
+  publicKey: string,
+  locale: string,
+): Promise<{ ok: boolean; devices?: number }> {
+  const body = (s: PushSubscription) => ({ subscription: s.toJSON(), timeZone: browserTimeZone(), locale });
+  const saved = await send("POST", body(subscription));
+  if (saved.ok || !saved.taken) return saved;
+  await subscription.unsubscribe().catch(() => false);
+  const fresh = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(publicKey) });
+  return send("POST", body(fresh));
 }
 
 export type EnableResult =
@@ -121,7 +147,7 @@ export async function enablePush(publicKey: string, locale: string): Promise<Ena
       userVisibleOnly: true,
       applicationServerKey: keyBytes(publicKey),
     });
-    const saved = await send("POST", { subscription: subscription.toJSON(), timeZone: browserTimeZone(), locale });
+    const saved = await register(reg, subscription, publicKey, locale);
     if (!saved.ok) return { ok: false, reason: "failed" };
     return { ok: true, devices: saved.devices ?? 1 };
   } catch {
@@ -139,6 +165,55 @@ export async function disablePush(): Promise<{ ok: boolean; devices?: number }> 
     return await send("DELETE", { endpoint });
   } catch {
     return { ok: false };
+  }
+}
+
+/** Longest a sign-out waits for push cleanup before going ahead anyway. */
+export const SIGN_OUT_CLEANUP_MS = 3_000;
+
+/**
+ * Before signing out (or deleting the account): stop this device receiving
+ * the student's notifications, so the next person on a shared device does not
+ * see assignment and exam titles on the lock screen. The browser
+ * subscription is dropped first (that alone stops delivery: the push service
+ * then reports the endpoint gone), then the server forgets the endpoint while
+ * the session still exists. Never throws and never takes longer than
+ * `timeoutMs`, so signing out always proceeds.
+ */
+export async function clearPushBeforeSignOut(timeoutMs = SIGN_OUT_CLEANUP_MS): Promise<void> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const work = (async () => {
+    const subscription = await currentSubscription();
+    if (!subscription) return;
+    const endpoint = subscription.endpoint;
+    await subscription.unsubscribe().catch(() => false);
+    await send("DELETE", { endpoint }, controller.signal).catch(() => undefined);
+  })().catch(() => undefined);
+  const timeout = new Promise<void>((resolve) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      resolve();
+    }, timeoutMs);
+  });
+  await Promise.race([work, timeout]);
+  if (timer) clearTimeout(timer);
+}
+
+/**
+ * Safety net for sign-outs that do not pass through our buttons (Clerk's own
+ * user menu, a session ended in another tab or by the server): a browser that
+ * is signed out keeps no StudyOS push subscription. Browser side only; the
+ * server record goes when the push service reports the endpoint gone.
+ */
+export async function dropPushWhenSignedOut(): Promise<boolean> {
+  try {
+    const subscription = await currentSubscription();
+    if (!subscription) return false;
+    await subscription.unsubscribe();
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -163,12 +238,12 @@ export async function syncPush(publicKey: string, locale: string): Promise<boole
   let subscription = await currentSubscription();
   if (!subscription) return false;
   try {
+    const reg = await registration();
     if (!sameKey(subscription, publicKey)) {
       await subscription.unsubscribe().catch(() => false);
-      const reg = await registration();
       subscription = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(publicKey) });
     }
-    const saved = await send("POST", { subscription: subscription.toJSON(), timeZone: browserTimeZone(), locale });
+    const saved = await register(reg, subscription, publicKey, locale);
     return saved.ok;
   } catch {
     return false;

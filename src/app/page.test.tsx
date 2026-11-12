@@ -51,6 +51,10 @@ describe("landing page", () => {
     const dict = getDictionary(locale);
     expect(text).toContain(dict.landing.hero.titleLine1);
     expect(text).toContain(dict.landing.chapters.material.title);
+    // The study-help promise, last in the trust section (see src/lib/ai/integrity.ts).
+    const promise = dict.landing.trust.items.at(-1)!;
+    expect(text).toContain(promise.title);
+    expect(text).toContain(promise.body);
     expect(text).not.toMatch(/undefined|NaN|\[object Object\]/);
     // Every {placeholder} was filled in.
     expect(text).not.toMatch(/\{[a-zA-Z]+\}/);
@@ -74,6 +78,9 @@ describe("landing page", () => {
       expect(text).not.toMatch(claim);
     }
     expect(text).toContain("about a minute");
+    // Says what the assistant is built to do, not that it never could.
+    expect(text).toContain("It won’t do your work for you.");
+    expect(text).not.toMatch(/never writes your work/i);
     expect(text).toContain(`${FREE_SIGNUP_CREDITS} AI credits when you sign up`);
   });
 

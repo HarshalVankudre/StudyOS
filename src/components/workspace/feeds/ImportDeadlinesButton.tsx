@@ -11,10 +11,10 @@ import { ImportDeadlinesDialog } from "./ImportDeadlinesDialog";
  * student when imported rows vanished from their calendar and need a look.
  */
 export function ImportDeadlinesButton({ db }: { db: Database }) {
-  const { dict, t } = useI18n();
+  const { dict, plural } = useI18n();
   const [open, setOpen] = useState(false);
   const flagged = db.rows.reduce((n, r) => (r.source?.missingSince ? n + 1 : n), 0);
-  const label = flagged ? t(dict.feeds.buttonFlagged, { count: flagged }) : dict.feeds.button;
+  const label = flagged ? plural(dict.feeds.buttonFlagged, flagged) : dict.feeds.button;
   return (
     <>
       <button

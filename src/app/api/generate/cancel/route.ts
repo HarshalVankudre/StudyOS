@@ -1,3 +1,4 @@
+import { rejectCrossSite } from "@/lib/http/same-origin";
 import { auth } from "@clerk/nextjs/server";
 import { z } from "zod";
 import { generationTaskKey } from "@/lib/ai/generate";
@@ -16,6 +17,8 @@ const requestSchema = z.object({
  * so a user can only ever cancel their own generation.
  */
 export async function POST(request: Request) {
+  const crossSite = rejectCrossSite(request);
+  if (crossSite) return crossSite;
   const { userId } = await auth();
   if (!userId) return Response.json({ cancelled: false }, { status: 401 });
 

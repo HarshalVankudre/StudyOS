@@ -29,6 +29,7 @@ import {
 import type { ReactNode } from "react";
 import type { Dictionary } from "@/lib/i18n/dictionaries/en";
 import { fmt } from "@/lib/i18n/interpolate";
+import { plural } from "@/lib/i18n/plural";
 import {
   examCountdownLabel,
   formatDay,
@@ -65,7 +66,7 @@ interface PreviewProps {
 /** Small "Sample" marker so nobody mistakes a rendering for real data. */
 export function SampleTag({ label }: { label: string }) {
   return (
-    <span className="shrink-0 rounded-full border border-line-strong bg-surface-2 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] text-ink-faint">
+    <span className="shrink-0 rounded-full border border-line-strong bg-surface-2 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] text-ink-soft">
       {label}
     </span>
   );
@@ -130,7 +131,7 @@ export function TodayPreview({ dict, locale, today }: PreviewProps) {
           </p>
         </div>
         <p className="mt-1 text-sm text-ink-soft">
-          {fmt(T.summaryOther, { count: totals.total, time: formatDuration(totals.minutes, T) })}
+          {plural(locale, dict.counts.planSummary, totals.total, { time: formatDuration(totals.minutes, T) })}
           <span className="text-ink-faint">
             {" · "}
             {fmt(T.budget, { time: formatDuration(120, T) })}
@@ -145,7 +146,7 @@ export function TodayPreview({ dict, locale, today }: PreviewProps) {
         <Sparkles className="mt-1 h-4 w-4 shrink-0 text-lime-deep" aria-hidden />
         <div className="min-w-0">
           <p className="font-medium text-ink">{T.welcomeBack}</p>
-          <p className="mt-0.5">{fmt(T.carriedOther, { count: carried })}</p>
+          <p className="mt-0.5">{plural(locale, dict.counts.carried, carried)}</p>
         </div>
       </div>
 
@@ -155,7 +156,7 @@ export function TodayPreview({ dict, locale, today }: PreviewProps) {
         ))}
       </ol>
 
-      <p className="flex items-center gap-1.5 border-t border-line bg-surface-2 px-4 py-3 text-[11px] text-ink-faint sm:px-5">
+      <p className="flex items-center gap-1.5 border-t border-line bg-surface-2 px-4 py-3 text-[11px] text-ink-soft sm:px-5">
         <CalendarClock className="h-3.5 w-3.5 shrink-0" aria-hidden />
         {T.free}
       </p>
@@ -227,7 +228,7 @@ function TodayRow({ item, dict, locale }: { item: DailyStudyPlanItem; dict: Dict
 export function PlanToolsPreview({ dict, locale, today }: PreviewProps) {
   const T = dict.today;
   const S = dict.landing.samples;
-  const workload = workloadText(sampleWorkload(S), T);
+  const workload = workloadText(sampleWorkload(S), T, locale);
   const exams = sampleExams(S, today);
   const choices = TODAY_MINUTES_OPTIONS.map((m) => formatDuration(m, T));
 
@@ -254,7 +255,7 @@ export function PlanToolsPreview({ dict, locale, today }: PreviewProps) {
             >
               <span className="min-w-0 truncate font-medium text-ink">{exam.title}</span>
               <span className="shrink-0 rounded-full bg-surface-2 px-2 py-0.5 font-semibold tabular-nums text-ink-soft">
-                {examCountdownLabel(exam, T)}
+                {examCountdownLabel(exam, T, locale)}
               </span>
               <span className="sr-only">{formatDay(exam.date, locale)}</span>
             </li>
@@ -370,7 +371,7 @@ export function StudyKitPreview({ dict, locale }: Omit<PreviewProps, "today">) {
           <p className="text-xs font-semibold text-ink-soft">
             {S.card.material} · {fmt(M.viewerPage, { page: 14, count: 38 })}
           </p>
-          <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.12em] text-ink-faint">{M.viewerQuote}</p>
+          <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.12em] text-ink-soft">{M.viewerQuote}</p>
           <p className="mt-1 text-sm leading-6 text-ink">
             <mark className="rounded bg-lime-faint px-0.5 text-ink">{S.card.quote}</mark>
           </p>
@@ -388,11 +389,11 @@ export function StudyKitPreview({ dict, locale }: Omit<PreviewProps, "today">) {
         <div className="space-y-1.5 text-xs leading-5 text-ink-soft">
           <p className="flex items-start gap-1.5">
             <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-lime-deep" aria-hidden />
-            {fmt(M.doneDropped, { count: 3 })}
+            {plural(locale, M.doneDropped, 3)}
           </p>
           <p className="flex items-start gap-1.5">
             <Clock3 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ink-faint" aria-hidden />
-            {fmt(M.cost, { estimate: cost.estimate.toLocaleString(locale), max: cost.max.toLocaleString(locale) })}{" "}
+            {plural(locale, M.cost, cost.estimate, { max: cost.max.toLocaleString(locale) })}{" "}
             {M.costNote}
           </p>
         </div>

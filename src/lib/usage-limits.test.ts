@@ -6,12 +6,17 @@ const mocks = vi.hoisted(() => ({
   subFindUnique: vi.fn(),
 }));
 
-vi.mock("@/lib/db", () => ({
-  prisma: {
-    usageEvent: { count: mocks.usageCount, create: mocks.usageCreate },
-    subscription: { findUnique: mocks.subFindUnique },
-  },
-}));
+vi.mock("@/lib/db", () => {
+  const usageEvent = { count: mocks.usageCount, create: mocks.usageCreate };
+  return {
+    prisma: {
+      usageEvent,
+      subscription: { findUnique: mocks.subFindUnique },
+      // checkUsageLimit counts and records under an advisory lock in a transaction.
+      $transaction: async (fn: (tx: unknown) => unknown) => fn({ $queryRaw: async () => [], usageEvent }),
+    },
+  };
+});
 
 import {
   checkUsageLimit,

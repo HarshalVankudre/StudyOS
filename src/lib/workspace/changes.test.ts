@@ -73,6 +73,19 @@ describe("diff / applyPatch", () => {
     expect(doc.pages[0].blocks).toBe(a.pages[0].blocks);
   });
 
+  it("shares by id, and keeps the new order when several items moved", () => {
+    const a = ws();
+    a.pages[0].blocks = ["a", "b", "c", "d"].map((id) => ({ id, type: "paragraph" as const, text: id }));
+    const b = structuredClone(a); // a fresh copy, as read from the server
+    b.pages[0].blocks = [b.pages[0].blocks[2], b.pages[0].blocks[0], b.pages[0].blocks[3], b.pages[0].blocks[1]];
+    const { doc, changed } = shareWith(a, b);
+    expect(changed).toBe(true);
+    expect(doc.pages[0].blocks.map((x) => x.id)).toEqual(["c", "a", "d", "b"]);
+    expect(doc.pages[0].blocks[0]).toBe(a.pages[0].blocks[2]);
+    expect(doc.pages[1]).toBe(a.pages[1]);
+    expect(shareWith(a, structuredClone(a))).toEqual({ doc: a, changed: false });
+  });
+
   it("treats tag lists and other id-less arrays as one value", () => {
     const a = ws();
     a.databases[0].rows[0].cells.tags = ["x", "y"];
@@ -105,17 +118,49 @@ describe("rebase rules", () => {
     expect(r.report.keptBoth).toBe(0);
   });
 
-  it("keeps both versions of a block's text edited in the same place", () => {
-    const base = ws([{ id: "b1", type: "paragraph", text: "hi" }]);
-    const mine = edit(base, (d) => ((d.pages[0].blocks[0] as { text: string }).text = "hi and mine"));
-    const theirs = edit(base, (d) => ((d.pages[0].blocks[0] as { text: string }).text = "Hello theirs"));
+  it("keeps both versions of a block's text edited in the same place, the other one marked", () => {
+    const base = ws([{ id: "b1", type: "paragraph", text: "hi there" }]);
+    const mine = edit(base, (d) => ((d.pages[0].blocks[0] as { text: string }).text = "hey there"));
+    const theirs = edit(base, (d) => ((d.pages[0].blocks[0] as { text: string }).text = "Hello there"));
     const r = applyPatch(theirs, diff(base, mine), {
       mode: "rebase",
       lookup: lookupIn(mine),
       newId: () => "copy",
     });
-    expect(texts(r.doc)).toEqual(["Hello theirs", "hi and mine"]);
-    expect(r.doc.pages[0].blocks[1].id).toBe("copy");
+    // The student's version stays in place (under their cursor), the other
+    // one follows as a copy marked as kept from it.
+    expect(texts(r.doc)).toEqual(["hey there", "Hello there"]);
+    expect(r.doc.pages[0].blocks.map((b) => [b.id, (b as { keptFrom?: string }).keptFrom])).toEqual([
+      ["b1", undefined],
+      ["copy", "b1"],
+    ]);
+    expect(r.report.keptBoth).toBe(1);
+  });
+
+  it("combines an edit with words added right next to it", () => {
+    const base = ws([{ id: "b1", type: "paragraph", text: "hi" }]);
+    const mine = edit(base, (d) => ((d.pages[0].blocks[0] as { text: string }).text = "hi and mine"));
+    const theirs = edit(base, (d) => ((d.pages[0].blocks[0] as { text: string }).text = "Hello theirs"));
+    const r = applyPatch(theirs, diff(base, mine), { mode: "rebase", lookup: lookupIn(mine) });
+    expect(texts(r.doc)).toEqual(["Hello theirs and mine"]);
+    expect(r.report.keptBoth).toBe(0);
+  });
+
+  it("a restored block that another writer restored with other text keeps both texts (rebase)", () => {
+    const base = ws([{ id: "b2", type: "paragraph", text: "two" }]);
+    // The student undid deleting b1 (it comes back with their text) while
+    // another writer brought b1 back from an older copy, with other text.
+    const mine = ws([
+      { id: "b1", type: "paragraph", text: "one [kept by me]" },
+      { id: "b2", type: "paragraph", text: "two" },
+    ]);
+    const theirs = ws([
+      { id: "b1", type: "paragraph", text: "one" },
+      { id: "b2", type: "paragraph", text: "two" },
+    ]);
+    const r = applyPatch(theirs, diff(base, mine), { mode: "rebase", lookup: lookupIn(mine), newId: () => "copy" });
+    expect(texts(r.doc)).toEqual(["one", "one [kept by me]", "two"]);
+    expect((r.doc.pages[0].blocks[1] as { keptFrom?: string }).keptFrom).toBe("b1");
     expect(r.report.keptBoth).toBe(1);
   });
 

@@ -16,15 +16,15 @@ import { prisma } from "@/lib/db";
 import type { Prisma } from "@/generated/prisma";
 import type { TokenUsage } from "@/lib/ai/usage-meter";
 import { callCostUsd, MODEL_PRICES } from "@/lib/ai/model-pricing";
+import { usdToCredits } from "@/lib/credits-info";
+
+// The peg and the conversions live in the client-safe credits-info.
+export { creditsToUsd, SANDBOX_RUN_CREDITS, USD_PER_1000_CREDITS, usdToCredits } from "@/lib/credits-info";
 
 // GLM 5.2 list price on OpenRouter, USD per 1,000,000 tokens (the legacy
 // single rate, still used for usage that does not say which model ran).
 export const GLM_INPUT_USD_PER_MTOK = MODEL_PRICES["z-ai/glm-5.2"].inputPerMTok;
 export const GLM_OUTPUT_USD_PER_MTOK = MODEL_PRICES["z-ai/glm-5.2"].outputPerMTok;
-
-/** The peg: 1000 credits buys $3.00 of token spend. */
-export const USD_PER_1000_CREDITS = 3;
-const USD_PER_CREDIT = USD_PER_1000_CREDITS / 1000; // $0.003
 
 /** Credits granted automatically the first time a user is seen (free tier). */
 export const FREE_SIGNUP_CREDITS = 300;
@@ -44,8 +44,6 @@ export const PRO_MONTHLY_CREDITS = 1000;
 /** The buyable credit pack. */
 export const CREDIT_PACK_SIZE = 1000;
 export const CREDIT_PACK_PRICE_USD = 10;
-/** Flat credit price of one sandbox render run (covers Daytona compute). */
-export const SANDBOX_RUN_CREDITS = 2;
 
 /**
  * Dollar cost of a request's tokens. The usage meter prices every call with
@@ -62,17 +60,6 @@ export function usageToUsd(usage: TokenUsage, model?: string): number {
     cacheRead,
     cacheWrite,
   });
-}
-
-/** Credits for a dollar amount, rounded up (never below 1 when anything ran). */
-export function usdToCredits(usd: number): number {
-  if (!(usd > 0)) return 0;
-  return Math.max(1, Math.ceil(usd / USD_PER_CREDIT - 1e-9));
-}
-
-/** The dollar value of `credits` at the peg. */
-export function creditsToUsd(credits: number): number {
-  return Math.max(0, credits) * USD_PER_CREDIT;
 }
 
 /** Credits a request costs. 0 when nothing ran (e.g. the local mock); else ≥ 1. */
@@ -175,9 +162,12 @@ type ProRow = {
 
 /**
  * Does this subscription row grant Pro right now? Active on Stripe, no open
- * dispute on the payment of its current period, and its paid period (plus
- * PRO_GRACE_MS) not over. Rows without a known period end (legacy) follow
- * their status alone.
+ * or lost dispute on the payment of its current period, and its paid period
+ * (plus PRO_GRACE_MS) not over. Rows without a known period end (written by
+ * the code before stripeSyncedAt existed) follow their status alone until
+ * the maintenance job has re-read them from Stripe (lib/billing.ts
+ * reconcileUnsyncedSubscriptions, and the re-read of active rows with no
+ * period end), which sets the period end.
  */
 export function subscriptionGrantsPro(row: ProRow | null, now = new Date()): boolean {
   if (row?.status !== "active") return false;
@@ -309,23 +299,40 @@ export function dueAllowanceMonths(
   return due;
 }
 
-/**
- * Ledger key of the Pro allowance for one calendar month (UTC) of coverage.
- * Every Pro grant (a paid invoice or an annual anniversary) uses it, so a
- * month of coverage is granted once however many invoices touch it (plan
- * switches, proration invoices, retries).
- */
-export function proMonthKey(userId: string, month: Date): string {
-  return `pro_month:${userId}:${month.toISOString().slice(0, 7)}`;
+/** The calendar month (UTC) containing `date`, as YYYY-MM. */
+export function monthKey(date: Date): string {
+  return date.toISOString().slice(0, 7);
 }
 
-/** Grant the Pro allowance of the calendar month containing `month`, once. */
-export async function grantProMonth(userId: string, month: Date): Promise<boolean> {
+/** Prefix shared by every Pro grant key of one user and calendar month. */
+export function proMonthPrefix(userId: string, month: Date): string {
+  return `pro_month:${userId}:${monthKey(month)}`;
+}
+
+/**
+ * Ledger key of the Pro allowance one subscription gives for one calendar
+ * month (UTC) of coverage. Every Pro grant (a paid invoice or an annual
+ * anniversary) uses it, so a month is granted once per subscription however
+ * many invoices of that subscription touch it (plan switches, proration
+ * invoices, retries), while a new subscription paid in the same month (after
+ * a cancellation) is a new paid month. (Keys without the subscription, from
+ * before, are `proMonthPrefix` alone; lib/billing.ts treats them as covering.)
+ */
+export function proMonthKey(userId: string, month: Date, subscriptionId: string): string {
+  return `${proMonthPrefix(userId, month)}:${subscriptionId}`;
+}
+
+/** Grant one subscription's Pro allowance for the calendar month containing `month`, once. */
+export async function grantProMonth(
+  userId: string,
+  month: Date,
+  subscriptionId: string,
+): Promise<boolean> {
   const outcome = await grantCredits(
     userId,
     PRO_MONTHLY_CREDITS,
     "pro_monthly",
-    proMonthKey(userId, month),
+    proMonthKey(userId, month, subscriptionId),
   );
   return outcome === "granted";
 }
@@ -351,9 +358,8 @@ export async function accrueProAllowance(
   now = new Date(),
 ): Promise<boolean> {
   if (!sub?.allowanceYearly) return false;
-  if (!sub.allowanceSubscriptionId || sub.allowanceSubscriptionId !== sub.stripeSubscriptionId) {
-    return false;
-  }
+  const subscriptionId = sub.allowanceSubscriptionId;
+  if (!subscriptionId || subscriptionId !== sub.stripeSubscriptionId) return false;
   const { allowancePeriodStart: start, allowancePeriodEnd: end } = sub;
   if (!start || !end) return false;
   const due = dueAllowanceMonths(start, end, now, earliest(sub.allowanceStopAt, sub.disputedAt));
@@ -361,13 +367,13 @@ export async function accrueProAllowance(
   // Hot path: months are granted in order, so the newest due month existing
   // means every earlier one does too.
   const newest = await prisma.creditLedger.findUnique({
-    where: { idempotencyKey: proMonthKey(userId, addMonthsUtc(start, due[due.length - 1])) },
+    where: { idempotencyKey: proMonthKey(userId, addMonthsUtc(start, due[due.length - 1]), subscriptionId) },
     select: { id: true },
   });
   if (newest) return false;
   let granted = false;
   for (const i of due) {
-    if (await grantProMonth(userId, addMonthsUtc(start, i))) granted = true;
+    if (await grantProMonth(userId, addMonthsUtc(start, i), subscriptionId)) granted = true;
   }
   return granted;
 }
@@ -565,8 +571,11 @@ export interface CreditHold {
  *    difference to the hold is returned, or taken, never below zero);
  *  - releaseCreditHold(hold): the policy says this outcome is free.
  * Both are idempotent and a release after a settle does nothing, so callers
- * can settle on success and always release in `finally`. A hold that is
- * neither (a crashed request) is released once CREDIT_HOLD_TTL_MS passes.
+ * can settle on success and always release in `finally`. A settle records
+ * the charge it intends on the hold before it runs, so if the settle itself
+ * fails, the later release (or the expiry sweep) completes that charge
+ * instead of giving the work away. A hold that is neither settled nor
+ * released (a crashed request) is released once CREDIT_HOLD_TTL_MS passes.
  */
 export async function reserveCredits(
   userId: string,
@@ -604,6 +613,11 @@ export async function reserveCredits(
  * credits charged (at most the hold plus what is left in the balance). If
  * the hold had already expired and been given back, the cost is charged
  * from the balance now. Idempotent: settling twice charges once.
+ *
+ * The intended charge is written on the hold first (`pendingCharge`): when
+ * the settle transaction then fails, the hold is not given back by the
+ * caller's release; it is settled at that amount by the release, or later by
+ * the expiry sweep (getCreditBalance, the maintenance job).
  */
 export async function settleCreditHold(
   hold: CreditHold,
@@ -611,7 +625,18 @@ export async function settleCreditHold(
   opts: { reason?: string } = {},
 ): Promise<number> {
   const actual = Math.max(0, Math.ceil(actualCredits));
-  const reason = opts.reason ?? hold.reason;
+  await prisma.creditHold.updateMany({
+    where: { id: hold.id, state: "held" },
+    data: { pendingCharge: actual },
+  });
+  return settleHoldTx(hold, actual, opts.reason ?? hold.reason);
+}
+
+async function settleHoldTx(
+  hold: Pick<CreditHold, "id" | "userId">,
+  actual: number,
+  reason: string,
+): Promise<number> {
   return prisma.$transaction(async (tx) => {
     const balance = await lockBalance(tx, hold.userId);
     const row = await tx.creditHold.findUnique({ where: { id: hold.id } });
@@ -646,14 +671,33 @@ export async function settleCreditHold(
   });
 }
 
+/** What closing a hold did. */
+type HoldClose = "released" | "settled" | "none";
+
+/**
+ * Close a hold that was not settled: give it back in full, unless a settle
+ * recorded the charge it intended (and then failed): that charge is
+ * completed instead, never given away.
+ */
+async function closeHoldById(id: string, state: "released" | "expired"): Promise<HoldClose> {
+  const seen = await prisma.creditHold.findUnique({ where: { id } });
+  if (!seen || seen.state !== "held") return "none";
+  if (seen.pendingCharge !== null) {
+    await settleHoldTx(seen, seen.pendingCharge, seen.reason);
+    return "settled";
+  }
+  return (await releaseHoldById(id, state)) ? "released" : "none";
+}
+
 async function releaseHoldById(id: string, state: "released" | "expired"): Promise<boolean> {
   return prisma.$transaction(async (tx) => {
     const seen = await tx.creditHold.findUnique({ where: { id } });
-    if (!seen || seen.state !== "held") return false;
+    if (!seen || seen.state !== "held" || seen.pendingCharge !== null) return false;
     // Same lock order as reserve and settle: the account row first.
     const balance = await lockBalance(tx, seen.userId);
+    // A settle that recorded its charge meanwhile wins: no release then.
     const claimed = await tx.creditHold.updateMany({
-      where: { id, state: "held" },
+      where: { id, state: "held", pendingCharge: null },
       data: { state, charged: 0, settledAt: new Date() },
     });
     if (claimed.count === 0) return false;
@@ -675,12 +719,21 @@ async function releaseHoldById(id: string, state: "released" | "expired"): Promi
   });
 }
 
-/** Give a hold back in full (the outcome is free). No-op once settled or released. */
+/**
+ * Give a hold back in full (the outcome is free). No-op once settled or
+ * released. A hold whose settle failed after recording its charge is settled
+ * now instead (and stays open for the expiry sweep if that fails again).
+ * Returns true only when credits went back.
+ */
 export async function releaseCreditHold(hold: Pick<CreditHold, "id">): Promise<boolean> {
-  return releaseHoldById(hold.id, "released");
+  return (await closeHoldById(hold.id, "released")) === "released";
 }
 
-/** Give back holds left open past their expiry (all users, or one). */
+/**
+ * Close holds left open past their expiry (all users, or one): give them
+ * back, or complete the charge a failed settle recorded. Returns how many
+ * were closed. A hold that cannot be closed now stays for the next run.
+ */
 export async function releaseExpiredHolds(
   opts: { userId?: string; now?: Date; limit?: number } = {},
 ): Promise<number> {
@@ -694,11 +747,15 @@ export async function releaseExpiredHolds(
     orderBy: { expiresAt: "asc" },
     take: opts.limit ?? 500,
   });
-  let released = 0;
+  let closed = 0;
   for (const h of stale) {
-    if (await releaseHoldById(h.id, "expired")) released++;
+    try {
+      if ((await closeHoldById(h.id, "expired")) !== "none") closed++;
+    } catch {
+      // The database refused this one now; the next read or run retries it.
+    }
   }
-  return released;
+  return closed;
 }
 
 /** Net credits moved by ledger rows whose key starts with `prefix`. */

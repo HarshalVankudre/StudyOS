@@ -8,12 +8,15 @@ import { createAssetService } from "@/lib/assets/service";
 import { gcsAssetStore } from "@/lib/assets/storage";
 import { prismaAssetRepo } from "@/lib/assets/repo";
 import { agentSandboxEnabled } from "@/lib/flags";
+import { remoteAssetImagesAvailable } from "@/lib/ops/env";
 
 // All imports are static (ES2017 target forbids top-level await).
 // Construction of the Daytona client and asset service is guarded behind the
 // flag so that when AGENT_SANDBOX is off (the default, including prod) no
-// Daytona client is instantiated and the tool is not registered.
-if (agentSandboxEnabled()) {
+// Daytona client is instantiated and the tool is not registered. It also stays
+// off when the build cannot show its images (ASSETS_BUCKET missing or not the
+// bucket the image CSP was built for, see lib/ops/env.ts).
+if (agentSandboxEnabled() && remoteAssetImagesAvailable()) {
   const assets = createAssetService({ store: gcsAssetStore(), repo: prismaAssetRepo() });
   toolRegistry.register(
     createSandboxTool({

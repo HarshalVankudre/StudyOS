@@ -10,6 +10,12 @@ import type { Workspace } from "@/lib/workspace/types";
 export interface AgentMessage {
   role: "user" | "assistant";
   content: string;
+  /**
+   * The id-bearing note of what that turn changed (assistant turns). Kept
+   * apart from `content` because it quotes workspace text (titles, labels):
+   * the agent loop places it in the prompt inside the data fence.
+   */
+  note?: string;
 }
 
 export interface AgentChoice {

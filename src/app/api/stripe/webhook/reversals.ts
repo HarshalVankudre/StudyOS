@@ -1,35 +1,44 @@
 /**
  * Refund and dispute handling for the Stripe webhook.
  *
+ * Every refund and dispute is recorded as facts (BillingEvent rows: one per
+ * refund, a "refund_failed" row when a refund fails, one per dispute and per
+ * dispute closure, each with the time it happened on Stripe), and what they
+ * mean is recomputed from all the facts of the payment, so the outcome does
+ * not depend on the order the webhooks arrive in. Refunds are always re-read
+ * from Stripe (the payment's refund list), so a pending refund that later
+ * fails is seen as failed.
+ *
  * Policy (proportionate, never punitive):
- *  - Every refund and dispute is recorded as a BillingEvent for the owner.
  *  - Credit pack: the share of the pack clawed back follows the total money
- *    returned on its payment (refunds plus disputes not closed in our
- *    favour), limited to what is left in the balance, so the balance never
- *    goes below zero and the app keeps working. Credits already spent are not
- *    chased, then or later. A dispute closed in our favour ("won", or an
- *    inquiry "warning_closed") gives back what it took. A refund or dispute
- *    that arrives before the pack was granted applies at the grant: the pack
- *    lands at its net share. (lib/billing.ts reconcilePackTx.)
- *  - Subscription payment refunded in full: the allowance it paid for stops
- *    accruing further months. Pro follows the subscription's status (a refund
- *    issued with a cancellation ends Pro through customer.subscription.*);
- *    monthly credits already granted are not clawed back.
- *  - Subscription payment disputed (inquiry or chargeback) while it pays the
- *    current period: Pro and accrual pause until the dispute closes. Closed
- *    in our favour: both resume. Lost: the subscription is canceled, so a
- *    customer who took the money back is not charged again.
+ *    returned on its payment (refunds that did not fail, plus disputes not
+ *    closed in our favour), limited to what is left in the balance, so the
+ *    balance never goes below zero and the app keeps working. Credits already
+ *    spent are not chased, then or later. A dispute closed in our favour
+ *    ("won", or an inquiry "warning_closed") or a refund that failed gives
+ *    back what it took. A refund or dispute that arrives before the pack was
+ *    granted applies at the grant: the pack lands at its net share.
+ *    (lib/billing.ts reconcilePackTx.)
+ *  - Subscription payment (lib/billing.ts refreshAllowanceState): monthly
+ *    credits already granted are never clawed back. Refunded in full: the
+ *    allowance it paid for stops accruing further months (until the refund
+ *    fails, if it does). Disputed while it pays the current period (whether
+ *    or not its invoice was processed yet): Pro and accrual pause until the
+ *    dispute closes; closed in our favour, both resume. Lost: the user's
+ *    subscription is canceled (whichever payment it was on), so a customer
+ *    who took the money back is not charged again.
  *
  * All steps are idempotent under webhook retries: events are keyed by
  * (kind, Stripe object id) and credit movements by ledger idempotency keys.
  */
 import type Stripe from "stripe";
 import {
-  disputeClosedInOurFavour,
-  isSubscriptionAlreadyGone,
   type PackInfo,
   recordBillingEvent,
   recordPackEvents,
+  refreshAllowanceState,
+  stopBillingAfterLostDispute,
+  userForCustomer,
 } from "@/lib/billing";
 import { CREDIT_PACK_PRICE_USD, CREDIT_PACK_SIZE } from "@/lib/credits";
 import { prisma } from "@/lib/db";
@@ -53,145 +62,163 @@ async function packForPaymentIntent(pi: string): Promise<PackInfo | null> {
   };
 }
 
-async function userForCustomer(customerId: string | null): Promise<string | null> {
-  if (!customerId) return null;
+/** The user a (non-pack) payment belongs to: the row it pays for, else the charge's customer. */
+async function userForPayment(pi: string, chargeId: string | null, customerId: string | null) {
   const row = await prisma.subscription.findFirst({
-    where: { stripeCustomerId: customerId },
+    where: { allowancePaymentIntentId: pi },
     select: { userId: true },
   });
-  return row?.userId ?? null;
+  if (row) return row.userId;
+  let customer = customerId;
+  if (!customer && chargeId) customer = stripeId((await stripe.charges.retrieve(chargeId)).customer);
+  return userForCustomer(customer);
 }
 
-/** The user behind a disputed charge (by its customer). */
-async function userForDispute(dispute: Stripe.Dispute): Promise<string | null> {
+const fromUnix = (n: number | null | undefined) => (typeof n === "number" ? new Date(n * 1000) : null);
+const REFUND_FAILED = new Set<string>(["failed", "canceled"]);
+
+/**
+ * Record every refund of a payment as Stripe has it now (re-read, never
+ * taken from the payload), then apply them: to the pack it bought, or to the
+ * subscription allowance it paid for.
+ */
+async function applyRefunds(pi: string, chargeId: string | null, customerId: string | null): Promise<void> {
+  const refunds = await stripe.refunds.list({ payment_intent: pi, limit: 100 });
+  const ordered = [...refunds.data].sort((a, b) => (a.created ?? 0) - (b.created ?? 0));
+  const facts = ordered.flatMap((r) => [
+    {
+      kind: "refund",
+      stripeObjectId: r.id,
+      amountCents: r.amount,
+      occurredAt: fromUnix(r.created),
+      detail: `status ${r.status}`,
+    },
+    ...(REFUND_FAILED.has(r.status ?? "")
+      ? [
+          {
+            kind: "refund_failed",
+            stripeObjectId: r.id,
+            amountCents: r.amount,
+            occurredAt: new Date(),
+            detail: `status ${r.status}${r.failure_reason ? `; ${r.failure_reason}` : ""}`,
+          },
+        ]
+      : []),
+  ]);
+
+  const pack = await packForPaymentIntent(pi);
+  if (pack) {
+    await recordPackEvents(
+      pack,
+      pi,
+      facts.map((f) => ({ ...f, detail: `credit_pack; ${f.detail}` })),
+    );
+    return;
+  }
+
+  const userId = await userForPayment(pi, chargeId, customerId);
+  for (const f of facts) {
+    await recordBillingEvent({ ...f, userId, paymentIntentId: pi, detail: `subscription_or_other; ${f.detail}` });
+  }
+  if (userId) await refreshAllowanceState(userId);
+}
+
+/** charge.refunded: a refund was created (full or partial). */
+export async function handleChargeRefunded(charge: Stripe.Charge): Promise<void> {
+  const pi = stripeId(charge.payment_intent);
+  if (!pi) {
+    // Not a PaymentIntent charge (nothing of ours): keep an audit row only.
+    await recordBillingEvent({
+      userId: await userForCustomer(stripeId(charge.customer)),
+      kind: "refund",
+      stripeObjectId: `${charge.id}:${charge.amount_refunded}`,
+      amountCents: charge.amount_refunded,
+      detail: "charge without a payment intent",
+    });
+    return;
+  }
+  await applyRefunds(pi, charge.id, stripeId(charge.customer));
+}
+
+/**
+ * charge.refund.updated / refund.updated / refund.failed: a refund changed
+ * status, e.g. a pending refund failed and the money stayed with us.
+ */
+export async function handleRefundUpdated(refund: Stripe.Refund): Promise<void> {
+  const pi = stripeId(refund.payment_intent);
+  if (!pi) return;
+  await applyRefunds(pi, stripeId(refund.charge), null);
+}
+
+/** The user behind a disputed charge (the row its payment pays for, else the charge's customer). */
+async function userForDispute(dispute: Stripe.Dispute, pi: string | null): Promise<string | null> {
   const chargeId = stripeId(dispute.charge);
+  if (pi) return userForPayment(pi, chargeId, null);
   if (!chargeId) return null;
   const charge = await stripe.charges.retrieve(chargeId);
   return userForCustomer(stripeId(charge.customer));
 }
 
-export async function handleChargeRefunded(charge: Stripe.Charge): Promise<void> {
-  const pi = stripeId(charge.payment_intent);
-  const pack = pi ? await packForPaymentIntent(pi) : null;
-  // One row per cumulative refunded amount (each partial refund).
-  const stripeObjectId = `${charge.id}:${charge.amount_refunded}`;
-  if (pack && pi) {
-    await recordPackEvents(pack, pi, [
-      { kind: "refund", stripeObjectId, amountCents: charge.amount_refunded, detail: "credit_pack" },
-    ]);
-    return;
-  }
-
-  const userId = await userForCustomer(stripeId(charge.customer));
-  if (userId && pi && charge.amount > 0 && charge.amount_refunded >= charge.amount) {
-    // The payment of the current allowance period came back in full: no
-    // further months accrue from it.
-    const now = new Date();
-    await prisma.subscription.updateMany({
-      where: {
-        userId,
-        allowancePaymentIntentId: pi,
-        OR: [{ allowanceStopAt: null }, { allowanceStopAt: { gt: now } }],
-      },
-      data: { allowanceStopAt: now },
-    });
-  }
-  await recordBillingEvent({
-    userId,
-    kind: "refund",
-    stripeObjectId,
-    paymentIntentId: pi,
-    amountCents: charge.amount_refunded,
-    detail: "subscription_or_other",
-  });
+function disputeFact(dispute: Stripe.Dispute, detail: string) {
+  return {
+    kind: "dispute",
+    stripeObjectId: dispute.id,
+    amountCents: dispute.amount,
+    occurredAt: fromUnix(dispute.created),
+    detail,
+  };
 }
 
 export async function handleDisputeCreated(dispute: Stripe.Dispute): Promise<void> {
   const pi = stripeId(dispute.payment_intent);
   const pack = pi ? await packForPaymentIntent(pi) : null;
   if (pack && pi) {
-    await recordPackEvents(pack, pi, [
-      {
-        kind: "dispute",
-        stripeObjectId: dispute.id,
-        amountCents: dispute.amount,
-        detail: `credit_pack; reason ${dispute.reason}`,
-      },
-    ]);
+    await recordPackEvents(pack, pi, [disputeFact(dispute, `credit_pack; reason ${dispute.reason}`)]);
     return;
   }
 
-  const userId = await userForDispute(dispute);
-  let held = false;
-  if (userId && pi) {
-    // Only when the disputed payment pays the current period: an old
-    // month's dispute does not take away a period paid for since.
-    const result = await prisma.subscription.updateMany({
-      where: { userId, allowancePaymentIntentId: pi },
-      data: { disputeId: dispute.id, disputedAt: new Date() },
-    });
-    held = result.count > 0;
-  }
+  const userId = await userForDispute(dispute, pi);
   await recordBillingEvent({
+    ...disputeFact(dispute, `subscription_or_other; reason ${dispute.reason}`),
     userId,
-    kind: "dispute",
-    stripeObjectId: dispute.id,
     paymentIntentId: pi,
-    amountCents: dispute.amount,
-    detail: `subscription_or_other; reason ${dispute.reason}${held ? "; pro paused" : ""}`,
   });
+  // Pauses Pro and accrual when it is on the payment of the current period
+  // (or will be, once that invoice is processed).
+  if (userId) await refreshAllowanceState(userId);
 }
 
 export async function handleDisputeClosed(dispute: Stripe.Dispute): Promise<void> {
   const pi = stripeId(dispute.payment_intent);
   const pack = pi ? await packForPaymentIntent(pi) : null;
-  const closed = `status ${dispute.status}`;
+  const closed = {
+    kind: "dispute_closed",
+    stripeObjectId: dispute.id,
+    amountCents: dispute.amount,
+    occurredAt: new Date(),
+    detail: `status ${dispute.status}`,
+  };
   if (pack && pi) {
     await recordPackEvents(pack, pi, [
       // A dispute whose "created" event never arrived still counts.
-      {
-        kind: "dispute",
-        stripeObjectId: dispute.id,
-        amountCents: dispute.amount,
-        detail: `credit_pack; reason ${dispute.reason}`,
-      },
-      { kind: "dispute_closed", stripeObjectId: dispute.id, amountCents: dispute.amount, detail: closed },
+      disputeFact(dispute, `credit_pack; reason ${dispute.reason}`),
+      closed,
     ]);
     return;
   }
 
-  const row =
-    (await prisma.subscription.findFirst({ where: { disputeId: dispute.id } })) ??
-    (pi ? await prisma.subscription.findFirst({ where: { allowancePaymentIntentId: pi } }) : null);
-  const userId = row?.userId ?? (await userForDispute(dispute));
-  const notes: string[] = [closed];
-  if (row && disputeClosedInOurFavour(closed)) {
-    await prisma.subscription.updateMany({
-      where: { userId: row.userId, disputeId: dispute.id },
-      data: { disputeId: null, disputedAt: null },
-    });
-    notes.push("pro resumed");
-  } else if (row && dispute.status === "lost") {
-    // The money for this period is gone: keep Pro paused and stop billing.
-    await prisma.subscription.updateMany({
-      where: { userId: row.userId, disputeId: null },
-      data: { disputeId: dispute.id, disputedAt: new Date() },
-    });
-    if (row.stripeSubscriptionId) {
-      try {
-        await stripe.subscriptions.cancel(row.stripeSubscriptionId);
-        notes.push("subscription canceled");
-      } catch (err) {
-        if (!isSubscriptionAlreadyGone(err)) throw err;
-      }
-    }
-  }
+  const userId = await userForDispute(dispute, pi);
+  // A dispute whose "created" event never arrived still counts.
   await recordBillingEvent({
+    ...disputeFact(dispute, `subscription_or_other; reason ${dispute.reason}`),
     userId,
-    kind: "dispute_closed",
-    stripeObjectId: dispute.id,
     paymentIntentId: pi,
-    amountCents: dispute.amount,
-    detail: notes.join("; "),
   });
+  await recordBillingEvent({ ...closed, userId, paymentIntentId: pi });
+  if (!userId) return;
+  // Won: Pro and accrual resume. Lost: they stay stopped from the dispute on...
+  await refreshAllowanceState(userId);
+  // ...and the customer who took the money back is not billed again,
+  // whichever of their payments the dispute was on.
+  if (dispute.status === "lost") await stopBillingAfterLostDispute(userId, dispute.id);
 }

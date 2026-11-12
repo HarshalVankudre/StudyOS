@@ -13,6 +13,7 @@ import { AccountMenu } from "@/components/account/AccountMenu";
 import { CreditChip } from "@/components/account/CreditChip";
 import { Toaster } from "@/components/ui/sonner";
 import { TodayPlan } from "@/components/today/TodayPlan";
+import { SearchButton } from "@/components/command/SearchButton";
 import { loadDemoAction } from "./actions";
 import { manageBillingAction } from "./billing-actions";
 import { DeleteWorkspaceButton } from "./DeleteWorkspaceButton";
@@ -108,6 +109,7 @@ export default async function AppHome({
                 <Bot className="h-4 w-4" aria-hidden />
                 {Agent.label}
               </Link>
+              <SearchButton />
               <Link
                 href="/generate"
                 className="whitespace-nowrap rounded-md bg-ink px-3 py-2 text-[13px] font-semibold text-paper shadow-card transition hover:opacity-90 sm:px-4 sm:text-sm"

@@ -200,9 +200,23 @@ describe("sendWebPush against a local fake push service", () => {
     expect(JSON.stringify(outcome)).not.toContain("secret-capability");
   });
 
+  it("refuses an oversized message as too_large, not as a rejection of the device", async () => {
+    const browser = newBrowser();
+    const vapid = { ...generateVapidKeys(), subject: "mailto:ops@example.com" };
+    const outcome = await sendWebPush(
+      { endpoint: "http://127.0.0.1:1/x", ...browser.keys },
+      "x".repeat(MAX_PAYLOAD_BYTES + 1),
+      vapid,
+      { ttlSeconds: 60, timeoutMs: 2000 },
+    );
+    expect(outcome).toEqual({ kind: "too_large", status: null });
+  });
+
   it("classifies statuses", () => {
     expect(classifyStatus(202).kind).toBe("sent");
-    expect(classifyStatus(413).kind).toBe("rejected");
+    // 413: the message was too big, which says nothing about the device.
+    expect(classifyStatus(413).kind).toBe("too_large");
+    expect(classifyStatus(400).kind).toBe("rejected");
     expect(classifyStatus(429).kind).toBe("retry");
   });
 });

@@ -18,6 +18,7 @@
 import type { Database, DatabaseRow, Workspace } from "@/lib/workspace/types";
 import { getOption, getProperty, titleProperty } from "@/lib/workspace/helpers";
 import { isRowComplete } from "@/lib/workspace/view-logic";
+import { findRow, relationIds } from "@/lib/workspace/row-lookup";
 
 export interface CalendarEvent {
   /** Stable across regenerations so calendar clients update rather than dupe. */
@@ -109,8 +110,10 @@ function rowCourse(workspace: Workspace, db: Database, row: DatabaseRow): string
   const target = workspace.databases.find((d) => d.id === relation.relationDatabaseId);
   const ids = row.cells[relation.id];
   if (!target || !Array.isArray(ids)) return undefined;
-  const labels = ids
-    .map((id) => target.rows.find((r) => r.id === id))
+  // Indexed lookup and a bounded id list: a per-id scan of the target rows
+  // was quadratic on a hostile cell (see row-lookup.ts).
+  const labels = relationIds(ids, 20)
+    .map((id) => findRow(target, id))
     .filter((r): r is DatabaseRow => Boolean(r))
     .map((r) => rowTitle(target, r));
   return labels.join(", ") || undefined;

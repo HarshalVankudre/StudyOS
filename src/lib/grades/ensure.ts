@@ -6,16 +6,33 @@
  *   - every grades block points at a database that exists and only at
  *     columns that exist (detection fills the rest at render time);
  *   - if the model added no grades block, one is added to a grades page
- *     when there is one, otherwise to the home page.
- * Existing data is never changed or removed. Pure: returns a new workspace.
+ *     when there is one, otherwise to the home page;
+ *   - a row the model made for a share of the grade many items have in
+ *     common ("Problem sets 20%", no date) becomes a grading category of the
+ *     list, and an item that copied its category's weight loses the copy.
+ * Real work is never changed or removed. Pure: returns a new workspace.
  */
 import type { Block, Database, GradesBlock, GradesColumns, Page, Workspace } from "@/lib/workspace/types";
 import {
   GRADE_COLUMN_KEYS,
+  categoryRowsOf,
   columnFits,
   findGradeDatabase,
   resolveGradeColumns,
+  rowCourseKey,
 } from "./workspace";
+import { clearCopiedCategoryWeights, convertCategoryRows, dropSingleItemCategories } from "./categories";
+
+/** Category rows become categories of the scheme; items keep only their own weights. */
+export function categoriesFromRows(workspace: Workspace, db: Database): void {
+  const columns = resolveGradeColumns(db, undefined);
+  convertCategoryRows(db, categoryRowsOf(workspace, db, columns));
+  const courseOf = (row: Database["rows"][number]) => rowCourseKey(workspace, db, columns, row);
+  dropSingleItemCategories(db, columns, courseOf);
+  clearCopiedCategoryWeights(db, columns, courseOf);
+  // A zero means none: keep the scheme tidy.
+  for (const c of db.grading?.categories ?? []) if (c.dropLowest === 0) delete c.dropLowest;
+}
 
 export interface GradeTrackingLabels {
   /** Name of the added score column, e.g. "Score". */
@@ -113,6 +130,7 @@ export function ensureGradeTracking(workspace: Workspace, labels: GradeTrackingL
   if (!target) return next;
 
   const scoreId = ensureScoreColumn(target, labels.score);
+  categoriesFromRows(next, target);
   if (blocks.length > 0) return next;
 
   // No grades block yet: add one, configured with what was detected.

@@ -45,6 +45,7 @@ import {
 } from "./editor/blockOps";
 import { BlockMenu, GUTTER_BUTTON } from "./editor/BlockMenu";
 import { DraftInput } from "./editor/DraftInput";
+import { KeptCopyNote } from "./editor/KeptCopyNote";
 import {
   EditorContext,
   useEditor,
@@ -439,6 +440,12 @@ function PageEditor({
         rowsRef.current.get(id)?.focusHandle();
       },
 
+      openOptions(id) {
+        const row = rowsRef.current.get(id);
+        if (row?.openMenu) row.openMenu();
+        else row?.focusHandle();
+      },
+
       convert(id, kind: TextKind) {
         if (!isTextBlock(blocks()[indexOf(id)])) return null;
         mutate((bs) => replaceText(bs, id, (x) => convertTextBlock(x, kind)));
@@ -599,8 +606,15 @@ function PageEditor({
 
   return (
     <EditorContext.Provider value={editor}>
-      <div className="mx-auto max-w-4xl px-4 py-8 sm:px-16 sm:py-10 lg:px-20 lg:py-12">
-        <header className="mb-6 flex min-w-0 items-center gap-2 sm:mb-8 sm:gap-3">
+      {/* Wide enough for a database's columns; prose keeps a comfortable
+          line length inside it (PROSE). */}
+      <div className="mx-auto max-w-6xl px-4 py-8 sm:px-16 sm:py-10 lg:px-20 lg:py-12">
+        <header className={cn(PROSE, "mb-6 flex min-w-0 items-center gap-2 sm:mb-8 sm:gap-3")}>
+          {/* The page's one h1, for screen readers and the document outline:
+              the visible title is an editable field, which is not a heading. */}
+          <h1 dir="auto" className="sr-only">
+            {page.title.trim() || dict.editor.untitled}
+          </h1>
           <DraftInput
             value={page.icon ?? ""}
             onCommit={(icon) =>
@@ -697,7 +711,7 @@ function AddBlockButton({ label, onOpen }: { label: string; onOpen: (anchor: HTM
     [editor],
   );
   return (
-    <div className="mt-2 ps-11 sm:ps-0">
+    <div data-print="hide" className={cn(PROSE, "mt-2 ps-11 sm:ps-0")}>
       <button
         ref={ref}
         type="button"
@@ -739,6 +753,7 @@ const BlockRow = memo(function BlockRow({ block, number, isFirst, isLast }: RowP
   const { dict } = useI18n();
   const textRef = useRef<BlockTextHandle>(null);
   const handleRef = useRef<HTMLButtonElement>(null);
+  const openMenuRef = useRef<(() => void) | null>(null);
 
   useLayoutEffect(
     () =>
@@ -746,6 +761,7 @@ const BlockRow = memo(function BlockRow({ block, number, isFirst, isLast }: RowP
         focusText: (caret) =>
           textRef.current ? textRef.current.focus(caret) : handleRef.current?.focus(),
         focusHandle: () => handleRef.current?.focus(),
+        openMenu: () => openMenuRef.current?.(),
       }),
     [editor, block.id],
   );
@@ -753,9 +769,13 @@ const BlockRow = memo(function BlockRow({ block, number, isFirst, isLast }: RowP
   return (
     <div
       data-block-id={block.id}
-      className="group/row relative ps-11 data-[dragging=true]:opacity-40 sm:ps-0"
+      className={cn(
+        "group/row relative ps-11 data-[dragging=true]:opacity-40 sm:ps-0",
+        // Databases use the page's full width; everything else reads at prose width.
+        block.type !== "database_view" && PROSE,
+      )}
     >
-      <div className="absolute start-0 top-0 z-[2] flex sm:-start-16">
+      <div data-print="hide" className="absolute start-0 top-0 z-[2] flex sm:-start-16">
         {/* Pointer shortcut only: keyboard users reach the same action through
             the handle's menu ("Add block below") or by typing "/". */}
         <button
@@ -768,7 +788,13 @@ const BlockRow = memo(function BlockRow({ block, number, isFirst, isLast }: RowP
         >
           <Plus className="size-4" aria-hidden />
         </button>
-        <BlockMenu block={block} isFirst={isFirst} isLast={isLast} handleRef={handleRef} />
+        <BlockMenu
+          block={block}
+          isFirst={isFirst}
+          isLast={isLast}
+          handleRef={handleRef}
+          openMenuRef={openMenuRef}
+        />
       </div>
       {isTextBlock(block) ? (
         <TextBlockView block={block} number={number} textRef={textRef} />
@@ -778,6 +804,9 @@ const BlockRow = memo(function BlockRow({ block, number, isFirst, isLast }: RowP
     </div>
   );
 }, rowPropsEqual);
+
+/** Prose column: about 75 characters of body text, centred in the page. */
+const PROSE = "mx-auto w-full max-w-[46rem]";
 
 const WRAPPER: Partial<Record<TextKind, string>> = {
   heading1: "mt-7 mb-1",
@@ -828,6 +857,9 @@ function TextBlockView({
   // itself, so it is deliberately not keyed by the workspace `rev`: a
   // remount would throw away the caret of whoever is typing.
   return (
+    <>
+    {/* A second version the sync engine kept (see editor/KeptCopyNote). */}
+    {block.keptFrom && <KeptCopyNote pageId={editor.pageId} blockId={id} keptFrom={block.keptFrom} />}
     <div className={cn("flex min-w-0 items-start gap-2 py-1", WRAPPER[kind])}>
       <BlockMarker block={block} number={number} />
       <BlockText
@@ -848,12 +880,14 @@ function TextBlockView({
         onNavigate={(dir) => editor.navigate(id, dir)}
         onMove={(delta, text, caret) => editor.moveByKeyboard(id, delta, text, caret)}
         onEscape={() => editor.escape(id)}
+        onOptions={() => editor.openOptions(id)}
         onShortcut={(match) => editor.shortcut(id, match)}
         getSlashItems={editor.getSlashItems}
         onSlashPick={(item, text, caret) => editor.slashPick(id, item, text, caret)}
         slashLabels={{ menu: dict.page.blockMenu.insertMenu, empty: dict.page.blockMenu.noMatches }}
       />
     </div>
+    </>
   );
 }
 
@@ -911,7 +945,7 @@ function BlockBody({ block, pageId }: { block: Exclude<Block, TextBlock>; pageId
         </div>
       );
     case "database_view":
-      return <DatabaseView databaseId={block.databaseId} viewId={block.viewId} />;
+      return <DatabaseView databaseId={block.databaseId} viewId={block.viewId} pageId={pageId} />;
     case "media":
       return (
         <figure className="my-3">

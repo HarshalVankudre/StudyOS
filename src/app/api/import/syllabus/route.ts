@@ -1,3 +1,4 @@
+import { rejectCrossSite } from "@/lib/http/same-origin";
 import { auth } from "@clerk/nextjs/server";
 import {
   ExtractError,
@@ -33,6 +34,8 @@ const FORM_OVERHEAD_BYTES = 64 * 1024;
  * no_text so the client can say "scanned PDF".
  */
 export async function POST(request: Request) {
+  const crossSite = rejectCrossSite(request);
+  if (crossSite) return crossSite;
   const { userId } = await auth();
   if (!userId) return Response.json({ code: "not_authenticated" }, { status: 401 });
 
@@ -57,7 +60,7 @@ export async function POST(request: Request) {
 
   try {
     const bytes = new Uint8Array(await file.arrayBuffer());
-    const extracted = await extractSourceText(bytes, file.name, file.type);
+    const extracted = await extractSourceText(bytes, file.name, file.type, { owner: userId });
     return Response.json({
       text: extracted.text,
       kind: extracted.kind,

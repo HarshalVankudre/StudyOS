@@ -229,6 +229,11 @@ describe("FlashcardsBlock — editing", () => {
     const front2 = screen.getByRole("textbox", { name: "Front (Card 2)" });
     expect(front2).toHaveFocus();
     await user.type(front2, "Line one{Enter}line two");
+    // Typing is one write per burst (after a pause or on leaving the field),
+    // not one per key.
+    expect(front2).toHaveValue("Line one\nline two");
+    expect(deck().cards[1].front).toBe("");
+    await user.tab();
     expect(deck().cards[1].front).toBe("Line one\nline two");
 
     await user.click(screen.getByRole("button", { name: "Move up (Card 2)" }));

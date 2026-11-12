@@ -15,6 +15,7 @@ import { auth } from "@clerk/nextjs/server";
 import { z } from "zod";
 import { FeedFetchError, fetchFeed } from "@/lib/feeds/fetch-feed";
 import { readFeed, type FeedSnapshot } from "@/lib/feeds/normalize";
+import { feedLinksAvailable } from "@/lib/feeds/secret";
 import * as store from "@/lib/feeds/store";
 import { MAX_SERIES, type FeedErrorCode, type FeedInfo, type SyncSummary } from "@/lib/feeds/types";
 import { feedLabel, normalizeFeedUrl } from "@/lib/feeds/url";
@@ -52,7 +53,17 @@ async function load(url: string, uid: string): Promise<{ ok: true; feed: FeedSna
 }
 
 export type PreviewResult =
-  | { ok: true; feed: FeedSnapshot; label: string; connectedFeedId: string | null }
+  | {
+      ok: true;
+      feed: FeedSnapshot;
+      label: string;
+      connectedFeedId: string | null;
+      /**
+       * False when this server cannot keep links (production without
+       * FEED_URL_KEY): the link can still be imported once, but not connected.
+       */
+      canConnect: boolean;
+    }
   | Fail;
 
 /** Fetch a pasted link and return what it contains, without saving anything. */
@@ -71,6 +82,7 @@ export async function previewFeedAction(workspaceId: string, rawUrl: string): Pr
     feed: loaded.feed,
     label: feedLabel(normalized.url),
     connectedFeedId: await store.findFeedByUrl(uid, workspaceId, normalized.url),
+    canConnect: feedLinksAvailable(),
   };
 }
 
@@ -88,6 +100,7 @@ export async function connectFeedAction(input: z.input<typeof connectInput>): Pr
   const uid = await userId();
   const parsed = connectInput.safeParse(input);
   if (!uid || !parsed.success) return { ok: false, error: "not_found" };
+  if (!feedLinksAvailable()) return { ok: false, error: "links_unavailable" };
   const normalized = normalizeFeedUrl(parsed.data.url);
   if (!normalized.ok) return { ok: false, error: normalized.error };
   if (!(await store.ownsWorkspace(uid, parsed.data.workspaceId))) return { ok: false, error: "not_found" };

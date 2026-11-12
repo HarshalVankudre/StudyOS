@@ -37,7 +37,8 @@ export interface CommittedDraft {
  */
 export function useCommittedDraft(
   value: string,
-  onCommit: (text: string) => void,
+  /** Returning false: the text was not stored (unreadable); the field shows the stored value again. */
+  onCommit: (text: string) => void | boolean,
   delay: number = COMMIT_DELAY_MS,
 ): CommittedDraft {
   const sync = usePendingFieldRegistry();
@@ -45,6 +46,9 @@ export function useCommittedDraft(
   const [draft, setDraft] = useState(value);
   const [seen, setSeen] = useState(value);
   const [seenRev, setSeenRev] = useState(rev);
+  // Set by a commit until the field is typed in again: the stored value that
+  // results (possibly normalised, "1." stored as 1) is what the field shows.
+  const [follow, setFollow] = useState(false);
   if (rev !== seenRev) {
     // Undo, redo or a merge: the engine wrote this field's typing just before,
     // so show what is stored now (even if it equals what was stored before
@@ -54,7 +58,10 @@ export function useCommittedDraft(
     setDraft(value);
   } else if (value !== seen) {
     setSeen(value);
-    if (draft === seen) setDraft(value);
+    if (draft === seen || follow) {
+      setDraft(value);
+      setFollow(false);
+    }
   }
 
   const draftRef = useRef(value);
@@ -76,9 +83,16 @@ export function useCommittedDraft(
     if (timer.current) clearTimeout(timer.current);
     timer.current = null;
     const text = draftRef.current;
-    if (text !== committedRef.current) {
+    const stored = committedRef.current;
+    if (text !== stored) {
       committedRef.current = text;
-      onCommitRef.current(text);
+      setFollow(true);
+      if (onCommitRef.current(text) === false) {
+        committedRef.current = stored;
+        draftRef.current = stored;
+        setDraft(stored);
+        setFollow(false);
+      }
     }
   }, []);
 
@@ -86,6 +100,7 @@ export function useCommittedDraft(
     (text: string, hold = false) => {
       draftRef.current = text;
       setDraft(text);
+      setFollow(false);
       if (timer.current) clearTimeout(timer.current);
       timer.current = hold ? null : setTimeout(commitNow, delay);
     },
