@@ -3,35 +3,29 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import {
   Activity,
-  ArrowUpRight,
   Bot,
-  Check,
-  Clock3,
   Eye,
   FileCheck2,
   History,
   ShieldCheck,
-  Sparkles,
 } from "lucide-react";
 import { AccountMenu } from "@/components/account/AccountMenu";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { TodayPlan } from "@/components/today/TodayPlan";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Card,
-  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Toaster } from "@/components/ui/sonner";
+import { formatDuration, runSummaryText } from "@/lib/agents/daily-study/present";
 import { getAgentCenterSnapshot } from "@/lib/agents/daily-study/store";
 import { DAILY_MINUTES_OPTIONS } from "@/lib/agents/daily-study/types";
-import type {
-  AgentRunData,
-  DailyStudyPlanItem,
-} from "@/lib/agents/daily-study/types";
+import type { AgentRunData } from "@/lib/agents/daily-study/types";
 import type { Dictionary } from "@/lib/i18n/dictionaries/en";
 import { getI18n } from "@/lib/i18n/server";
 import { DailyAgentBootstrap } from "./DailyAgentBootstrap";
@@ -40,7 +34,6 @@ import { TimezoneInput } from "./TimezoneInput";
 import {
   runDailyStudyAgentAction,
   saveDailyStudyAgentConfigAction,
-  toggleDailyStudyItemAction,
 } from "./actions";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -49,25 +42,21 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function AgentCenterPage() {
-  const [snapshot, { dict, t, locale }] = await Promise.all([
+  const [snapshot, { dict, locale, dir }] = await Promise.all([
     getAgentCenterSnapshot(),
     getI18n(),
   ]);
   const A = dict.agentCenter;
+  const T = dict.today;
   const { config, plan, runs } = snapshot;
-  const totalMinutes = plan?.items.reduce(
-    (sum, item) => sum + item.durationMinutes,
-    0,
-  );
-  const completedCount = plan?.items.filter((item) => item.completed).length ?? 0;
-  const allDone = Boolean(plan?.items.length) && completedCount === plan?.items.length;
 
   return (
     <main className="min-h-screen bg-paper text-ink antialiased">
+      <Toaster dir={dir} position="bottom-center" />
       <DailyAgentBootstrap
         enabled={config.enabled}
         planLocalDate={plan?.localDate ?? null}
-        planningLabel={A.running}
+        planningLabel={T.planning}
       />
 
       <header className="sticky top-0 z-40 border-b border-line bg-surface/95 backdrop-blur-md">
@@ -132,84 +121,10 @@ export default async function AgentCenterPage() {
         </section>
 
         <div className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,1.65fr)_minmax(300px,0.8fr)]">
-          <Card className="gap-0 overflow-hidden border-line-strong py-0">
-            <CardHeader className="border-b border-line px-5 py-5 sm:px-6">
-              <CardTitle className="font-display text-xl font-bold">
-                {A.todayTitle}
-              </CardTitle>
-              <CardDescription className="leading-6 text-ink-soft">
-                {A.todaySubtitle}
-              </CardDescription>
-              {plan && (
-                <CardAction className="hidden gap-2 sm:flex">
-                  <Badge variant="outline">
-                    <Clock3 aria-hidden />
-                    {t(A.minutes, { count: totalMinutes ?? 0 })}
-                  </Badge>
-                  <Badge variant="outline">
-                    {t(A.sessions, { count: plan.items.length })}
-                  </Badge>
-                </CardAction>
-              )}
-            </CardHeader>
-
-            <CardContent className="px-0">
-              {!plan ? (
-                <EmptyPlan
-                  title={A.noPlanTitle}
-                  body={A.noPlanBody}
-                  runLabel={A.runNow}
-                  runningLabel={A.running}
-                  timeZone={config.timeZone}
-                />
-              ) : plan.items.length === 0 ? (
-                <div className="px-6 py-14 text-center">
-                  <span className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-lime-faint text-lime-deep">
-                    <Sparkles className="h-5 w-5" aria-hidden />
-                  </span>
-                  <h2 className="mt-4 font-display text-lg font-bold">
-                    {A.clearTitle}
-                  </h2>
-                  <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-ink-soft">
-                    {plan.summary}
-                  </p>
-                </div>
-              ) : (
-                <>
-                  {allDone && (
-                    <div className="mx-5 mt-5 flex items-center gap-2 rounded-md border border-lime/30 bg-lime-faint px-4 py-3 text-sm font-medium sm:mx-6">
-                      <Check className="h-4 w-4 text-lime-deep" aria-hidden />
-                      {A.allDone}
-                    </div>
-                  )}
-                  <ol className="divide-y divide-line">
-                    {plan.items.map((item, index) => (
-                      <PlanItem
-                        key={item.id}
-                        item={item}
-                        index={index}
-                        planId={plan.id}
-                        locale={locale}
-                        copy={A}
-                      />
-                    ))}
-                  </ol>
-                </>
-              )}
-            </CardContent>
-
-            {plan && (
-              <div className="border-t border-line bg-surface-2 px-5 py-3 font-mono text-[10px] leading-5 text-ink-faint sm:px-6">
-                {t(A.scanned, {
-                  sources: plan.sourceCount,
-                  candidates: plan.candidateCount,
-                })}
-              </div>
-            )}
-          </Card>
+          <TodayPlan plan={plan} dailyMinutes={config.dailyMinutes} variant="center" />
 
           <div className="space-y-6">
-            <Card className="gap-5 border-line-strong">
+            <Card id="settings" className="scroll-mt-24 gap-5 border-line-strong">
               <CardHeader>
                 <CardTitle className="font-display text-lg font-bold">
                   {A.settingsTitle}
@@ -249,7 +164,7 @@ export default async function AgentCenterPage() {
                     >
                       {DAILY_MINUTES_OPTIONS.map((minutes) => (
                         <option key={minutes} value={minutes}>
-                          {t(A.minutes, { count: minutes })}
+                          {formatDuration(minutes, T)}
                         </option>
                       ))}
                     </select>
@@ -280,12 +195,12 @@ export default async function AgentCenterPage() {
                 <Boundary
                   icon={<FileCheck2 aria-hidden />}
                   label={A.writesLabel}
-                  body={A.writesBody}
+                  body={T.agentWrites}
                 />
                 <Boundary
                   icon={<ShieldCheck aria-hidden />}
                   label={A.neverLabel}
-                  body={A.neverBody}
+                  body={T.agentNever}
                 />
               </CardContent>
             </Card>
@@ -316,6 +231,7 @@ export default async function AgentCenterPage() {
                     locale={locale}
                     timeZone={config.timeZone}
                     copy={A}
+                    today={T}
                   />
                 ))}
               </ul>
@@ -324,113 +240,6 @@ export default async function AgentCenterPage() {
         </Card>
       </div>
     </main>
-  );
-}
-
-function EmptyPlan({
-  title,
-  body,
-  runLabel,
-  runningLabel,
-  timeZone,
-}: {
-  title: string;
-  body: string;
-  runLabel: string;
-  runningLabel: string;
-  timeZone: string;
-}) {
-  return (
-    <div className="px-6 py-14 text-center">
-      <span className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-surface-2 text-ink-soft">
-        <Bot className="h-5 w-5" aria-hidden />
-      </span>
-      <h2 className="mt-4 font-display text-lg font-bold">{title}</h2>
-      <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-ink-soft">{body}</p>
-      <form action={runDailyStudyAgentAction} className="mt-5">
-        <TimezoneInput initialValue={timeZone} />
-        <PendingButton idleLabel={runLabel} pendingLabel={runningLabel} />
-      </form>
-    </div>
-  );
-}
-
-function PlanItem({
-  item,
-  index,
-  planId,
-  locale,
-  copy,
-}: {
-  item: DailyStudyPlanItem;
-  index: number;
-  planId: string;
-  locale: string;
-  copy: Dictionary["agentCenter"];
-}) {
-  return (
-    <li className={`px-5 py-5 sm:px-6 ${item.completed ? "bg-surface-2/70" : ""}`}>
-      <div className="flex gap-3 sm:gap-4">
-        <span
-          className={`mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full border text-[11px] font-bold ${
-            item.completed
-              ? "border-lime/40 bg-lime-faint text-lime-deep"
-              : "border-line-strong bg-surface text-ink-soft"
-          }`}
-          aria-hidden
-        >
-          {item.completed ? <Check className="h-3.5 w-3.5" /> : index + 1}
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <h3
-                className={`font-semibold leading-6 ${item.completed ? "text-ink-faint line-through" : "text-ink"}`}
-              >
-                {item.title}
-              </h3>
-              <p className="mt-1 text-xs text-ink-faint">{item.source}</p>
-            </div>
-            <div className="flex shrink-0 flex-wrap gap-1.5">
-              <Badge variant="outline">
-                <Clock3 aria-hidden />
-                {copy.minutes.replace("{count}", String(item.durationMinutes))}
-              </Badge>
-              {item.dueDate && (
-                <Badge variant="outline">
-                  {copy.due.replace("{date}", formatDay(item.dueDate, locale))}
-                </Badge>
-              )}
-              {item.dueCount && (
-                <Badge variant="outline">
-                  {copy.cardsDue.replace("{count}", String(item.dueCount))}
-                </Badge>
-              )}
-            </div>
-          </div>
-          <p className="mt-3 text-sm leading-6 text-ink-soft">{item.reason}</p>
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            <Button asChild variant="ghost" size="sm">
-              <Link href={item.href}>
-                {copy.openWorkspace}
-                <ArrowUpRight aria-hidden />
-              </Link>
-            </Button>
-            <form action={toggleDailyStudyItemAction}>
-              <input type="hidden" name="planId" value={planId} />
-              <input type="hidden" name="itemId" value={item.id} />
-              <input type="hidden" name="completed" value={String(!item.completed)} />
-              <PendingButton
-                idleLabel={item.completed ? copy.undoDone : copy.markDone}
-                pendingLabel="…"
-                variant="outline"
-                size="sm"
-              />
-            </form>
-          </div>
-        </div>
-      </div>
-    </li>
   );
 }
 
@@ -461,11 +270,13 @@ function ActivityRow({
   locale,
   timeZone,
   copy,
+  today,
 }: {
   run: AgentRunData;
   locale: string;
   timeZone: string;
   copy: Dictionary["agentCenter"];
+  today: Dictionary["today"];
 }) {
   const statusLabel =
     run.status === "completed"
@@ -485,7 +296,11 @@ function ActivityRow({
             {run.trigger === "auto" ? copy.autoTrigger : copy.manualTrigger}
           </p>
           <p className="mt-1 text-xs leading-5 text-ink-soft">
-            {run.summary || run.error || statusLabel}
+            {run.status === "failed"
+              ? today.runFailed
+              : run.result
+                ? runSummaryText(run.result, today)
+                : statusLabel}
           </p>
         </div>
       </div>
@@ -506,12 +321,4 @@ function ActivityRow({
       </div>
     </li>
   );
-}
-
-function formatDay(day: string, locale: string): string {
-  return new Date(`${day}T12:00:00.000Z`).toLocaleDateString(locale, {
-    month: "short",
-    day: "numeric",
-    timeZone: "UTC",
-  });
 }

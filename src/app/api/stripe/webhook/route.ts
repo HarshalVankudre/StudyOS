@@ -3,9 +3,11 @@ import {
   applyLiveSubscription,
   grantCreditPack,
   grantProInvoice,
+  recordBillingEvent,
   syncSubscription,
 } from "@/lib/billing";
 import { prisma } from "@/lib/db";
+import { reportError } from "@/lib/ops/report-error";
 import { recordFunnelEvent } from "@/lib/usage-limits";
 import { stripe, stripeId } from "@/lib/stripe";
 import {
@@ -46,7 +48,7 @@ export async function POST(req: Request) {
   try {
     return await handleEvent(event);
   } catch (err) {
-    console.error(`[stripe webhook] ${event.type} failed`, err);
+    reportError(err, { source: "api", route: "/api/stripe/webhook", method: "POST", eventType: event.type });
     return new Response("Handler failed", { status: 500 });
   }
 }
@@ -125,6 +127,8 @@ async function handleInvoicePaid(inv: Stripe.Invoice): Promise<Response> {
   const subId = stripeId(details?.subscription ?? legacy.subscription ?? null);
   if (!subId) return ok(); // not a subscription invoice
 
+  // When the live state was read: an older read never overwrites a newer one.
+  const fetchedAt = new Date();
   const live = await stripe.subscriptions.retrieve(subId);
   const userId =
     details?.metadata?.userId ??
@@ -133,15 +137,30 @@ async function handleInvoicePaid(inv: Stripe.Invoice): Promise<Response> {
     (await userForSubscription(subId)) ??
     (await userForCustomer(stripeId(inv.customer)));
   if (!userId) {
-    // Can't attribute this invoice yet. Non-2xx makes Stripe retry with
-    // backoff until the subscription row exists.
-    return new Response("Unknown subscription", { status: 500 });
+    // A subscription this app did not create (another integration on the
+    // same Stripe account, or one made by hand for a customer we do not
+    // know). Retrying cannot attribute it, so acknowledge it and leave one
+    // audit row for the owner instead of failing every retry for days.
+    const first = await recordBillingEvent({
+      kind: "unattributed_invoice",
+      stripeObjectId: inv.id,
+      amountCents: typeof inv.amount_paid === "number" ? inv.amount_paid : null,
+      detail: `subscription ${subId}; customer ${stripeId(inv.customer) ?? "none"}`,
+    });
+    if (first) {
+      reportError(new Error("Paid invoice of a subscription no StudyOS user owns"), {
+        source: "api",
+        route: "/api/stripe/webhook",
+        eventType: "invoice.paid",
+      });
+    }
+    return ok();
   }
 
   // Status follows the live subscription (an invoice arriving after a
   // cancellation must not flip the user back to active). This also creates
   // the row when the invoice beats checkout.session.completed.
-  const outcome = await applyLiveSubscription(userId, live);
+  const outcome = await applyLiveSubscription(userId, live, fetchedAt);
   if (outcome === "deleted_account" || outcome === "duplicate") return ok();
 
   // Money arrived for a real period: grant that period's allowance.
@@ -163,5 +182,15 @@ async function userForCustomer(customerId: string | null): Promise<string | null
     where: { stripeCustomerId: customerId },
     select: { userId: true },
   });
-  return row?.userId ?? null;
+  if (row) return row.userId;
+  // Every customer this app creates carries its user id (ensureStripeCustomer),
+  // e.g. a subscription made by hand in the dashboard for a known customer.
+  try {
+    const customer = await stripe.customers.retrieve(customerId);
+    if ("deleted" in customer && customer.deleted) return null;
+    return (customer as Stripe.Customer).metadata?.userId || null;
+  } catch (err) {
+    if ((err as { type?: string })?.type === "StripeInvalidRequestError") return null;
+    throw err;
+  }
 }

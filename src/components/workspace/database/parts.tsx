@@ -25,7 +25,7 @@ export function isEmptyValue(value: CellValue | undefined): boolean {
 }
 
 export function ShowMore({ remaining, onMore }: { remaining: number; onMore: () => void }) {
-  const { dict, t } = useI18n();
+  const { dict, plural } = useI18n();
   if (remaining <= 0) return null;
   return (
     <button
@@ -33,7 +33,7 @@ export function ShowMore({ remaining, onMore }: { remaining: number; onMore: () 
       onClick={onMore}
       className="min-h-10 w-full border-t border-line px-3 py-2 text-sm text-ink-soft transition hover:bg-hover hover:text-ink"
     >
-      {t(dict.dbViews.showMore, { count: remaining })}
+      {plural(dict.counts.showMore, remaining)}
     </button>
   );
 }

@@ -2,6 +2,8 @@
 
 import { useEffect } from "react";
 import {
+  FileStack,
+  GraduationCap,
   Heading1,
   Heading2,
   Heading3,
@@ -9,6 +11,7 @@ import {
   Lightbulb,
   Link2,
   List,
+  ListChecks,
   ListOrdered,
   Minus,
   Quote,
@@ -42,8 +45,14 @@ export function insertItemIcon(item: InsertItem): LucideIcon {
       return Table2;
     case "flashcards":
       return Layers;
+    case "quiz":
+      return ListChecks;
+    case "grades":
+      return GraduationCap;
     case "linked":
       return Link2;
+    case "studyKit":
+      return item.action.make === "material" ? FileStack : item.action.make === "page_quiz" ? ListChecks : Layers;
   }
 }
 

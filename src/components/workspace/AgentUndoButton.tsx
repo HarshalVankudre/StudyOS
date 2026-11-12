@@ -7,17 +7,20 @@ import type { Workspace } from "@/lib/workspace/types";
 export function AgentUndoButton({
   changeId,
   onUndone,
+  onUnavailable,
 }: {
   changeId: string;
   onUndone: (workspace: Workspace) => void;
+  /** The server can no longer honour this Undo (edits were saved on top). */
+  onUnavailable?: () => void;
 }) {
   const { dict } = useI18n();
   const [busy, setBusy] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const [failure, setFailure] = useState<null | "edits" | "other">(null);
 
   const undo = async () => {
     setBusy(true);
-    setFailed(false);
+    setFailure(null);
     try {
       const response = await fetch("/api/agent/undo", {
         method: "POST",
@@ -25,26 +28,39 @@ export function AgentUndoButton({
         body: JSON.stringify({ changeId }),
       });
       const body = await response.json().catch(() => null);
+      if (response.status === 409 && body?.reason === "newer_edits") {
+        setFailure("edits");
+        onUnavailable?.();
+        return;
+      }
       if (!response.ok || !body?.workspace) throw new Error("Undo failed");
       onUndone(body.workspace as Workspace);
     } catch {
-      setFailed(true);
+      setFailure("other");
     } finally {
       setBusy(false);
     }
   };
+
+  if (failure === "edits") {
+    return (
+      <p role="status" className="text-[10px] leading-snug text-ink-soft">
+        {dict.agentChat.undoBlockedByEdits}
+      </p>
+    );
+  }
 
   return (
     <div className="flex items-center gap-2">
       <button
         onClick={undo}
         disabled={busy}
-        className="rounded-full border border-line-strong bg-card px-2.5 py-1 text-[10px] font-semibold text-ink transition hover:bg-hover disabled:opacity-50"
+        className="min-h-8 rounded-full border border-line-strong bg-card px-2.5 py-1 text-[10px] font-semibold text-ink transition hover:bg-hover disabled:opacity-50"
       >
         <span aria-hidden>↶</span> {busy ? dict.agentChat.undoing : dict.agentChat.undo}
       </button>
-      {failed && (
-        <span className="text-[10px] text-rose-500">
+      {failure === "other" && (
+        <span role="status" className="text-[10px] text-rose-500">
           {dict.agentChat.undoFailed}
         </span>
       )}

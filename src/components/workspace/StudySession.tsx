@@ -25,6 +25,8 @@ import {
 import { daysBetween } from "@/lib/study/days";
 import { intervalParts } from "@/lib/study/format";
 import { CardContent } from "./study/CardContent";
+import { findCard } from "./study/gradeEdit";
+import { useWorkspace } from "./WorkspaceContext";
 
 /** A card to review, tagged with where it lives so grades persist correctly. */
 export interface ReviewItem {
@@ -63,8 +65,12 @@ const keyOf = (item: ReviewItem) => `${item.pageId}:${item.blockId}:${item.card.
  * Full-screen flashcard session.
  *
  * mode "review": spaced repetition. Every grade is reported through `onGrade`
- *   with the card's next FSRS state so the parent can persist it; a card that
- *   lands in a short (re)learning step comes back later in the same session.
+ *   with the card's next FSRS state and the moment of the answer, so the
+ *   parent can persist it (see study/gradeEdit.ts); a card that lands in a
+ *   short (re)learning step comes back later in the same session. Cards are
+ *   read from the workspace as it is now (not as it was when the session
+ *   started), so a change made meanwhile (another device, the AI agent) is
+ *   shown and built upon.
  * mode "practice": cram through any cards without touching the schedule;
  *   "again" simply shows the card once more at the end.
  *
@@ -78,18 +84,22 @@ export function StudySession({
   onGrade,
   onAnswer,
   onClose,
+  returnFocus,
 }: {
   items: ReviewItem[];
   title: string;
   mode?: StudyMode;
-  onGrade?: (item: ReviewItem, grade: Grade, next: Flashcard) => void;
+  onGrade?: (item: ReviewItem, grade: Grade, next: Flashcard, at: Date) => void;
   onAnswer?: (event: AnswerEvent) => void;
   onClose: () => void;
+  /** Focus target on close when the button that opened the session is gone. */
+  returnFocus?: () => HTMLElement | null | undefined;
 }) {
   const { dict, t } = useI18n();
   const S = dict.study;
   const T = dict.studyTools;
   const practice = mode === "practice";
+  const { workspace, status, retrySave } = useWorkspace();
 
   // Snapshot the queue: the parent's due list shrinks as cards are graded.
   const [queue, setQueue] = useState<ReviewItem[]>(() => items.filter((i) => isStudyable(i.card)));
@@ -100,14 +110,26 @@ export function StudySession({
   );
   const [answered, setAnswered] = useState(0);
 
-  const current = queue[0];
+  const queued = queue[0];
+  // The card as it is in the workspace now; the queued copy only if it was
+  // deleted meanwhile.
+  const liveCard = queued
+    ? (workspace &&
+        findCard(workspace, { pageId: queued.pageId, blockId: queued.blockId, cardId: queued.card.id })) ||
+      queued.card
+    : undefined;
+  const current = useMemo(
+    () => (queued && liveCard && liveCard !== queued.card ? { ...queued, card: liveCard } : queued),
+    [queued, liveCard],
+  );
   const finished = !current;
   const remaining = useMemo(() => new Set(queue.map(keyOf)).size, [queue]);
   const completed = total - remaining;
 
+  const currentCard = current?.card;
   const preview = useMemo(
-    () => (current && !practice ? previewCard(current.card, new Date()) : null),
-    [current, practice],
+    () => (currentCard && !practice ? previewCard(currentCard, new Date()) : null),
+    [currentCard, practice],
   );
 
   const grade = useCallback(
@@ -121,7 +143,7 @@ export function StudySession({
         if (g === "again") requeue = current;
       } else {
         const next = reviewCard(current.card, g, now);
-        onGrade?.(current, g, next);
+        onGrade?.(current, g, next, now);
         finalCard = next;
         if (isShortTerm(next)) requeue = { ...current, card: next };
       }
@@ -184,6 +206,7 @@ export function StudySession({
     >
       <DialogContent
         showCloseButton={false}
+        returnFocus={returnFocus}
         onPointerDownOutside={(event) => event.preventDefault()}
         className="inset-0 top-0 left-0 flex h-[100dvh] w-screen max-w-none translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-0 bg-paper/95 p-0 backdrop-blur-sm sm:max-w-none"
       >
@@ -192,7 +215,7 @@ export function StudySession({
         </DialogDescription>
         {/* Top bar */}
         <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-2 sm:px-5">
-          <DialogTitle className="min-w-0 truncate font-display text-sm font-bold text-ink">
+          <DialogTitle dir="auto" className="min-w-0 truncate font-display text-sm font-bold text-ink">
             {title}
           </DialogTitle>
           <div className="flex shrink-0 items-center gap-3">
@@ -218,6 +241,24 @@ export function StudySession({
         >
           <div className="h-full bg-lime transition-all" style={{ width: `${progress}%` }} />
         </div>
+        {/* The editor's save banners sit behind this full-screen session. */}
+        {!practice && status && status !== "saved" && status !== "saving" && (
+          <div
+            role="alert"
+            className="flex flex-wrap items-center justify-center gap-2 border-b border-line bg-amber-400/10 px-4 py-2 text-center text-xs font-medium text-ink"
+          >
+            <span>{dict.safety.sessionNotSaving}</span>
+            {(status === "error" || status === "offline") && retrySave && (
+              <button
+                type="button"
+                onClick={retrySave}
+                className="min-h-9 rounded-md border border-line-strong bg-card px-3 text-xs font-semibold transition hover:bg-hover"
+              >
+                {dict.safety.retry}
+              </button>
+            )}
+          </div>
+        )}
         {practice && !finished && (
           <p className="flex items-center justify-center gap-2 border-b border-line bg-sky-500/10 px-4 py-2 text-center text-xs font-medium text-sky-700 dark:text-sky-300">
             <Dumbbell className="size-4 shrink-0" aria-hidden />
@@ -250,6 +291,7 @@ export function StudySession({
                   <div className="my-1 h-px w-16 bg-line-strong" aria-hidden />
                   <CardContent
                     text={current.card.back}
+                    source={current.card.source}
                     className="text-base leading-relaxed text-ink-soft sm:text-lg"
                   />
                 </>
@@ -304,7 +346,7 @@ function SessionSummary({
   results: { hard: boolean; card: Flashcard }[];
   onClose: () => void;
 }) {
-  const { dict, t } = useI18n();
+  const { dict, t, plural } = useI18n();
   const S = dict.study;
   const T = dict.studyTools;
   const today = isoDay(new Date());
@@ -322,8 +364,8 @@ function SessionSummary({
   let nextLabel = T.nothingScheduled;
   if (nextDay) {
     const d = daysBetween(today, nextDay);
-    const when = d <= 0 ? T.dueToday : d === 1 ? T.dueTomorrow : t(T.dueInDays, { count: d });
-    nextLabel = `${when} · ${t(S.stats.cards, { count: byDay.get(nextDay)! })}`;
+    const when = d <= 0 ? T.dueToday : d === 1 ? T.dueTomorrow : plural(dict.counts.inDays, d);
+    nextLabel = `${when} · ${plural(dict.counts.cards, byDay.get(nextDay)!)}`;
   }
 
   return (

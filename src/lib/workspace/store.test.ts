@@ -17,7 +17,7 @@ interface Row {
 }
 
 const db = vi.hoisted(() => ({ rows: [] as Row[] }));
-const mocks = vi.hoisted(() => ({ auth: vi.fn() }));
+const mocks = vi.hoisted(() => ({ auth: vi.fn(), report: vi.fn() }));
 
 type Where = Record<string, unknown>;
 
@@ -42,6 +42,7 @@ function pick(row: Row, select?: Record<string, boolean>) {
 }
 
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }));
+vi.mock("@/lib/ops/report-error", () => ({ reportError: mocks.report }));
 vi.mock("@/lib/db", () => ({
   prisma: {
     workspace: {
@@ -87,9 +88,11 @@ import {
   getWorkspaceVersion,
   listTrashedWorkspaces,
   listWorkspaces,
+  parseStoredWorkspace,
   restoreWorkspace,
   saveWorkspace,
   trashWorkspace,
+  updateWorkspaceWith,
 } from "./store";
 
 function ws(id: string, name = "Semester"): Workspace {
@@ -168,6 +171,19 @@ describe("version-checked saves", () => {
     seed("a", { deletedAt: new Date() });
     expect(await saveWorkspace("a", ws("a"), 1)).toEqual({ status: "not_found" });
   });
+
+  // Postgres rejects 0x00 in a text column (verified on the local database):
+  // a NUL pasted into the workspace name made every later save fail.
+  it("keeps NUL characters out of the name and icon columns (finding 15)", async () => {
+    seed("a");
+    const doc = { ...ws("a", "Bio\u0000logy"), icon: "\u0000📚" };
+    expect(await saveWorkspace("a", doc, 1)).toEqual({ status: "saved", version: 2 });
+    const row = db.rows.find((r) => r.id === "a")!;
+    expect(row.name).toBe("Biology");
+    expect(row.icon).toBe("📚");
+    // The document itself is stored as given (JSON escapes the character).
+    expect(JSON.parse(row.data).name).toBe("Bio\u0000logy");
+  });
 });
 
 describe("trash", () => {
@@ -228,5 +244,69 @@ describe("duplicate", () => {
   it("does not duplicate a trashed workspace", async () => {
     seed("a", { deletedAt: new Date() });
     expect(await duplicateWorkspace("a", (n) => n)).toBeNull();
+  });
+});
+
+describe("updateWorkspaceWith (server-side write-through)", () => {
+  const rename = (name: string) => (draft: Workspace) => {
+    draft.pages[0].title = name;
+    return { changed: true, result: name };
+  };
+
+  it("saves through the version check and advances the version", async () => {
+    seed("a", { version: 3 });
+    const result = await updateWorkspaceWith("a", rename("Today"));
+    expect(result).toEqual({ status: "saved", version: 4, result: "Today" });
+    expect((await getWorkspace("a"))?.pages[0].title).toBe("Today");
+  });
+
+  it("re-reads and retries when another save lands in between", async () => {
+    seed("a", { version: 1 });
+    let calls = 0;
+    const result = await updateWorkspaceWith("a", (draft) => {
+      calls += 1;
+      // Another tab saves while the first attempt is in flight.
+      if (calls === 1) db.rows[0].version += 1;
+      draft.pages[0].title = "Mine";
+      return { changed: true, result: calls };
+    });
+    expect(calls).toBe(2);
+    expect(result).toEqual({ status: "saved", version: 3, result: 2 });
+  });
+
+  it("writes nothing when nothing changed, and never touches another user's workspace", async () => {
+    seed("a");
+    seed("theirs", { ownerId: "user-2" });
+    expect(await updateWorkspaceWith("a", () => ({ changed: false, result: null }))).toEqual({
+      status: "unchanged",
+      result: null,
+    });
+    expect(db.rows[0].version).toBe(1);
+    expect(await updateWorkspaceWith("theirs", rename("x"))).toEqual({ status: "not_found" });
+  });
+
+  it("gives up with a conflict after repeated concurrent saves", async () => {
+    seed("a");
+    const result = await updateWorkspaceWith("a", (draft) => {
+      db.rows[0].version += 1;
+      draft.pages[0].title = "Mine";
+      return { changed: true, result: null };
+    });
+    expect(result).toEqual({ status: "conflict" });
+  });
+});
+
+describe("unreadable stored workspaces are reported, never logged raw", () => {
+  it("reports unparseable JSON through reportError without the stored text", () => {
+    const spy = vi.spyOn(console, "error");
+    expect(parseStoredWorkspace({ id: "w-bad", data: "{\"secret exam notes" })).toBeNull();
+    expect(mocks.report).toHaveBeenCalledWith(expect.any(Error), { source: "workspace-store", workspaceId: "w-bad" });
+    expect(String(mocks.report.mock.calls[0][0].message)).not.toContain("secret");
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("reports a document that is not a workspace at all", () => {
+    expect(parseStoredWorkspace({ id: "w-num", data: "42" })).toBeNull();
+    expect(mocks.report).toHaveBeenCalledWith(expect.any(Error), { source: "workspace-store", workspaceId: "w-num" });
   });
 });

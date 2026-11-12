@@ -17,7 +17,7 @@ type Scope = "workspace" | "all";
  * reviews due over the next 2 weeks, retention and the streak.
  */
 export function StudyStats({ workspaceId, cards }: { workspaceId: string; cards: Flashcard[] }) {
-  const { dict, t, locale } = useI18n();
+  const { dict, t, locale, plural } = useI18n();
   const T = dict.studyTools;
   const [scope, setScope] = useState<Scope>("workspace");
   const [data, setData] = useState<{ scope: Scope; value: StudyDashboard | null } | null>(null);
@@ -107,7 +107,7 @@ export function StudyStats({ workspaceId, cards }: { workspaceId: string; cards:
             tone="sky"
           />
           {forecast.newWaiting > 0 && (
-            <p className="text-xs text-ink-soft">{t(T.newWaiting, { count: forecast.newWaiting })}</p>
+            <p className="text-xs text-ink-soft">{plural(dict.counts.newCardsWaiting, forecast.newWaiting)}</p>
           )}
         </div>
       )}
@@ -117,7 +117,7 @@ export function StudyStats({ workspaceId, cards }: { workspaceId: string; cards:
 
 /** Streak, banked freezes and the one message that matters right now. */
 export function StreakPanel({ streak }: { streak: StreakStatus }) {
-  const { dict, t, locale } = useI18n();
+  const { dict, t, locale, plural } = useI18n();
   const T = dict.studyTools;
   const fmtDay = (day: string) =>
     new Intl.DateTimeFormat(locale, { weekday: "long" }).format(startOfLocalDay(day));
@@ -143,14 +143,14 @@ export function StreakPanel({ streak }: { streak: StreakStatus }) {
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <span className="flex items-center gap-2">
           <Flame className="size-5 text-amber-500" aria-hidden />
-          <span className="font-display text-lg font-bold text-ink">{t(T.streakDays, { count: streak.current })}</span>
+          <span className="font-display text-lg font-bold text-ink">{plural(dict.counts.streak, streak.current)}</span>
         </span>
         <span className="flex items-center gap-1.5 text-sm text-ink-soft">
           <Snowflake className="size-4 text-sky-500" aria-hidden />
           {t(T.freezes, { count: streak.freezes })}
         </span>
         {streak.longest > streak.current && (
-          <span className="text-xs text-ink-soft">{t(T.longestStreak, { count: streak.longest })}</span>
+          <span className="text-xs text-ink-soft">{plural(dict.counts.bestStreak, streak.longest)}</span>
         )}
       </div>
       <p className={`text-sm ${tone}`}>{message}</p>

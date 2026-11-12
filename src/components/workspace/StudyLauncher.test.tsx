@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Workspace, Flashcard } from "@/lib/workspace/types";
 import { en } from "@/lib/i18n/dictionaries/en";
 import { fmt } from "@/lib/i18n/interpolate";
+import { pluralizer } from "@/lib/i18n/plural";
 import { isoDay } from "@/lib/study/srs";
 import { shiftDay } from "@/lib/study/days";
 import { EMPTY_STREAK, type StreakStatus } from "@/lib/study/streak";
@@ -35,7 +36,7 @@ vi.mock("./WorkspaceContext", async () => {
   };
 });
 vi.mock("@/lib/i18n/client", () => ({
-  useI18n: () => ({ dict: en, t: fmt, locale: "en", dir: "ltr" }),
+  useI18n: () => ({ dict: en, t: fmt, plural: pluralizer("en"), locale: "en", dir: "ltr" }),
 }));
 vi.mock("@/components/RichText", () => ({
   RichText: ({ text }: { text: string }) => <div>{text}</div>,

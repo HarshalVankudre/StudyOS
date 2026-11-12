@@ -42,4 +42,20 @@ describe("POST /api/ops/client-error", () => {
     expect(statuses.slice(0, 5).every((s) => s === 204)).toBe(true);
     expect(statuses[6]).toBe(429);
   });
+
+  it("behind a load balancer (2 trusted hops) clients do not share the balancer's bucket", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubEnv("STUDYOS_TRUSTED_PROXY_HOPS", "2");
+    try {
+      const lb = "34.117.0.1";
+      for (let i = 0; i < 6; i++) {
+        await POST(req({ message: "loop" }, {}, `198.51.100.1, ${lb}`));
+      }
+      // The looping client is limited, another client behind the same balancer is not.
+      expect((await POST(req({ message: "x" }, {}, `198.51.100.1, ${lb}`))).status).toBe(429);
+      expect((await POST(req({ message: "x" }, {}, `198.51.100.2, ${lb}`))).status).toBe(204);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
 });

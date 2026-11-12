@@ -24,6 +24,9 @@ export interface DayCounts {
   reviewPassed: number;
   /** Practice (cram) answers, which never change the schedule. */
   practice: number;
+  /** Quiz answers (practice and exam), and how many were right. */
+  quizAnswers: number;
+  quizCorrect: number;
 }
 
 export const COUNT_KEYS: (keyof DayCounts)[] = [
@@ -36,10 +39,24 @@ export const COUNT_KEYS: (keyof DayCounts)[] = [
   "reviewTotal",
   "reviewPassed",
   "practice",
+  "quizAnswers",
+  "quizCorrect",
 ];
 
 export function zeroCounts(): DayCounts {
-  return { reviews: 0, again: 0, hard: 0, good: 0, easy: 0, newCards: 0, reviewTotal: 0, reviewPassed: 0, practice: 0 };
+  return {
+    reviews: 0,
+    again: 0,
+    hard: 0,
+    good: 0,
+    easy: 0,
+    newCards: 0,
+    reviewTotal: 0,
+    reviewPassed: 0,
+    practice: 0,
+    quizAnswers: 0,
+    quizCorrect: 0,
+  };
 }
 
 export function addCounts(a: DayCounts, b: DayCounts): DayCounts {

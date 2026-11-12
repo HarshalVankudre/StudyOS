@@ -7,6 +7,26 @@
  */
 import { addCounts, countsForEvent, zeroCounts, type DayCounts, type ReviewEvent } from "./stats";
 
+/** One answered quiz question (practice or exam). Counts as studying. */
+export interface QuizAnswerEvent {
+  quiz: true;
+  correct: boolean;
+}
+
+/** Anything that counts toward the per-day study record and the streak. */
+export type StudyEvent = ReviewEvent | QuizAnswerEvent;
+
+/** The counts one study event adds to its day. */
+export function countsForStudyEvent(event: StudyEvent): DayCounts {
+  if ("quiz" in event) {
+    const c = zeroCounts();
+    c.quizAnswers = 1;
+    if (event.correct) c.quizCorrect = 1;
+    return c;
+  }
+  return countsForEvent(event);
+}
+
 export interface ReviewBatch {
   workspaceId: string;
   localDate: string;
@@ -16,10 +36,10 @@ export interface ReviewBatch {
 export class ReviewBuffer {
   private pending = new Map<string, ReviewBatch>();
 
-  add(workspaceId: string, localDate: string, event: ReviewEvent): void {
+  add(workspaceId: string, localDate: string, event: StudyEvent): void {
     const key = `${workspaceId}\u0000${localDate}`;
     const prev = this.pending.get(key);
-    const counts = addCounts(prev?.counts ?? zeroCounts(), countsForEvent(event));
+    const counts = addCounts(prev?.counts ?? zeroCounts(), countsForStudyEvent(event));
     this.pending.set(key, { workspaceId, localDate, counts });
   }
 

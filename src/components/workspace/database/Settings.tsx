@@ -47,7 +47,7 @@ export function DatabaseSettings({
   setActiveViewId: (id: string) => void;
 }) {
   const { workspace, update } = useWorkspace();
-  const { dict, t } = useI18n();
+  const { dict, t, plural } = useI18n();
   const { withDb, updateView } = useDbActions(database.id);
 
   const addProperty = () => {
@@ -65,7 +65,7 @@ export function DatabaseSettings({
     const filled = database.rows.filter((row) => hasValue(row.cells[propertyId])).length;
     if (
       filled > 0 &&
-      !window.confirm(t(dict.dbViews.deleteFieldConfirm, { name: property?.name ?? "", count: filled }))
+      !window.confirm(plural(dict.counts.deleteFieldConfirm, filled, { name: property?.name ?? "" }))
     ) {
       return;
     }
@@ -95,10 +95,9 @@ export function DatabaseSettings({
     if (
       result.lost > 0 &&
       !window.confirm(
-        t(dict.dbViews.convertConfirm, {
+        plural(dict.counts.convertConfirm, result.lost, {
           name: property.name,
           type: dict.dbSettings.propertyTypes[type],
-          count: result.lost,
         }),
       )
     ) {
@@ -249,6 +248,7 @@ export function DatabaseSettings({
                         if (p) p.name = e.target.value;
                       })
                     }
+                    dir="auto"
                     aria-label={dict.dbSettings.fieldName}
                     className={`min-w-32 flex-1 ${fieldInput}`}
                   />
@@ -313,6 +313,7 @@ export function DatabaseSettings({
                               if (o) o.label = e.target.value;
                             })
                           }
+                          dir="auto"
                           aria-label={dict.dbSettings.optionLabel}
                           className="w-24 bg-transparent text-xs text-ink-soft outline-none"
                         />
@@ -362,6 +363,7 @@ export function DatabaseSettings({
                       target.name = e.target.value;
                     })
                   }
+                  dir="auto"
                   aria-label={dict.dbSettings.viewName}
                   className={`min-w-28 flex-1 ${fieldInput}`}
                 />

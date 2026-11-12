@@ -84,7 +84,7 @@ describe("honest failure", () => {
       generateWorkspace("CS student", "model", "", undefined, "en", "", { clock: CLOCK }),
     );
     expect(result.name).toBe(sampleWorkspace.name);
-    expect(usage).toEqual({ promptTokens: 1200, completionTokens: 800 });
+    expect(usage).toMatchObject({ promptTokens: 1200, completionTokens: 800 });
   });
 
   it("treats a truncated reply as a failure (and retries it)", async () => {
@@ -215,7 +215,10 @@ describe("syllabus grading weights and exam dates", () => {
       clock: CLOCK,
     });
     const text = JSON.stringify(workspace);
-    expect(text).toContain("Problem sets");
+    // The mock has no final exam row, so the syllabus's one is added…
+    expect(text).toContain('"a-name":"Final exam","a-weight":45');
+    // …but its "Problem Set" rows already cover "Problem sets": no duplicate.
+    expect(text).not.toContain('"a-name":"Problem sets"');
     // Mock starter dates are relative to the student's today, not the server's.
     expect(text).toContain("2026-11-14");
   });

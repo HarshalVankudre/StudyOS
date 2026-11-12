@@ -49,8 +49,10 @@ export async function POST(request: Request) {
       );
     }
     if (error instanceof WorkspaceChangeUnavailableError) {
+      // "newer_edits": the student's own edits were saved on top of the
+      // change, so only the editor's undo (Ctrl/Cmd+Z) can step back now.
       return Response.json(
-        { error: T.ai.agent.undoUnavailable },
+        { error: T.ai.agent.undoUnavailable, reason: error.reason },
         { status: 409 },
       );
     }

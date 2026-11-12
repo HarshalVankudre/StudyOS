@@ -128,6 +128,8 @@ export const sampleWorkspace: Workspace = {
         },
         { id: "a-due", name: "Due", type: "date" },
         { id: "a-weight", name: "Weight %", type: "number" },
+        // The score received: empty until the work comes back graded.
+        { id: "a-score", name: "Score", type: "number" },
       ],
       views: [
         { id: "v-assign-table", name: "All", type: "table" },
@@ -334,6 +336,14 @@ export const sampleWorkspace: Workspace = {
           type: "database_view",
           databaseId: "db-assignments",
           viewId: "v-assign-board",
+        },
+        { id: "b-h-grades", type: "heading", level: 2, text: "🎯 Grades" },
+        {
+          id: "b-grades",
+          type: "grades",
+          title: "Grades",
+          databaseId: "db-assignments",
+          columns: { course: "a-course", score: "a-score", weight: "a-weight", due: "a-due" },
         },
         { id: "b-h-courses", type: "heading", level: 2, text: "📚 My courses" },
         {

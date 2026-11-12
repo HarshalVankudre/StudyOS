@@ -20,6 +20,26 @@ vi.mock("@/lib/i18n/client", () => ({
           saving: "Finishing",
         },
         areaStatus: { queued: "Queued", working: "Updating", complete: "Ready" },
+        liveSteps: {
+          reading: "Reading your workspace",
+          finding: "Finding the right pages and entries",
+          checking: "Checking the changes",
+          visual: "Building a visual",
+          lookup: "Looking something up",
+          retrying: "Fixing a change that didn’t fit",
+          working: "Working on your workspace",
+          addPage: "Adding a page",
+          editPage: "Editing a page",
+          removePage: "Removing a page",
+          addRows: "Adding entries",
+          updateRows: "Updating entries",
+          removeRows: "Removing entries",
+          addDatabase: "Adding a table",
+          editDatabase: "Adjusting a table",
+          removeDatabase: "Removing a table",
+          grades: "Setting up grades",
+          workspace: "Updating workspace settings",
+        },
       },
     },
   }),
@@ -46,29 +66,37 @@ describe("AgentProgressCard", () => {
     expect(screen.getByText("68%")).toBeInTheDocument();
   });
 
-  it("shows discoveries without technical details", () => {
+  it("describes finished steps in friendly words, never the server’s technical text", () => {
     const activity = {
       ...createInitialAgentActivity("Improving"),
       discoveries: [
         {
-          id: "layout",
-          title: "Layout understood",
-          detail: "I found where the dashboard was crowded",
+          id: "tool-1",
+          title: "Reviewed the whole workspace",
+          detail: "pages: p-1 (add_page operation), unique ids",
+          step: { tool: "summarize_workspace" },
+        },
+        {
+          id: "tool-2",
+          title: "Staged 3 change(s)",
+          step: { tool: "apply_ops", ok: true, ops: ["add_page", "update_row", "update_row"] },
         },
       ],
     };
-    render(
-      <AgentProgressCard
-        activity={activity}
-        onStop={vi.fn()}
-        stopping={false}
-        canStop
-      />,
-    );
-    expect(screen.getByText("Layout understood")).toBeInTheDocument();
-    expect(
-      screen.getByText("I found where the dashboard was crowded"),
-    ).toBeInTheDocument();
+    render(<AgentProgressCard activity={activity} onStop={vi.fn()} stopping={false} canStop />);
+    expect(screen.getByText("Reading your workspace")).toBeInTheDocument();
+    expect(screen.getByText("Adding a page · Updating entries")).toBeInTheDocument();
+    expect(screen.queryByText(/Staged|add_page|unique ids|Reviewed the whole/)).not.toBeInTheDocument();
+  });
+
+  it("shows a neutral line for steps from an older server without step data", () => {
+    const activity = {
+      ...createInitialAgentActivity("Improving"),
+      discoveries: [{ id: "tool-1", title: "Staged 2 change(s)" }],
+    };
+    render(<AgentProgressCard activity={activity} onStop={vi.fn()} stopping={false} canStop />);
+    expect(screen.getByText("Working on your workspace")).toBeInTheDocument();
+    expect(screen.queryByText(/Staged/)).not.toBeInTheDocument();
   });
 
   it("animates but does not cross the active phase ceiling", () => {
@@ -95,13 +123,13 @@ describe("AgentProgressCard", () => {
     vi.useRealTimers();
   });
 
-  it("shows thinking and a prominent Stop task control", () => {
+  it("shows the plan’s goal and a prominent Stop task control", () => {
     const onStop = vi.fn();
     render(
       <AgentProgressCard
         activity={{
           ...createInitialAgentActivity("Working"),
-          thinking: "Reviewing the course plan",
+          plan: { summary: "Add a midterm to each course", areas: [] },
         }}
         onStop={onStop}
         stopping={false}
@@ -109,7 +137,8 @@ describe("AgentProgressCard", () => {
       />,
     );
 
-    expect(screen.getByText("Reviewing the course plan")).toBeInTheDocument();
+    expect(screen.getByText("Add a midterm to each course")).toBeInTheDocument();
+    expect(screen.queryByText("Thinking…")).not.toBeInTheDocument();
     screen.getByRole("button", { name: "Stop task" }).click();
     expect(onStop).toHaveBeenCalledOnce();
   });

@@ -29,7 +29,12 @@ import {
   createProCheckout,
   getUserPlan,
   grantProInvoice,
+  isPro,
+  markAccountDeleted,
+  PRO_GRACE_MS,
   reconcileCheckoutSession,
+  runBillingMaintenance,
+  stopBillingForDeletedAccount,
 } from "./billing";
 import { getCreditBalance, PRO_MONTHLY_CREDITS } from "./credits";
 
@@ -367,5 +372,178 @@ describe("annual plan: monthly allowance on the anniversary day", () => {
     vi.setSystemTime(new Date(Date.UTC(2026, 1, 28, 13)));
     await getCreditBalance(USER);
     expect(proGrants()).toBe(1);
+  });
+});
+
+// ---- Review findings (wave 1 billing) ---------------------------------------
+
+const DAY_SEC = 86_400;
+const utc = (y: number, m: number, d: number, hh = 0) => Date.UTC(y, m - 1, d, hh) / 1000;
+function clockAt(sec: number) {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(sec * 1000));
+}
+const proGrantCount = () => h.db.ledgerFor(USER).filter((l) => l.reason === "pro_monthly").length;
+
+/** Subscribe on "Stripe" and apply the first paid invoice, as the webhook would. */
+async function subscribed(opts: { start: number; interval: "month" | "year"; periodEnd?: number }) {
+  const res = await proCheckout();
+  if (!("url" in res)) throw new Error("blocked");
+  const done = h.stripe.completeSubscriptionCheckout(sessionId(res.url), {
+    periodStart: opts.start,
+    interval: opts.interval,
+    periodEnd: opts.periodEnd,
+  });
+  await applyLiveSubscription(USER, done.subscription as never);
+  await grantProInvoice(USER, done.invoice as never, done.subscription.id);
+  return done;
+}
+
+/** Live the subscription day by day: renew when due, read the balance daily. */
+async function liveDaily(subId: string, from: number, days: number) {
+  let paid = 1;
+  for (let t = from; t < from + days * DAY_SEC; t += DAY_SEC) {
+    clockAt(t);
+    const live = h.stripe.state.subscriptions.get(subId)!;
+    if (t >= live.items.data[0].current_period_end) {
+      const { invoice } = h.stripe.renewSubscription(subId);
+      await applyLiveSubscription(USER, (await h.stripe.stripe.subscriptions.retrieve(subId)) as never);
+      await grantProInvoice(USER, invoice as never, subId);
+      paid++;
+    }
+    await getCreditBalance(USER);
+  }
+  return paid;
+}
+
+describe("finding 4: month-end anchors and boundary days", () => {
+  it.each([29, 30, 31])(
+    "a monthly subscriber anchored on day %i gets exactly one allowance per paid month",
+    async (day) => {
+      const start = utc(2026, 1, day, 12);
+      clockAt(start + 60);
+      const { subscription } = await subscribed({ start, interval: "month" });
+      const paid = await liveDaily(subscription.id, start + 3600, 364);
+      expect(paid).toBe(12);
+      expect(proGrantCount()).toBe(12);
+    },
+  );
+
+  it("an annual subscription anchored on Feb 29 gets at most twelve allowances for its year", async () => {
+    const start = utc(2028, 2, 29, 12);
+    clockAt(start + 60);
+    // Stripe may end that year on Mar 1.
+    await subscribed({ start, interval: "year", periodEnd: utc(2029, 3, 1, 12) });
+    for (let t = start; t < utc(2029, 3, 1, 11); t += DAY_SEC) {
+      clockAt(t);
+      await getCreditBalance(USER);
+    }
+    expect(proGrantCount()).toBe(12);
+  });
+
+  it("an annual period that ends a day or two late still gives twelve", async () => {
+    const start = utc(2026, 1, 1, 12);
+    clockAt(start + 60);
+    await subscribed({ start, interval: "year", periodEnd: utc(2027, 1, 3, 12) });
+    clockAt(utc(2027, 1, 3, 11));
+    await getCreditBalance(USER);
+    expect(proGrantCount()).toBe(12);
+  });
+});
+
+describe("finding 5: the later-fetched subscription state wins", () => {
+  async function liveSub() {
+    clockAt(utc(2026, 3, 1, 1));
+    const { subscription } = await subscribed({ start: utc(2026, 3, 1), interval: "month" });
+    return subscription.id as string;
+  }
+
+  it("a stale 'active' fetched before the cancellation never overwrites it", async () => {
+    const id = await liveSub();
+    const t1 = new Date(utc(2026, 3, 5) * 1000);
+    const active = await h.stripe.stripe.subscriptions.retrieve(id);
+    h.stripe.setSubscriptionStatus(id, "canceled");
+    const t2 = new Date(utc(2026, 3, 5, 1) * 1000);
+    const canceled = await h.stripe.stripe.subscriptions.retrieve(id);
+    await applyLiveSubscription(USER, canceled as never, t2);
+    await applyLiveSubscription(USER, active as never, t1);
+    expect(h.db.state.subscriptions.get(USER)?.status).toBe("canceled");
+  });
+
+  it("a canceled subscription never becomes live again, whatever the clocks say", async () => {
+    const id = await liveSub();
+    const active = await h.stripe.stripe.subscriptions.retrieve(id);
+    h.stripe.setSubscriptionStatus(id, "canceled");
+    const canceled = await h.stripe.stripe.subscriptions.retrieve(id);
+    await applyLiveSubscription(USER, canceled as never, new Date(utc(2026, 3, 5) * 1000));
+    await applyLiveSubscription(USER, active as never, new Date(utc(2026, 3, 6) * 1000));
+    expect(h.db.state.subscriptions.get(USER)?.status).toBe("canceled");
+  });
+
+  it("stops counting as Pro once the paid period plus the grace interval has passed", async () => {
+    await liveSub();
+    const end = h.db.state.subscriptions.get(USER)!.currentPeriodEnd.getTime();
+    clockAt((end + PRO_GRACE_MS - 60_000) / 1000);
+    expect(await getUserPlan()).toBe("pro");
+    expect(await isPro()).toBe(true);
+    clockAt((end + PRO_GRACE_MS + 60_000) / 1000);
+    expect(await getUserPlan()).toBe("free");
+    expect(await isPro()).toBe(false);
+  });
+
+  it("the maintenance job re-reads a row whose period lapsed (a missed renewal webhook)", async () => {
+    const id = await liveSub();
+    const end = h.stripe.state.subscriptions.get(id)!.items.data[0].current_period_end;
+    clockAt(end + 2 * DAY_SEC);
+    h.stripe.renewSubscription(id); // renewed on Stripe, webhook lost
+    await runBillingMaintenance();
+    expect(h.db.state.subscriptions.get(USER)?.currentPeriodEnd.getTime()).toBe(
+      h.stripe.state.subscriptions.get(id)!.items.data[0].current_period_end * 1000,
+    );
+  });
+});
+
+describe("finding 6: account deletion stops billing durably", () => {
+  it("captures the Stripe ids at the tombstone and keeps retrying until the cancel succeeds", async () => {
+    clockAt(utc(2026, 3, 1, 1));
+    const { subscription } = await subscribed({ start: utc(2026, 3, 1), interval: "month" });
+    await markAccountDeleted(USER);
+    h.db.state.subscriptions.delete(USER); // the erase ran
+    h.stripe.failNext("subscriptions.cancel", { times: 2 });
+
+    expect(await stopBillingForDeletedAccount(USER)).toBe(false);
+    expect(h.stripe.state.subscriptions.get(subscription.id)?.status).toBe("active");
+    expect(h.db.state.intents).toEqual([
+      expect.objectContaining({ kind: "cancel_account_billing", key: USER, state: "pending", attempts: 1 }),
+    ]);
+
+    await runBillingMaintenance(); // Stripe still down
+    expect(h.db.state.intents[0]).toMatchObject({ state: "pending", attempts: 2 });
+    await runBillingMaintenance();
+    expect(h.stripe.state.subscriptions.get(subscription.id)?.status).toBe("canceled");
+    expect(h.db.state.intents[0]).toMatchObject({ state: "done" });
+  });
+});
+
+describe("finding 8: months of a paid year are never dropped", () => {
+  it("an annual subscriber who never opens the app gets every month when the year renews", async () => {
+    clockAt(utc(2026, 1, 1, 1));
+    const { subscription } = await subscribed({ start: utc(2026, 1, 1), interval: "year" });
+    clockAt(utc(2027, 1, 1, 1));
+    const { invoice } = h.stripe.renewSubscription(subscription.id);
+    await applyLiveSubscription(USER, (await h.stripe.stripe.subscriptions.retrieve(subscription.id)) as never);
+    await grantProInvoice(USER, invoice as never, subscription.id);
+    expect(proGrantCount()).toBe(13); // Jan 2026 + Feb..Dec 2026 + Jan 2027
+  });
+
+  it("canceled at period end: the year's months are still there after it ends", async () => {
+    clockAt(utc(2026, 1, 1, 1));
+    const { subscription } = await subscribed({ start: utc(2026, 1, 1), interval: "year" });
+    clockAt(utc(2027, 1, 1));
+    h.stripe.setSubscriptionStatus(subscription.id, "canceled"); // the period ran out
+    await applyLiveSubscription(USER, (await h.stripe.stripe.subscriptions.retrieve(subscription.id)) as never);
+    clockAt(utc(2027, 3, 1));
+    await getCreditBalance(USER);
+    expect(proGrantCount()).toBe(12);
   });
 });

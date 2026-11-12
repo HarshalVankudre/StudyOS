@@ -43,7 +43,7 @@ export function GalleryView({ db, view, rows, actions, onOpen, onAdd, empty }: V
                   onClick={() => onOpen(row.id)}
                   className={`min-h-9 min-w-0 flex-1 py-1.5 text-start text-sm font-semibold ${done ? "text-ink-faint line-through decoration-ink-faint/50" : "text-ink"}`}
                 >
-                  <span className="line-clamp-2">{name || dict.db.untitled}</span>
+                  <span dir="auto" className="line-clamp-2">{name || dict.db.untitled}</span>
                 </button>
               </div>
               {dateProp && !isEmptyValue(row.cells[dateProp.id]) && (
@@ -53,7 +53,7 @@ export function GalleryView({ db, view, rows, actions, onOpen, onAdd, empty }: V
                 <dl className="space-y-1">
                   {filled.map((p) => (
                     <div key={p.id} className="flex min-w-0 items-baseline gap-2">
-                      <dt className="w-20 shrink-0 truncate text-[11px] text-ink-faint">{p.name}</dt>
+                      <dt className="w-20 shrink-0 truncate text-[11px] text-ink-faint"><bdi>{p.name}</bdi></dt>
                       <dd className="min-w-0 flex-1">
                         <CellDisplay prop={p} value={row.cells[p.id]} complete={done} />
                       </dd>

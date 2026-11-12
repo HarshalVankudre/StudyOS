@@ -4,6 +4,7 @@ import { auth, currentUser } from "@clerk/nextjs/server";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
+import { reportError } from "@/lib/ops/report-error";
 import {
   createCreditPackCheckout,
   createProCheckout,
@@ -60,7 +61,7 @@ export async function startCheckoutAction(formData?: FormData): Promise<void> {
     target =
       "url" in result ? result.url : "/pricing?billing=already_subscribed";
   } catch (err) {
-    console.error("[billing] could not start Pro checkout", err);
+    reportError(err, { source: "billing", route: "startCheckoutAction", userId });
     target = "/pricing?billing=error";
   }
   redirect(target);
@@ -85,7 +86,7 @@ export async function buyCreditsAction(): Promise<void> {
     });
     target = url;
   } catch (err) {
-    console.error("[billing] could not start credit checkout", err);
+    reportError(err, { source: "billing", route: "buyCreditsAction", userId });
     target = "/app/credits?billing=error";
   }
   redirect(target);
@@ -109,7 +110,7 @@ export async function manageBillingAction(): Promise<void> {
     });
     target = session.url;
   } catch (err) {
-    console.error("[billing] could not open the billing portal", err);
+    reportError(err, { source: "billing", route: "manageBillingAction", userId });
     target = "/pricing?billing=error";
   }
   redirect(target);

@@ -2,17 +2,12 @@
 import "server-only";
 import { toolRegistry } from "./registry";
 import { createSandboxTool } from "./sandbox-tool";
+import { sandboxRunQuota } from "./sandbox-quota";
 import { DaytonaSandboxRunner } from "@/lib/ai/sandbox/daytona";
 import { createAssetService } from "@/lib/assets/service";
 import { gcsAssetStore } from "@/lib/assets/storage";
 import { prismaAssetRepo } from "@/lib/assets/repo";
 import { agentSandboxEnabled } from "@/lib/flags";
-import { checkUsageLimit } from "@/lib/usage-limits";
-import {
-  chargeCredits,
-  getCreditBalance,
-  SANDBOX_RUN_CREDITS,
-} from "@/lib/credits";
 
 // All imports are static (ES2017 target forbids top-level await).
 // Construction of the Daytona client and asset service is guarded behind the
@@ -25,20 +20,8 @@ if (agentSandboxEnabled()) {
       runner: new DaytonaSandboxRunner(),
       createAsset: assets.createAsset,
       enabled: true,
-      quota: {
-        // Every run spins a paid Daytona container: cap per day AND require
-        // enough credits to pay for it. Balance is checked first (no side
-        // effect) so a broke user's reject doesn't burn a daily-quota slot.
-        check: async (ownerId) => {
-          if ((await getCreditBalance(ownerId)) < SANDBOX_RUN_CREDITS) {
-            return { allowed: false };
-          }
-          return checkUsageLimit(ownerId, "sandbox_run");
-        },
-        settle: async (ownerId) => {
-          await chargeCredits(ownerId, SANDBOX_RUN_CREDITS, "sandbox_run");
-        },
-      },
+      // Credits reserved before each run, a daily quota (sandbox-quota.ts).
+      quota: sandboxRunQuota(),
     }),
   );
 }

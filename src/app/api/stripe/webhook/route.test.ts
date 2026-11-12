@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { createFakeDb, createFakeStripe } from "@/test/billing-fakes";
 
 // In-memory Prisma + Stripe: every scenario runs the real webhook, billing and
@@ -7,6 +7,7 @@ const h = vi.hoisted(() => ({
   db: null as unknown as ReturnType<typeof createFakeDb>,
   stripe: null as unknown as ReturnType<typeof createFakeStripe>,
   funnel: vi.fn(),
+  authUser: null as string | null,
 }));
 
 vi.mock("@/lib/db", async () => {
@@ -21,16 +22,20 @@ vi.mock("@/lib/stripe", async (importOriginal) => {
   return { ...actual, stripe: h.stripe.stripe };
 });
 vi.mock("@/lib/usage-limits", () => ({ recordFunnelEvent: h.funnel }));
-vi.mock("@clerk/nextjs/server", () => ({ auth: vi.fn(async () => ({ userId: null })) }));
+vi.mock("@clerk/nextjs/server", () => ({ auth: vi.fn(async () => ({ userId: h.authUser })) }));
+vi.mock("@/lib/ops/report-error", () => ({ reportError: vi.fn() }));
 
 import { POST } from "./route";
 import { webhookRequest } from "@/test/billing-fakes";
 import {
   createCreditPackCheckout,
   createProCheckout,
+  getUserPlan,
   markAccountDeleted,
+  reconcileCheckoutSession,
+  runBillingMaintenance,
 } from "@/lib/billing";
-import { FREE_SIGNUP_CREDITS, PRO_MONTHLY_CREDITS } from "@/lib/credits";
+import { FREE_SIGNUP_CREDITS, getCreditBalance, PRO_MONTHLY_CREDITS } from "@/lib/credits";
 
 const USER = "user_1";
 const DAY = 86400;
@@ -59,8 +64,21 @@ beforeEach(() => {
   h.db.reset();
   h.stripe.reset();
   h.funnel.mockReset();
+  h.authUser = null;
   process.env.STRIPE_WEBHOOK_SECRET = "whsec_test";
 });
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
+
+/** Seconds since the epoch of a UTC date. */
+const at = (y: number, m: number, d: number, hh = 0) => Date.UTC(y, m - 1, d, hh) / 1000;
+/** Move the (Date-only) fake clock. */
+function clockAt(sec: number) {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(sec * 1000));
+}
 
 describe("signature + failures", () => {
   it("rejects an invalid signature", async () => {
@@ -174,6 +192,8 @@ describe("invoice.paid credit grants", () => {
     await send("invoice.paid", {
       id: "in_legacy",
       parent: null,
+      total: 800,
+      amount_paid: 800,
       subscription: subscription.id,
       subscription_details: { metadata: { userId: USER } },
       lines: { data: [legacyLine], has_more: false },
@@ -192,23 +212,24 @@ describe("invoice.paid credit grants", () => {
     expect(row()?.allowancePeriodEnd?.getTime()).toBe(end * 1000);
   });
 
-  it("monthly → annual switch: the new period line grants and moves the period", async () => {
+  it("monthly → annual switch: the month already granted is not granted again; the period moves", async () => {
     const start = 1_767_225_600;
+    clockAt(start + 3600);
     const { session, subscription, invoice } = await subscribe({ periodStart: start, periodEnd: start + 31 * DAY });
     await send("checkout.session.completed", session);
     await send("invoice.paid", invoice);
     const switchAt = start + 10 * DAY;
-    const inv = h.stripe.subscriptionInvoice(subscription.id, {
-      start: switchAt, end: switchAt + 365 * DAY, amount: 8000, billingReason: "subscription_update",
-    });
-    // Stripe adds a negative proration line for unused monthly time.
-    inv.lines.data.unshift({
-      ...inv.lines.data[0], id: "il_credit", amount: -540,
-      parent: { type: "subscription_item_details", subscription_item_details: { proration: true, subscription: subscription.id } },
-    });
+    clockAt(switchAt + 60);
+    const { invoice: inv } = h.stripe.switchPrice(subscription.id, { interval: "year", at: switchAt, unusedCredit: 540 });
     await send("invoice.paid", inv);
-    expect(proGrants()).toHaveLength(2);
+    // January was already paid for and granted by the monthly invoice.
+    expect(proGrants()).toHaveLength(1);
     expect(row()?.allowancePeriodStart?.getTime()).toBe(switchAt * 1000);
+    expect(row()?.allowanceYearly).toBe(true);
+    // February's allowance arrives on the annual's first anniversary.
+    clockAt(switchAt + 31 * DAY);
+    await getCreditBalance(USER);
+    expect(proGrants()).toHaveLength(2);
   });
 
   it("never rewinds the allowance period for a late, older invoice", async () => {
@@ -300,11 +321,13 @@ describe("refunds and disputes", () => {
     expect(h.db.balance(USER)).toBe(FREE_SIGNUP_CREDITS);
   });
 
-  it("never grants a pack that was refunded before the grant landed", async () => {
+  it("a pack refunded in full before the grant landed adds nothing", async () => {
     const { session, chargeId, paymentIntent, amount } = await buyPack();
     await send("charge.refunded", { id: chargeId, payment_intent: paymentIntent, amount, amount_refunded: amount, customer: session.customer });
     await send("checkout.session.completed", session); // delayed delivery
-    expect(h.db.ledgerFor(USER).filter((l) => l.reason === "credit_purchase")).toHaveLength(0);
+    await send("checkout.session.completed", session); // retry
+    expect(h.db.balance(USER)).toBe(FREE_SIGNUP_CREDITS);
+    expect(h.db.ledgerSum(USER)).toBe(h.db.balance(USER));
   });
 
   it("claws back on dispute and restores when the dispute is won", async () => {
@@ -366,5 +389,325 @@ describe("after account deletion", () => {
     await send("checkout.session.completed", session);
     expect(h.db.state.accounts.has(USER)).toBe(false);
     expect(h.stripe.state.refunds).toEqual([expect.objectContaining({ payment_intent: paymentIntent })]);
+  });
+});
+
+// ---- Review findings (wave 1 billing) ---------------------------------------
+
+/** Two subscriptions for one user (a race Stripe let through): A tracked, B arriving. */
+async function twoSubscriptions() {
+  const a = await createProCheckout({ userId: USER, email: null, priceId: "p", origin: "o" });
+  const b = await createProCheckout({ userId: USER, email: null, priceId: "p", origin: "o" });
+  if (!("url" in a) || !("url" in b)) throw new Error("blocked");
+  const aId = a.url.split("/").pop()!;
+  h.stripe.state.sessions.get(aId)!.status = "open";
+  const first = h.stripe.completeSubscriptionCheckout(aId);
+  const second = h.stripe.completeSubscriptionCheckout(b.url.split("/").pop()!);
+  await send("checkout.session.completed", first.session);
+  await send("invoice.paid", first.invoice);
+  return { first, second };
+}
+
+describe("finding 1: a duplicate is refunded even when Stripe fails after the cancel", () => {
+  it.each(["invoicePayments.list", "refunds.create"])(
+    "%s fails once: Stripe's retry (subscription already canceled) still refunds and records it",
+    async (path) => {
+      const { first, second } = await twoSubscriptions();
+      h.stripe.failNext(path);
+      expect((await send("checkout.session.completed", second.session)).status).toBe(500);
+      expect(h.stripe.state.subscriptions.get(second.subscription.id)?.status).toBe("canceled");
+
+      expect((await send("checkout.session.completed", second.session)).status).toBe(200);
+      expect(h.stripe.state.refunds).toEqual([
+        expect.objectContaining({ payment_intent: second.paymentIntent, reason: "duplicate" }),
+      ]);
+      expect(h.db.state.billingEvents.filter((e) => e.kind === "duplicate_subscription")).toHaveLength(1);
+      // Its invoice never grants, before or after the refund.
+      await send("invoice.paid", second.invoice);
+      expect(proGrants()).toHaveLength(1);
+      expect(row()).toMatchObject({ status: "active", stripeSubscriptionId: first.subscription.id });
+    },
+  );
+
+  it("an invoice.paid for the duplicate that lands while its refund is pending grants nothing and finishes the refund", async () => {
+    const { second } = await twoSubscriptions();
+    h.stripe.failNext("refunds.create");
+    expect((await send("checkout.session.completed", second.session)).status).toBe(500);
+    expect((await send("invoice.paid", second.invoice)).status).toBe(200);
+    expect(proGrants()).toHaveLength(1);
+    expect(h.stripe.state.refunds).toHaveLength(1);
+  });
+
+  it("an invoice.paid running between the cancel and the audit record grants nothing", async () => {
+    const { second } = await twoSubscriptions();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const list = h.stripe.stripe.invoicePayments.list;
+    vi.spyOn(h.stripe.stripe.invoicePayments, "list").mockImplementationOnce(async (...args: unknown[]) => {
+      await gate;
+      return (list as (...a: unknown[]) => Promise<unknown>)(...args) as never;
+    });
+    const firstHandler = send("checkout.session.completed", second.session);
+    await vi.waitFor(() =>
+      expect(h.stripe.state.subscriptions.get(second.subscription.id)?.status).toBe("canceled"),
+    );
+    await send("invoice.paid", second.invoice);
+    release();
+    expect((await firstHandler).status).toBe(200);
+    expect(proGrants()).toHaveLength(1);
+    expect(h.stripe.state.refunds).toHaveLength(1);
+  });
+
+  it("a subscription paid after deletion is refunded on retry, or by the maintenance job", async () => {
+    const res = await createProCheckout({ userId: USER, email: null, priceId: "p", origin: "o" });
+    if (!("url" in res)) throw new Error("blocked");
+    await markAccountDeleted(USER);
+    const { session, paymentIntent } = h.stripe.completeSubscriptionCheckout(res.url.split("/").pop()!);
+    h.stripe.failNext("refunds.create");
+    expect((await send("checkout.session.completed", session)).status).toBe(500);
+    // Stripe gives up retrying; the daily job finishes the job.
+    await runBillingMaintenance();
+    expect(h.stripe.state.refunds).toEqual([expect.objectContaining({ payment_intent: paymentIntent })]);
+    expect(h.db.state.billingEvents.filter((e) => e.kind === "deleted_account_subscription")).toHaveLength(1);
+    expect(h.db.state.intents.every((i) => i.state === "done")).toBe(true);
+  });
+});
+
+describe("finding 2: refunded annual, then a new subscription", () => {
+  it("a refunded annual invoice accrues no further months", async () => {
+    clockAt(at(2026, 1, 1, 1));
+    const { session, invoice, chargeId } = await subscribe({ periodStart: at(2026, 1, 1), interval: "year" });
+    await send("checkout.session.completed", session);
+    await send("invoice.paid", invoice);
+    clockAt(at(2026, 1, 20));
+    await send("charge.refunded", h.stripe.refundCharge(chargeId!));
+    clockAt(at(2026, 5, 15));
+    await getCreditBalance(USER);
+    expect(proGrants()).toHaveLength(1);
+  });
+
+  it("an annual refunded and canceled early, then a monthly resubscription: no months of the old year", async () => {
+    clockAt(at(2026, 1, 1, 1));
+    const a = await subscribe({ periodStart: at(2026, 1, 1), interval: "year" });
+    await send("checkout.session.completed", a.session);
+    await send("invoice.paid", a.invoice);
+    clockAt(at(2026, 1, 20));
+    await send("charge.refunded", h.stripe.refundCharge(a.chargeId!));
+    h.stripe.setSubscriptionStatus(a.subscription.id, "canceled");
+    await send("customer.subscription.deleted", a.subscription);
+
+    clockAt(at(2026, 6, 10));
+    const b = await subscribe({ periodStart: at(2026, 6, 10), interval: "month" });
+    h.authUser = USER;
+    await reconcileCheckoutSession(b.session.id); // success redirect, before any webhook
+    expect(row()).toMatchObject({ status: "active", stripeSubscriptionId: b.subscription.id });
+    await getCreditBalance(USER);
+    expect(proGrants()).toHaveLength(1); // January only
+    await send("invoice.paid", b.invoice);
+    clockAt(at(2026, 7, 1));
+    await getCreditBalance(USER);
+    expect(proGrants()).toHaveLength(2); // + June
+  });
+});
+
+describe("finding 3: plan switches in the billing portal", () => {
+  it("switching monthly ↔ annual repeatedly grants one allowance per month of coverage", async () => {
+    const jan1 = at(2026, 1, 1);
+    clockAt(jan1 + 3600);
+    const { session, subscription, invoice } = await subscribe({ periodStart: jan1, interval: "month" });
+    await send("checkout.session.completed", session);
+    await send("invoice.paid", invoice);
+    const switches: [number, "year" | "month", number][] = [
+      [at(2026, 1, 10), "year", 580],
+      [at(2026, 1, 12), "month", 7900], // paid entirely by the proration credit
+      [at(2026, 1, 14), "year", 770],
+      [at(2026, 1, 16), "month", 7800],
+    ];
+    for (const [when, interval, unusedCredit] of switches) {
+      clockAt(when + 60);
+      const { invoice: inv } = h.stripe.switchPrice(subscription.id, { interval, at: when, unusedCredit });
+      await send("customer.subscription.updated", subscription);
+      await send("invoice.paid", inv);
+      await getCreditBalance(USER);
+    }
+    expect(proGrants()).toHaveLength(1);
+    // The monthly renewal paid from the customer's balance in February grants.
+    clockAt(at(2026, 2, 16, 1));
+    const { invoice: feb } = h.stripe.renewSubscription(subscription.id, { balanceApplied: 800 });
+    await send("invoice.paid", feb);
+    expect(proGrants()).toHaveLength(2);
+  });
+
+  it("an invoice whose total is zero after proration grants nothing", async () => {
+    clockAt(at(2026, 3, 1, 1));
+    const { session, subscription, invoice } = await subscribe({ periodStart: at(2026, 3, 1), interval: "year" });
+    await send("checkout.session.completed", session);
+    await send("invoice.paid", invoice);
+    clockAt(at(2026, 4, 2));
+    const { invoice: inv } = h.stripe.switchPrice(subscription.id, { interval: "month", at: at(2026, 4, 2), unusedCredit: 7300 });
+    expect(inv.amount_paid).toBe(0);
+    await send("invoice.paid", inv);
+    await getCreditBalance(USER);
+    // March (paid invoice) + April (annual anniversary on Apr 1, flushed at the switch).
+    expect(proGrants()).toHaveLength(2);
+  });
+});
+
+describe("finding 5: concurrent webhook handlers", () => {
+  it("a handler that fetched 'active' before the cancellation cannot restore Pro after it", async () => {
+    clockAt(at(2026, 3, 1, 1));
+    const { session, subscription } = await subscribe({ periodStart: at(2026, 3, 1), interval: "month" });
+    await send("checkout.session.completed", session);
+    const activeSnapshot = await h.stripe.stripe.subscriptions.retrieve(subscription.id);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    vi.spyOn(h.stripe.stripe.subscriptions, "retrieve").mockImplementationOnce(async () => {
+      await gate; // handler 1's read of the live state is slow
+      return activeSnapshot as never;
+    });
+    const handler1 = send("customer.subscription.updated", subscription);
+
+    clockAt(at(2026, 3, 1, 2));
+    h.stripe.setSubscriptionStatus(subscription.id, "canceled");
+    await send("customer.subscription.deleted", subscription);
+    expect(row()?.status).toBe("canceled");
+
+    release();
+    expect((await handler1).status).toBe(200);
+    expect(row()?.status).toBe("canceled");
+    h.authUser = USER;
+    expect(await getUserPlan()).toBe("free");
+  });
+});
+
+describe("finding 9: refunds and disputes", () => {
+  it("(a) an inquiry claws back, and closing it as warning_closed restores", async () => {
+    const { session, chargeId } = await buyPack();
+    await send("checkout.session.completed", session);
+    const inquiry = h.stripe.dispute(chargeId, { status: "warning_needs_response" });
+    await send("charge.dispute.created", inquiry);
+    expect(h.db.balance(USER)).toBe(FREE_SIGNUP_CREDITS);
+    await send("charge.dispute.closed", { ...inquiry, status: "warning_closed" });
+    await send("charge.dispute.closed", { ...inquiry, status: "warning_closed" });
+    expect(h.db.balance(USER)).toBe(FREE_SIGNUP_CREDITS + 1000);
+    expect(h.db.ledgerSum(USER)).toBe(h.db.balance(USER));
+  });
+
+  it("(b) a 50% refund plus a lost dispute on the other 50% claws back the whole pack", async () => {
+    const { session, chargeId } = await buyPack();
+    await send("checkout.session.completed", session);
+    await send("charge.refunded", h.stripe.refundCharge(chargeId, 500));
+    const dispute = h.stripe.dispute(chargeId, { amount: 500 });
+    await send("charge.dispute.created", dispute);
+    await send("charge.dispute.closed", { ...dispute, status: "lost" });
+    expect(h.db.balance(USER)).toBe(FREE_SIGNUP_CREDITS);
+  });
+
+  it("(b) a lost dispute is counted even when its 'created' event never arrived", async () => {
+    const { session, chargeId } = await buyPack();
+    await send("checkout.session.completed", session);
+    await send("charge.dispute.closed", h.stripe.dispute(chargeId, { status: "lost" }));
+    expect(h.db.balance(USER)).toBe(FREE_SIGNUP_CREDITS);
+  });
+
+  it("(c) a $1 partial refund before the grant: the pack is granted net (900)", async () => {
+    const { session, chargeId } = await buyPack();
+    await send("charge.refunded", h.stripe.refundCharge(chargeId, 100));
+    await send("checkout.session.completed", session);
+    await send("checkout.session.completed", session);
+    expect(h.db.balance(USER)).toBe(FREE_SIGNUP_CREDITS + 900);
+  });
+
+  it("(c) a dispute before the grant that is then won ends with the full pack", async () => {
+    const { session, chargeId } = await buyPack();
+    const dispute = h.stripe.dispute(chargeId);
+    await send("charge.dispute.created", dispute);
+    await send("checkout.session.completed", session);
+    expect(h.db.balance(USER)).toBe(FREE_SIGNUP_CREDITS);
+    await send("charge.dispute.closed", { ...dispute, status: "won" });
+    expect(h.db.balance(USER)).toBe(FREE_SIGNUP_CREDITS + 1000);
+  });
+
+  it("(d) a dispute on the annual payment stops Pro and accrual; winning it restores both", async () => {
+    clockAt(at(2026, 1, 1, 1));
+    const { session, invoice, chargeId } = await subscribe({ periodStart: at(2026, 1, 1), interval: "year" });
+    await send("checkout.session.completed", session);
+    await send("invoice.paid", invoice);
+    h.authUser = USER;
+    expect(await getUserPlan()).toBe("pro");
+
+    clockAt(at(2026, 2, 10));
+    await getCreditBalance(USER); // February granted
+    const dispute = h.stripe.dispute(chargeId!);
+    await send("charge.dispute.created", dispute);
+    expect(await getUserPlan()).toBe("free");
+    clockAt(at(2026, 5, 10));
+    await getCreditBalance(USER);
+    expect(proGrants()).toHaveLength(2);
+
+    await send("charge.dispute.closed", { ...dispute, status: "won" });
+    expect(await getUserPlan()).toBe("pro");
+    await getCreditBalance(USER);
+    expect(proGrants()).toHaveLength(5); // March, April, May
+  });
+
+  it("(d) a lost dispute on the subscription payment cancels the subscription", async () => {
+    clockAt(at(2026, 1, 1, 1));
+    const { session, invoice, chargeId, subscription } = await subscribe({ periodStart: at(2026, 1, 1), interval: "year" });
+    await send("checkout.session.completed", session);
+    await send("invoice.paid", invoice);
+    const dispute = h.stripe.dispute(chargeId!);
+    await send("charge.dispute.created", dispute);
+    await send("charge.dispute.closed", { ...dispute, status: "lost" });
+    expect(h.stripe.state.subscriptions.get(subscription.id)?.status).toBe("canceled");
+    h.authUser = USER;
+    expect(await getUserPlan()).toBe("free");
+  });
+
+  it("(e) credits spent before a refund are not taken out of a later purchase", async () => {
+    const first = await buyPack();
+    await send("checkout.session.completed", first.session);
+    h.db.state.accounts.get(USER)!.balance = 100; // spent the rest
+    await send("charge.refunded", h.stripe.refundCharge(first.chargeId, 500)); // takes 100, forgives 400
+    expect(h.db.balance(USER)).toBe(0);
+    const second = await buyPack();
+    await send("checkout.session.completed", second.session);
+    expect(h.db.balance(USER)).toBe(1000);
+    await send("charge.refunded", h.stripe.refundCharge(first.chargeId)); // the other half of pack 1
+    expect(h.db.balance(USER)).toBe(500);
+  });
+});
+
+describe("finding 7: a pack paid while the account is being deleted", () => {
+  it("is refunded, and no credit account is recreated", async () => {
+    const { session, paymentIntent } = await buyPack();
+    await markAccountDeleted(USER); // tombstone first; the erase has not run yet
+    await send("checkout.session.completed", session);
+    expect(h.db.ledgerFor(USER).filter((l) => l.reason === "credit_purchase")).toHaveLength(0);
+    expect(h.stripe.state.refunds).toEqual([expect.objectContaining({ payment_intent: paymentIntent })]);
+  });
+});
+
+describe("finding 11: invoices of subscriptions this app did not create", () => {
+  it("are acknowledged and recorded once instead of failing every retry", async () => {
+    h.stripe.addSubscription({ id: "sub_foreign", customer: "cus_foreign" });
+    const inv = h.stripe.subscriptionInvoice("sub_foreign", { start: at(2026, 1, 1), end: at(2026, 2, 1) });
+    expect((await send("invoice.paid", inv)).status).toBe(200);
+    expect((await send("invoice.paid", inv)).status).toBe(200);
+    expect(h.db.state.billingEvents.filter((e) => e.kind === "unattributed_invoice")).toEqual([
+      expect.objectContaining({ stripeObjectId: inv.id }),
+    ]);
+    expect(h.db.state.ledger).toHaveLength(0);
+  });
+
+  it("are attributed through the customer's metadata when the subscription has none", async () => {
+    const pack = await createCreditPackCheckout({ userId: USER, email: null, origin: "o" });
+    const customer = h.stripe.state.sessions.get(pack.url.split("/").pop()!)!.customer;
+    h.db.state.subscriptions.delete(USER); // no local row to find it by
+    h.stripe.addSubscription({ id: "sub_dash", customer });
+    const inv = h.stripe.subscriptionInvoice("sub_dash", { start: at(2026, 1, 1), end: at(2026, 2, 1) });
+    expect((await send("invoice.paid", inv)).status).toBe(200);
+    expect(row()).toMatchObject({ status: "active", stripeSubscriptionId: "sub_dash" });
+    expect(proGrants()).toHaveLength(1);
   });
 });

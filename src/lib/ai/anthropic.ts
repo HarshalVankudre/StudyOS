@@ -12,6 +12,7 @@
  * - Assistant prefill is unsupported, so a trailing assistant turn is rejected.
  */
 import Anthropic, { APIUserAbortError } from "@anthropic-ai/sdk";
+import { AiTruncatedError } from "./ai-errors";
 import { getAnthropicClient } from "./anthropic-client";
 import { recordUsage } from "./usage-meter";
 import type { ChatMessage } from "./openrouter";
@@ -33,6 +34,24 @@ export interface AnthropicCallOptions {
   onReasoning?: (text: string) => void;
   /** Called with visible answer text as it streams. */
   onContent?: (text: string) => void;
+  /**
+   * Prompt caching for a prefix reused across calls (an agent loop): an
+   * explicit breakpoint on the system prompt, plus automatic caching of the
+   * growing conversation tail. The prefix must be byte-identical between
+   * calls for the cache to hit (see shared/prompt-caching guidance).
+   */
+  cache?: boolean;
+  /**
+   * How much the model thinks before answering (`output_config.effort`).
+   * Omitted: the model's default (medium on Claude Haiku 5.5).
+   */
+  effort?: "low" | "medium" | "high";
+  /**
+   * Answer without thinking (`thinking: {type: "disabled"}`, accepted at
+   * effort high or below). For long, well-specified outputs where the
+   * thinking was done in an earlier step. Ignored when `onReasoning` is set.
+   */
+  noThinking?: boolean;
 }
 
 /** Placeholder first turn when trimmed history starts with an assistant reply. */
@@ -88,8 +107,17 @@ export async function anthropicCompletion(
     max_tokens: maxTokens,
     messages: turns,
   };
-  if (system) params.system = system;
+  if (system) {
+    params.system = options.cache
+      ? [{ type: "text", text: system, cache_control: { type: "ephemeral" } }]
+      : system;
+  }
+  // Automatic breakpoint on the last block: each call in a loop reads the
+  // whole prefix the previous call wrote and writes only what it appended.
+  if (options.cache) params.cache_control = { type: "ephemeral" };
   if (options.onReasoning) params.thinking = { type: "adaptive", display: "summarized" };
+  else if (options.noThinking) params.thinking = { type: "disabled" };
+  if (options.effort) params.output_config = { effort: options.effort };
 
   const stream = getAnthropicClient().messages.stream(params, { signal: options.signal });
   const { onReasoning, onContent } = options;
@@ -115,7 +143,7 @@ export async function anthropicCompletion(
     }
     throw error;
   } finally {
-    recordUsage((message ?? stream.currentMessage)?.usage);
+    recordUsage((message ?? stream.currentMessage)?.usage, model);
   }
 
   if (message.stop_reason === "refusal") {
@@ -137,15 +165,18 @@ export async function anthropicCompletion(
   // max_tokens — thinking counts against it) is not a transport failure.
   if (text.length === 0) {
     if (truncated) {
-      throw new Error(
+      throw new AiTruncatedError(
         `Anthropic response was truncated before any text (max_tokens=${maxTokens} too low)`,
+        maxTokens,
       );
     }
     throw new Error("Anthropic returned no text content");
   }
   if (truncated) {
-    throw new Error(
+    throw new AiTruncatedError(
       `Anthropic response was truncated mid-output (max_tokens=${maxTokens} too low); the JSON is incomplete`,
+      maxTokens,
+      text,
     );
   }
   return text;

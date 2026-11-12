@@ -34,9 +34,41 @@ model Workspace {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   changes   WorkspaceChange[]
+  agentMessages AgentChatMessage[]
+  materials StudyMaterial[]
+  feeds     CalendarFeed[]
 
   @@index([ownerId])
   @@index([ownerId, deletedAt])
+}
+
+// Course material a student added to a workspace (lecture slides, notes,
+// readings, or the text of one of their pages) to make study material from.
+// Text is kept per page so every generated flashcard and question can cite
+// the page it came from, and the citation viewer can show that page.
+// `pages` is a JSON string[]; `pageChars` (JSON number[]) lets the client plan
+// a run and show its cost without loading the text. Owner-scoped; hidden while
+// its workspace is in the trash and removed with it (ON DELETE CASCADE).
+model StudyMaterial {
+  id           String    @id @default(cuid())
+  ownerId      String
+  workspaceId  String
+  title        String
+  kind         String
+  pages        String
+  pageChars    String
+  pageCount    Int
+  charCount    Int
+  sourcePages  Int
+  truncated    Boolean   @default(false)
+  contentHash  String
+  sourcePageId String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId])
+  @@index([workspaceId, ownerId, createdAt])
 }
 
 // Append-only history of agent (and undo) edits to a workspace. Each row keeps
@@ -104,6 +136,11 @@ model DailyStudyPlan {
   items          String
   sourceCount    Int      @default(0)
   candidateCount Int      @default(0)
+  // 1: English sentences in summary/items. 2: structured items rendered
+  // through the i18n dictionaries; plan-level data (workload check, exam
+  // countdowns, effort ledger) lives in `details` as validated JSON.
+  version        Int      @default(1)
+  details        String   @default("{}")
   generatedAt    DateTime @default(now())
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -141,6 +178,23 @@ model Subscription {
   // allowance per anniversary inside it; see lib/credits.ts.
   allowancePeriodStart DateTime?
   allowancePeriodEnd   DateTime?
+  // When the live Stripe state written here was fetched: a write carrying an
+  // older fetch never overwrites a newer one (concurrent webhooks).
+  stripeSyncedAt           DateTime?
+  // The subscription and payment the allowance period belongs to. Cleared
+  // when another subscription is adopted; a refund or dispute of that
+  // payment stops the accrual.
+  allowanceSubscriptionId  String?
+  allowancePaymentIntentId String?
+  // Only a yearly period accrues further monthly allowances.
+  allowanceYearly          Boolean   @default(false)
+  // No allowance month on or after this instant (subscription ended early,
+  // or its payment was refunded in full).
+  allowanceStopAt          DateTime?
+  // An open dispute on the payment of the current period: not Pro and no
+  // accrual until it closes in our favour.
+  disputeId                String?
+  disputedAt               DateTime?
   updatedAt            DateTime  @updatedAt
 
   // The webhook resolves invoices/subscription events back to a user by
@@ -175,6 +229,52 @@ model DeletedAccount {
   deletedAt DateTime @default(now())
 }
 
+// A billing job that must finish even if Stripe fails part-way: written
+// BEFORE the first Stripe call and completed idempotently by any later event,
+// retry or the maintenance job (lib/billing.ts runBillingMaintenance).
+//   kind "refund_subscription": cancel and refund a subscription that must not
+//     exist (key = Stripe subscription id; reason = duplicate_subscription or
+//     deleted_account_subscription). Its invoices never grant credits.
+//   kind "cancel_account_billing": stop every subscription of a deleted
+//     account (key = user id; the Stripe ids are captured before erasure).
+model BillingIntent {
+  id                   String    @id @default(cuid())
+  kind                 String
+  key                  String
+  userId               String?
+  reason               String?
+  stripeCustomerId     String?
+  stripeSubscriptionId String?
+  state                String    @default("pending")
+  attempts             Int       @default(0)
+  lastError            String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  completedAt          DateTime?
+
+  @@unique([kind, key])
+  @@index([state, updatedAt])
+}
+
+// Credits reserved for AI work in progress (lib/credits.ts reserveCredits).
+// `amount` is taken from the balance when the hold is made; settling charges
+// the real cost and returns the difference, releasing returns it all, and a
+// hold left "held" past `expiresAt` (a crashed request) is released.
+model CreditHold {
+  id        String    @id @default(cuid())
+  userId    String
+  amount    Int
+  reason    String
+  state     String    @default("held")
+  charged   Int?
+  expiresAt DateTime
+  createdAt DateTime  @default(now())
+  settledAt DateTime?
+
+  @@index([userId, state])
+  @@index([state, expiresAt])
+}
+
 // One row per rate-limited action (AI request, sandbox run) and per funnel
 // milestone. Counted over sliding windows to enforce per-user limits that are
 // correct across instances; also doubles as first-party funnel analytics.
@@ -205,6 +305,9 @@ model StudyDay {
   reviewTotal  Int      @default(0)
   reviewPassed Int      @default(0)
   practice     Int      @default(0)
+  // Quiz answers (practice and exam), and how many of them were right.
+  quizAnswers  Int      @default(0)
+  quizCorrect  Int      @default(0)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -220,6 +323,41 @@ model CalendarToken {
   token     String   @id
   userId    String   @unique
   createdAt DateTime @default(now())
+}
+
+// An incoming calendar feed (an iCalendar link from Canvas, Moodle, Blackboard,
+// Brightspace or Google Calendar) a student connected to one database of a
+// workspace, so their deadlines arrive and stay in sync on their own.
+// The link is a credential (anyone holding it can read the student's
+// calendar), so it lives only here, sealed (lib/feeds/secret.ts): never in the
+// workspace document (which the AI reads), never sent back to the browser,
+// never logged. `urlHash` (SHA-256 of the normalized link) stops the same link
+// being connected twice. Rows imported from the feed carry only this record's
+// id and the event UID (DatabaseRow.source). `settings` is JSON (column
+// mapping, events already decided on, followed repeating events);
+// `lastSummary` is JSON (what the last sync changed). Removed with the
+// workspace (ON DELETE CASCADE) and on account erasure.
+model CalendarFeed {
+  id             String    @id @default(cuid())
+  userId         String
+  workspaceId    String
+  databaseId     String
+  urlSealed      String
+  urlHash        String
+  label          String
+  platform       String    @default("other")
+  settings       String    @default("{}")
+  lastSyncedAt   DateTime?
+  lastAttemptAt  DateTime?
+  lastError      String?
+  lastSummary    String?
+  syncLeaseUntil DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, urlHash])
+  @@index([userId])
 }
 
 // A user's AI credit balance. Credits are spent per AI request based on the
@@ -258,4 +396,104 @@ model Asset {
   createdAt   DateTime @default(now())
 
   @@index([ownerId])
+}
+
+// The in-workspace AI agent's conversation, one row per message, so the chat
+// survives closing the panel and reloading the page and the model can be given
+// a short window of recent turns. Owner-scoped (every read and write filters on
+// userId), hidden while the workspace is in the trash, removed with it
+// (ON DELETE CASCADE), erased with the account and pruned by retention.
+// `changeNote` is a compact, id-bearing note of what the agent changed (fed
+// back to the model for follow-ups); `meta` is JSON (choices, affected areas,
+// credits cost, stop reason) used only to redraw the chat.
+model AgentChatMessage {
+  id           String    @id @default(cuid())
+  userId       String
+  workspaceId  String
+  role         String
+  content      String
+  modelContent String?
+  changeNote   String?
+  changeId     String?
+  meta         String?
+  createdAt    DateTime  @default(now())
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([userId, workspaceId, createdAt])
+  @@index([createdAt])
+}
+
+// One Web Push subscription per browser or installed app where a student
+// turned notifications on (lib/notifications). `endpoint` is a CAPABILITY URL
+// issued by the browser's push service: with the keys, it is enough to message
+// that device. It is never logged, never exported, never sent back to the
+// browser; `endpointHash` (SHA-256) is the lookup and uniqueness key. Only
+// endpoints of known push services are accepted (lib/notifications/endpoint.ts).
+// Removed when the push service reports it gone (404/410), after repeated
+// rejections, when the student turns the device off, and on account erasure.
+model PushSubscription {
+  id            String    @id @default(cuid())
+  userId        String
+  endpoint      String
+  endpointHash  String    @unique
+  p256dh        String
+  auth          String
+  // A short device label for the settings list ("iPhone", "Chrome · Windows").
+  label         String    @default("")
+  failures      Int       @default(0)
+  lastSuccessAt DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([userId])
+}
+
+// What a student wants to be reminded of, and when, in their own time zone.
+// Times are minutes after local midnight; lead times are JSON number[] of
+// days before a due date. `nextCheckAt` is the next instant anything could be
+// due for this student (null = nothing to do: no device, or everything off);
+// the dispatch only ever reads rows whose `nextCheckAt` has passed, through
+// its index, and `leaseUntil` stops two overlapping runs handling one student.
+model NotificationPreference {
+  userId          String    @id
+  timeZone        String    @default("UTC")
+  locale          String    @default("en")
+  dailyEnabled    Boolean   @default(true)
+  dailyMinute     Int       @default(480)
+  deadlineEnabled Boolean   @default(true)
+  deadlineMinute  Int       @default(1080)
+  deadlineLeads   String    @default("[7,2,1]")
+  examLeads       String    @default("[14,7,2,1]")
+  streakEnabled   Boolean   @default(true)
+  quietEnabled    Boolean   @default(true)
+  quietStart      Int       @default(1320)
+  quietEnd        Int       @default(420)
+  nextCheckAt     DateTime?
+  leaseUntil      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([nextCheckAt])
+}
+
+// What the notification dispatch decided, one row per reminder, so nothing is
+// sent twice: a row is claimed (unique userId + dedupeKey) BEFORE sending, so
+// overlapping or repeated runs can never send the same reminder again.
+// `message` = the row is one notification shown to the student (counts toward
+// the daily cap); reminders folded into a grouped notification have false.
+// `status`: pending | sent | failed | skipped. Pruned by retention.
+model NotificationLog {
+  id        String    @id @default(cuid())
+  userId    String
+  dedupeKey String
+  kind      String
+  localDate String
+  status    String    @default("pending")
+  message   Boolean   @default(false)
+  createdAt DateTime  @default(now())
+  sentAt    DateTime?
+
+  @@unique([userId, dedupeKey])
+  @@index([userId, localDate])
+  @@index([createdAt])
 }

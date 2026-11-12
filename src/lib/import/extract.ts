@@ -1,29 +1,64 @@
 /**
- * Server-side text extraction for syllabus uploads: PDF, Word (.docx) and
- * plain text / Markdown.
+ * Server-side text extraction for uploads (syllabus import, course
+ * material): PDF, Word (.docx) and plain text / Markdown.
  *
- * The upload is untrusted, so extraction is deliberately boxed in:
- * - It only ever sees the uploaded bytes. Nothing here takes a path or URL,
- *   PDF.js gets no font/CMap/wasm locations (so it never touches the disk or
- *   network), and .docx parsing reads exactly one zip entry into memory.
- * - Size is capped before parsing (MAX_UPLOAD_BYTES) and decompression is
- *   capped while parsing: the one .docx entry is inflated in small chunks and
- *   abandoned past MAX_DOCX_XML_BYTES, and every zlib stream in a PDF is
- *   measured the same way before PDF.js runs, so a zip/flate bomb is refused
- *   instead of exhausting memory.
- * - Work is bounded: at most MAX_PDF_PAGES pages, at most MAX_EXTRACTED_CHARS
- *   of text, and an overall deadline (EXTRACTION_TIMEOUT_MS) checked between
- *   pages, after which the PDF.js task is destroyed.
- * - The .docx XML is scanned with a single linear tag walk (no nested regex),
- *   so hostile markup can't trigger catastrophic backtracking.
+ * The upload is untrusted, so the parsing never runs in the server process.
+ * Each extraction runs in a child Node process (extract-child.mjs running
+ * extract-core.mjs) that:
+ * - has a hard memory cap: the V8 heap is capped (--max-old-space-size) and a
+ *   watchdog thread kills the process when its resident memory passes
+ *   `rssLimitMb` (PDF.js decodes into ArrayBuffers the heap cap does not see);
+ * - has a kill timer for every format, not just PDFs: past its deadline (plus
+ *   a short grace for the child to report its own timeout) it is SIGKILLed;
+ * - gets the bytes over IPC and an environment without secrets, and never a
+ *   path or URL. PDF.js gets no font/CMap/wasm locations, so it never touches
+ *   the disk or network, and eval is off.
+ * A per-instance pool caps how many children run at once (and how many
+ * requests may wait for one), so a burst of uploads cannot exhaust the
+ * instance either. A hostile file costs one capped, killable process; the
+ * event loop serving everyone else never runs a parser.
+ *
+ * Inside the child the work is bounded again, so a well-formed but huge
+ * document gets a friendly error instead of a kill: size is capped before
+ * parsing, the one .docx entry is inflated in chunks and abandoned past
+ * MAX_DOCX_XML_BYTES, every PDF stream is measured through its filter chain
+ * before PDF.js runs, every text scan is linear, at most maxPdfPages pages and
+ * maxChars of text are read, and PDF reading checks the deadline per page.
  *
  * The extracted text is still untrusted: callers pass it through
  * `normalizeSourceText` and `sourceTextBlock` (./syllabus), which fence it as
  * data in every prompt.
+ *
+ * Deployment: the child files are plain .mjs loaded from <cwd>/src/lib/import
+ * at run time. next.config.ts lists them in outputFileTracingIncludes so they
+ * ship in .next/standalone (the standalone server's cwd), and lists fflate and
+ * unpdf in serverExternalPackages so their files are traced into its
+ * node_modules.
  */
 import "server-only";
-import { Unzip, UnzipInflate, Unzlib } from "fflate";
+import { fork } from "node:child_process";
+import path from "node:path";
+import {
+  ExtractError,
+  assertPdfStreamsBounded as assertPdfStreamsBoundedCore,
+  detectSourceKind,
+  docxXmlToText as docxXmlToTextCore,
+  readZipEntry,
+  type ExtractedPages,
+  type ExtractedSource,
+  type ExtractionOutcome,
+  type ExtractionRequest,
+  type ResolvedLimits,
+} from "./extract-core.mjs";
 import { MAX_SOURCE_TEXT, MAX_UPLOAD_BYTES } from "./syllabus";
+
+export { ExtractError, detectSourceKind, readZipEntry };
+export type {
+  ExtractErrorCode,
+  ExtractedPages,
+  ExtractedSource,
+  SourceKind,
+} from "./extract-core.mjs";
 
 export { MAX_UPLOAD_BYTES };
 /** Pages read from a PDF; a syllabus is rarely longer. */
@@ -36,60 +71,23 @@ export const MAX_EXTRACTED_CHARS = MAX_SOURCE_TEXT * 3;
 export const EXTRACTION_TIMEOUT_MS = 15_000;
 /** Cap on the inflated word/document.xml of a .docx. */
 const MAX_DOCX_XML_BYTES = 30 * 1024 * 1024;
-/** Cap on the inflated size of all zlib streams in a PDF. */
+/** Cap on the decoded size of all streams in a PDF. */
 const MAX_PDF_INFLATED_BYTES = 80 * 1024 * 1024;
-/** Feed decompressors this much compressed input at a time. */
-const INFLATE_CHUNK = 16 * 1024;
 
-export type ExtractErrorCode =
-  | "too_large"
-  | "unsupported"
-  | "no_text"
-  | "unreadable"
-  | "timeout";
-
-export class ExtractError extends Error {
-  readonly code: ExtractErrorCode;
-  /** The detected file kind, when known (lets the UI say "scanned PDF"). */
-  readonly kind?: SourceKind;
-  constructor(code: ExtractErrorCode, detail?: string, kind?: SourceKind) {
-    super(detail ? `${code}: ${detail}` : code);
-    this.name = "ExtractError";
-    this.code = code;
-    this.kind = kind;
-  }
-}
-
-export type SourceKind = "pdf" | "docx" | "text";
-
-export interface ExtractedSource {
-  kind: SourceKind;
-  text: string;
-  /** Characters of text found (before the MAX_EXTRACTED_CHARS cap). */
-  totalChars: number;
-  /** PDF only: pages in the document, pages read, and whether some were skipped. */
-  pages?: number;
-  pagesRead?: number;
-  pagesTruncated?: boolean;
-}
-
-/** Decide the file kind from its leading bytes (the name/MIME only break ties). */
-export function detectSourceKind(
-  bytes: Uint8Array,
-  fileName: string,
-  mimeType: string,
-): SourceKind | null {
-  const name = fileName.toLowerCase();
-  const head = Buffer.from(bytes.subarray(0, 1024)).toString("latin1");
-  if (head.includes("%PDF-")) return "pdf";
-  const isZip = bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04;
-  if (isZip) {
-    return name.endsWith(".docx") || mimeType.includes("wordprocessingml") ? "docx" : null;
-  }
-  // Legacy binary .doc (OLE) and anything else binary is not supported.
-  if (bytes[0] === 0xd0 && bytes[1] === 0xcf && bytes[2] === 0x11 && bytes[3] === 0xe0) return null;
-  if (/\.(txt|md|markdown|text)$/.test(name) || mimeType.startsWith("text/")) return "text";
-  return null;
+/**
+ * Limits for one extraction. The defaults are the syllabus import's; longer
+ * course material (src/lib/materials) passes its own.
+ */
+export interface ExtractLimits {
+  timeoutMs?: number;
+  /** Largest file accepted, in bytes. */
+  maxBytes?: number;
+  /** Pages read from a PDF. */
+  maxPdfPages?: number;
+  /** Stop reading once this much text has been collected. */
+  maxChars?: number;
+  /** Cap on the decoded size of all streams in a PDF. */
+  maxPdfInflatedBytes?: number;
 }
 
 /** Extract plain text from an uploaded file, or throw an ExtractError. */
@@ -99,348 +97,278 @@ export async function extractSourceText(
   mimeType: string,
   options: { timeoutMs?: number } = {},
 ): Promise<ExtractedSource> {
+  return (await runIsolated("text", bytes, fileName, mimeType, {
+    timeoutMs: options.timeoutMs,
+  })) as ExtractedSource;
+}
+
+/**
+ * Extract text page by page, so generated study material can cite a page.
+ * Same isolation as extractSourceText, with caller-chosen limits. Text past
+ * `maxChars` is dropped (and `truncated` set), never silently kept.
+ */
+export async function extractSourcePages(
+  bytes: Uint8Array,
+  fileName: string,
+  mimeType: string,
+  limits: ExtractLimits = {},
+): Promise<ExtractedPages> {
+  return (await runIsolated("pages", bytes, fileName, mimeType, limits)) as ExtractedPages;
+}
+
+/**
+ * Text of a WordprocessingML body (see extract-core.mjs). Exported for tests;
+ * production code only runs it inside the extraction child.
+ */
+export function docxXmlToText(xml: string, maxChars = MAX_EXTRACTED_CHARS): string {
+  return docxXmlToTextCore(xml, maxChars);
+}
+
+/** Refuse PDFs whose streams would decode past the cap (see extract-core.mjs). */
+export function assertPdfStreamsBounded(
+  bytes: Uint8Array,
+  maxBytes = MAX_PDF_INFLATED_BYTES,
+): void {
+  assertPdfStreamsBoundedCore(bytes, maxBytes);
+}
+
+// ---------------------------------------------------------------------------
+// Isolation: the child process and the per-instance pool
+// ---------------------------------------------------------------------------
+
+/** Settings of the extraction pool. Tests lower them; production uses the defaults. */
+export interface ExtractionIsolation {
+  /** Children running at once on this instance. */
+  maxConcurrent: number;
+  /** Requests that may wait for a free child; more are refused as "busy". */
+  maxQueued: number;
+  /** Longest wait for a free child before "busy". */
+  maxWaitMs: number;
+  /** Resident memory of the child process at which it is killed. */
+  rssLimitMb: number;
+  /** V8 heap cap of the child. */
+  heapLimitMb: number;
+  /** Longest deadline any extraction gets, whatever the caller asks for. */
+  maxTimeoutMs: number;
+  /** Time past the deadline the child gets to report its own timeout before the kill. */
+  killGraceMs: number;
+  /** Tests only: skip the PDF stream pre-check so PDF.js itself meets the memory cap. */
+  skipPdfPrecheck: boolean;
+}
+
+/**
+ * Two children of at most 1 GiB each leave most of an 8 GiB instance to the
+ * server. A real 300-page lecture PDF stays far below the cap (text
+ * extraction never decodes images); only a decompression bomb gets near it.
+ * The wait is short enough that wait + the 15 s syllabus deadline fits the
+ * upload route's 30 s maxDuration.
+ */
+export const DEFAULT_EXTRACTION_ISOLATION: Readonly<ExtractionIsolation> = {
+  maxConcurrent: 2,
+  maxQueued: 8,
+  maxWaitMs: 10_000,
+  rssLimitMb: 1024,
+  heapLimitMb: 768,
+  maxTimeoutMs: 60_000,
+  killGraceMs: 1_500,
+  skipPdfPrecheck: false,
+};
+
+interface PoolState {
+  config: ExtractionIsolation;
+  active: number;
+  waiting: Array<() => void>;
+}
+
+// On globalThis so every route bundle (and dev hot reloads) share one pool.
+const POOL_KEY = Symbol.for("studyos.extractionPool");
+function pool(): PoolState {
+  const holder = globalThis as unknown as Record<symbol, PoolState | undefined>;
+  holder[POOL_KEY] ??= { config: { ...DEFAULT_EXTRACTION_ISOLATION }, active: 0, waiting: [] };
+  return holder[POOL_KEY]!;
+}
+
+/** Change pool settings (tests); returns the previous settings. */
+export function configureExtractionIsolation(
+  changes: Partial<ExtractionIsolation>,
+): ExtractionIsolation {
+  const state = pool();
+  const previous = { ...state.config };
+  state.config = { ...state.config, ...changes };
+  return previous;
+}
+
+/** Children running and requests waiting on this instance (tests, diagnostics). */
+export function extractionLoad(): { active: number; waiting: number } {
+  const state = pool();
+  return { active: state.active, waiting: state.waiting.length };
+}
+
+/** Take a slot or wait for one (bounded); throws ExtractError("busy"). */
+async function acquireSlot(): Promise<() => void> {
+  const state = pool();
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    state.active -= 1;
+    state.waiting.shift()?.();
+  };
+  if (state.active < state.config.maxConcurrent) {
+    state.active += 1;
+    return release;
+  }
+  if (state.waiting.length >= state.config.maxQueued) {
+    throw new ExtractError("busy", "extraction queue full");
+  }
+  await new Promise<void>((resolve, reject) => {
+    const wake = () => {
+      clearTimeout(timer);
+      state.active += 1;
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      const at = state.waiting.indexOf(wake);
+      if (at !== -1) state.waiting.splice(at, 1);
+      reject(new ExtractError("busy", "no extraction slot in time"));
+    }, state.config.maxWaitMs);
+    state.waiting.push(wake);
+  });
+  return release;
+}
+
+const CHILD_ENTRY = ["src", "lib", "import", "extract-child.mjs"];
+/** Must match MEMORY_LIMIT_MARKER in extract-child.mjs. */
+const MEMORY_LIMIT_MARKER = "STUDYOS_EXTRACT_MEMORY_LIMIT";
+const HEAP_EXHAUSTED = /heap out of memory|Reached heap limit|allocation failed/i;
+const MAX_STDERR_KEPT = 8 * 1024;
+
+/** The child sees no secrets: only what Node itself needs to start. */
+function childEnvironment(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { NODE_ENV: "production" };
+  if (process.platform === "win32") {
+    for (const name of ["SystemRoot", "SYSTEMROOT", "windir", "TEMP", "TMP"]) {
+      if (process.env[name]) env[name] = process.env[name];
+    }
+  }
+  return env;
+}
+
+async function runIsolated(
+  mode: ExtractionRequest["mode"],
+  bytes: Uint8Array,
+  fileName: string,
+  mimeType: string,
+  limits: ExtractLimits,
+): Promise<ExtractedSource | ExtractedPages> {
+  // Cheap refusals before taking a slot or starting a process.
   if (bytes.byteLength === 0) throw new ExtractError("no_text", "empty file");
-  if (bytes.byteLength > MAX_UPLOAD_BYTES) throw new ExtractError("too_large");
-  const kind = detectSourceKind(bytes, fileName, mimeType);
-  if (!kind) throw new ExtractError("unsupported");
+  if (bytes.byteLength > (limits.maxBytes ?? MAX_UPLOAD_BYTES)) throw new ExtractError("too_large");
+  // Names and MIME types only break ties; keep what crosses to the child short.
+  const name = String(fileName).slice(-200);
+  const mime = String(mimeType).slice(0, 200);
+  if (!detectSourceKind(bytes, name, mime)) throw new ExtractError("unsupported");
 
-  const deadline = Date.now() + (options.timeoutMs ?? EXTRACTION_TIMEOUT_MS);
-  let raw: string;
-  let pdfInfo: Pick<ExtractedSource, "pages" | "pagesRead" | "pagesTruncated"> = {};
-  if (kind === "pdf") {
-    const { text, ...info } = await extractPdf(bytes, deadline);
-    raw = text;
-    pdfInfo = info;
-  } else if (kind === "docx") {
-    raw = extractDocx(bytes);
-  } else {
-    raw = decodeText(bytes);
-  }
-
-  const text = tidy(raw);
-  const meaningful = text.replace(/\s+/g, "").length;
-  if (meaningful < 20) {
-    // A PDF with pages but no text layer is a scan (or images of text).
-    throw new ExtractError("no_text", "no text layer", kind);
-  }
-  return {
-    kind,
-    text: text.slice(0, MAX_EXTRACTED_CHARS),
-    totalChars: text.length,
-    ...pdfInfo,
-  };
-}
-
-function tidy(text: string): string {
-  return text
-    .replace(/\r\n?/g, "\n")
-    .replace(/[ \t ]+\n/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
-// ---------------------------------------------------------------------------
-// Plain text
-// ---------------------------------------------------------------------------
-
-function decodeText(bytes: Uint8Array): string {
-  let text: string;
-  if (bytes[0] === 0xff && bytes[1] === 0xfe) {
-    text = new TextDecoder("utf-16le").decode(bytes.subarray(2));
-  } else if (bytes[0] === 0xfe && bytes[1] === 0xff) {
-    text = new TextDecoder("utf-16be").decode(bytes.subarray(2));
-  } else {
-    text = new TextDecoder("utf-8").decode(bytes).replace(/^﻿/, "");
-  }
-  // Lots of NULs means this was a binary file with a text-looking name.
-  const nulCount = (text.slice(0, 4096).match(/\u0000/g) ?? []).length;
-  if (nulCount > 8) throw new ExtractError("unsupported", "binary content");
-  return text;
-}
-
-// ---------------------------------------------------------------------------
-// .docx
-// ---------------------------------------------------------------------------
-
-function extractDocx(bytes: Uint8Array): string {
-  const xml = readZipEntry(bytes, "word/document.xml", MAX_DOCX_XML_BYTES);
-  if (xml === null) throw new ExtractError("unreadable", "no word/document.xml");
-  return docxXmlToText(new TextDecoder("utf-8").decode(xml));
-}
-
-/**
- * Inflate one entry of a zip, refusing to produce more than `maxBytes`.
- * Returns null when the entry is missing. Throws too_large past the cap and
- * unreadable on a corrupt or encrypted archive.
- */
-export function readZipEntry(
-  bytes: Uint8Array,
-  entryName: string,
-  maxBytes: number,
-): Uint8Array | null {
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  let found = false;
-  let finished = false;
-  let overflow = false;
-  let failure: unknown = null;
-
-  const unzip = new Unzip();
-  unzip.register(UnzipInflate);
-  unzip.onfile = (file) => {
-    if (file.name !== entryName || found) return;
-    found = true;
-    file.ondata = (error, data, final) => {
-      if (overflow || failure) return;
-      if (error) {
-        failure = error;
-        return;
-      }
-      size += data.length;
-      if (size > maxBytes) {
-        overflow = true;
-        try {
-          file.terminate();
-        } catch {
-          // Already stopped.
-        }
-        return;
-      }
-      chunks.push(data);
-      if (final) finished = true;
-    };
-    try {
-      file.start();
-    } catch (error) {
-      failure = error;
-    }
-  };
-
+  const release = await acquireSlot();
   try {
-    for (let offset = 0; offset < bytes.length; offset += INFLATE_CHUNK) {
-      if (overflow || failure || finished) break;
-      const end = Math.min(offset + INFLATE_CHUNK, bytes.length);
-      unzip.push(bytes.subarray(offset, end), end === bytes.length);
-    }
-  } catch (error) {
-    if (!overflow) failure = error;
-  }
-
-  if (overflow) throw new ExtractError("too_large", "document expands beyond the limit");
-  if (failure) throw new ExtractError("unreadable", String(failure));
-  if (!found) return null;
-  if (!finished) throw new ExtractError("unreadable", "truncated archive");
-  const out = new Uint8Array(size);
-  let at = 0;
-  for (const chunk of chunks) {
-    out.set(chunk, at);
-    at += chunk.length;
-  }
-  return out;
-}
-
-/**
- * Text of a WordprocessingML body: runs (`w:t`) in reading order, tabs and
- * line breaks kept, paragraphs and table rows on new lines, table cells
- * separated by tabs (so a grading table stays "Midterm<TAB>25%").
- */
-export function docxXmlToText(xml: string): string {
-  const out: string[] = [];
-  let inText = false;
-  let cellDepth = 0;
-  let cursor = 0;
-  let length = 0;
-  const tag = /<[^>]*>/g;
-  let match: RegExpExecArray | null;
-  while ((match = tag.exec(xml)) !== null) {
-    if (inText && match.index > cursor) {
-      const piece = decodeXmlEntities(xml.slice(cursor, match.index));
-      out.push(piece);
-      length += piece.length;
-    }
-    cursor = match.index + match[0].length;
-    if (length > MAX_EXTRACTED_CHARS * 2) break;
-
-    const raw = match[0];
-    const closing = raw.startsWith("</");
-    const selfClosing = raw.endsWith("/>");
-    const name = raw.slice(closing ? 2 : 1).match(/^[A-Za-z0-9_:.-]+/)?.[0] ?? "";
-    switch (name) {
-      case "w:t":
-        inText = !closing && !selfClosing;
-        break;
-      case "w:tab":
-        if (!closing) out.push("\t");
-        break;
-      case "w:br":
-      case "w:cr":
-        if (!closing) out.push("\n");
-        break;
-      case "w:p":
-        // Inside a table cell, paragraphs join with a space so a row stays on one line.
-        if (closing) out.push(cellDepth > 0 ? " " : "\n");
-        break;
-      case "w:tc":
-        if (selfClosing) break;
-        if (closing) {
-          cellDepth = Math.max(0, cellDepth - 1);
-          out.push("\t");
-        } else {
-          cellDepth += 1;
-        }
-        break;
-      case "w:tr":
-        if (closing) out.push("\n");
-        break;
-      default:
-        break;
-    }
-  }
-  return out.join("").replace(/ \t/g, "\t").replace(/\t+\n/g, "\n");
-}
-
-function decodeXmlEntities(text: string): string {
-  return text.replace(/&(#x[0-9a-fA-F]{1,6}|#\d{1,7}|amp|lt|gt|quot|apos);/g, (_, entity: string) => {
-    switch (entity) {
-      case "amp":
-        return "&";
-      case "lt":
-        return "<";
-      case "gt":
-        return ">";
-      case "quot":
-        return '"';
-      case "apos":
-        return "'";
-      default: {
-        const code =
-          entity[1] === "x" ? parseInt(entity.slice(2), 16) : parseInt(entity.slice(1), 10);
-        return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : "";
-      }
-    }
-  });
-}
-
-// ---------------------------------------------------------------------------
-// PDF
-// ---------------------------------------------------------------------------
-
-/** Refuse PDFs whose zlib streams would inflate past the cap (flate bombs). */
-export function assertPdfStreamsBounded(bytes: Uint8Array, maxBytes = MAX_PDF_INFLATED_BYTES) {
-  const buf = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  let position = 0;
-  let total = 0;
-  while (position < buf.length) {
-    const keyword = buf.indexOf("stream", position, "latin1");
-    if (keyword === -1) return;
-    if (keyword >= 3 && buf.toString("latin1", keyword - 3, keyword) === "end") {
-      position = keyword + 6;
-      continue;
-    }
-    let start = keyword + 6;
-    if (buf[start] === 0x0d) start += 1;
-    if (buf[start] === 0x0a) start += 1;
-    const end = buf.indexOf("endstream", start, "latin1");
-    if (end === -1) return;
-    // 0x78 is the zlib header FlateDecode streams start with.
-    if (buf[start] === 0x78) {
-      total += inflatedSize(buf.subarray(start, end), maxBytes - total);
-      if (total > maxBytes) throw new ExtractError("too_large", "PDF expands beyond the limit");
-    }
-    position = end + 9;
-  }
-}
-
-function inflatedSize(data: Uint8Array, budget: number): number {
-  let size = 0;
-  let over = false;
-  const inflater = new Unzlib((chunk) => {
-    size += chunk.length;
-    if (size > budget) over = true;
-  });
-  try {
-    for (let offset = 0; offset < data.length && !over; offset += INFLATE_CHUNK) {
-      const end = Math.min(offset + INFLATE_CHUNK, data.length);
-      inflater.push(data.subarray(offset, end), end === data.length);
-    }
-  } catch {
-    // A corrupt stream; PDF.js decides what to do with it.
-  }
-  return size;
-}
-
-interface TextItemLike {
-  str?: string;
-  hasEOL?: boolean;
-}
-
-async function extractPdf(
-  bytes: Uint8Array,
-  deadline: number,
-): Promise<{ text: string; pages: number; pagesRead: number; pagesTruncated: boolean }> {
-  assertPdfStreamsBounded(bytes);
-
-  const { getResolvedPDFJS } = await import("unpdf");
-  const pdfjs = await getResolvedPDFJS();
-  // PDF.js may transfer (detach) the buffer it is given, so hand it a copy.
-  const task = pdfjs.getDocument({
-    data: new Uint8Array(bytes),
-    // No font/CMap/wasm locations: PDF.js never reads files or the network.
-    useSystemFonts: false,
-    disableFontFace: true,
-    useWasm: false,
-    enableXfa: false,
-    stopAtErrors: false,
-    isOffscreenCanvasSupported: false,
-    verbosity: 0,
-  });
-
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(
-      () => reject(new ExtractError("timeout")),
-      Math.max(0, deadline - Date.now()),
+    const { config } = pool();
+    const timeoutMs = Math.min(
+      config.maxTimeoutMs,
+      Math.max(0, limits.timeoutMs ?? EXTRACTION_TIMEOUT_MS),
     );
-  });
-
-  const work = (async () => {
-    let document;
-    try {
-      document = await task.promise;
-    } catch (error) {
-      // Password-protected, damaged, or not really a PDF.
-      throw new ExtractError("unreadable", error instanceof Error ? error.name : "load failed");
-    }
-    const pages = document.numPages;
-    const readPages = Math.min(pages, MAX_PDF_PAGES);
-    const parts: string[] = [];
-    let length = 0;
-    for (let number = 1; number <= readPages; number += 1) {
-      if (Date.now() > deadline) throw new ExtractError("timeout");
-      const page = await document.getPage(number);
-      const content = await page.getTextContent();
-      const pageText = (content.items as TextItemLike[])
-        .map((item) => (item.str ?? "") + (item.hasEOL ? "\n" : ""))
-        .join("");
-      page.cleanup();
-      parts.push(pageText);
-      length += pageText.length;
-      if (length > MAX_EXTRACTED_CHARS * 2) break;
-    }
-    return {
-      text: parts.join("\n\n"),
-      pages,
-      pagesRead: readPages,
-      pagesTruncated: pages > readPages,
+    const resolved: ResolvedLimits = {
+      deadline: Date.now() + timeoutMs,
+      maxBytes: limits.maxBytes ?? MAX_UPLOAD_BYTES,
+      maxPdfPages: limits.maxPdfPages ?? MAX_PDF_PAGES,
+      maxChars: limits.maxChars ?? MAX_EXTRACTED_CHARS,
+      maxPdfInflatedBytes: limits.maxPdfInflatedBytes ?? MAX_PDF_INFLATED_BYTES,
+      maxDocxXmlBytes: MAX_DOCX_XML_BYTES,
+      ...(config.skipPdfPrecheck ? { skipPdfPrecheck: true } : {}),
     };
-  })();
-
-  try {
-    return await Promise.race([work, timeout]);
+    const outcome = await runChild(
+      { mode, bytes, fileName: name, mimeType: mime, limits: resolved },
+      timeoutMs + config.killGraceMs,
+      config,
+    );
+    if (outcome.ok) return outcome.value;
+    if (outcome.code === "internal") {
+      throw new Error(`document extraction failed: ${outcome.detail}`);
+    }
+    const detail = outcome.detail.startsWith(`${outcome.code}: `)
+      ? outcome.detail.slice(outcome.code.length + 2)
+      : undefined;
+    throw new ExtractError(outcome.code, detail, outcome.kind);
   } finally {
-    if (timer) clearTimeout(timer);
-    // Always release PDF.js resources (also stops work after a timeout).
-    void task.destroy().catch(() => {});
-    work.catch(() => {});
+    release();
   }
+}
+
+/**
+ * Start the child, hand it the request, and settle once it has exited, so a
+ * pool slot is only freed when the process and its memory are gone.
+ */
+function runChild(
+  request: ExtractionRequest,
+  killAfterMs: number,
+  config: ExtractionIsolation,
+): Promise<ExtractionOutcome> {
+  return new Promise((resolve, reject) => {
+    const child = fork(path.join(process.cwd(), ...CHILD_ENTRY), [], {
+      execArgv: [
+        `--max-old-space-size=${config.heapLimitMb}`,
+        "--disallow-code-generation-from-strings",
+      ],
+      env: childEnvironment(),
+      stdio: ["ignore", "ignore", "pipe", "ipc"],
+      serialization: "advanced",
+    });
+
+    let outcome: ExtractionOutcome | null = null;
+    let timedOut = false;
+    let failure: Error | null = null;
+    let settled = false;
+    let stderr = "";
+    child.stderr?.setEncoding("utf8");
+    child.stderr?.on("data", (chunk: string) => {
+      stderr = (stderr + chunk).slice(-MAX_STDERR_KEPT);
+    });
+
+    const finish = (code: number | null, signal: NodeJS.Signals | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (outcome) return resolve(outcome);
+      if (timedOut) return reject(new ExtractError("timeout"));
+      if (stderr.includes(MEMORY_LIMIT_MARKER) || HEAP_EXHAUSTED.test(stderr)) {
+        return reject(new ExtractError("too_large", "extraction memory limit"));
+      }
+      reject(
+        failure ??
+          new Error(
+            `document extraction process ended without an answer (code ${code}, signal ${signal})`,
+          ),
+      );
+    };
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGKILL");
+    }, killAfterMs);
+
+    child.on("message", (message) => {
+      outcome = message as ExtractionOutcome;
+      // The child exits on its own once its answer is flushed; make sure.
+      setTimeout(() => child.kill("SIGKILL"), 1_000).unref();
+    });
+    child.on("error", (error) => {
+      failure = error;
+      // A failed spawn never emits "exit"; every other error is followed by it.
+      if (child.pid === undefined) finish(null, null);
+    });
+    child.on("exit", finish);
+
+    child.send({ request, rssLimitBytes: config.rssLimitMb * 1024 * 1024 }, (error) => {
+      if (error && !failure) failure = error;
+    });
+  });
 }

@@ -70,6 +70,29 @@ export type CellValue = string | number | boolean | string[] | null;
 export interface DatabaseRow {
   id: string;
   cells: Record<string, CellValue>;
+  /** Set on rows imported from a calendar (lib/feeds); absent on rows a student made. */
+  source?: RowSource;
+}
+
+/**
+ * Where an imported row came from, so a re-sync updates it instead of adding a
+ * duplicate. Never holds the feed link itself (that secret lives server-side
+ * in the CalendarFeed table); `feed` is only that record's opaque id.
+ */
+export interface RowSource {
+  kind: "ical";
+  /** CalendarFeed id of a connected feed, or "file" for a one-off .ics upload. */
+  feed: string;
+  /** The event's UID, plus "#<original start>" for one occurrence of a repeating event. */
+  key: string;
+  /**
+   * What the last import wrote into each mapped field (cell values as text).
+   * A cell that no longer matches was edited by the student and is never
+   * overwritten; a field missing here was never written by an import.
+   */
+  synced?: { title?: string; due?: string; link?: string; course?: string };
+  /** Local day the event was first missing from its feed. The row is kept and flagged, never deleted. */
+  missingSince?: string;
 }
 
 /** How a database is displayed. */
@@ -176,7 +199,9 @@ export type BlockType =
   | "database_view"
   | "media"
   | "react_artifact"
-  | "flashcards";
+  | "flashcards"
+  | "quiz"
+  | "grades";
 
 interface BaseBlock {
   id: string;
@@ -289,6 +314,57 @@ export interface Flashcard {
   learningStep?: number;
   /** Exact ISO datetime the card is due (minutes-precise for learning steps). */
   dueTime?: string;
+  /** Where this card came from in the student's own material. */
+  source?: SourceRef;
+}
+
+/** Where a card or question came from in the student's own material. */
+export interface SourceRef {
+  /** Id of a stored study material, when the item was generated from one. */
+  materialId?: string;
+  /** 1-based page number in that material. */
+  page?: number;
+  /** Short verbatim excerpt that supports the item. */
+  quote?: string;
+  /** Human label, e.g. the material's title. */
+  label?: string;
+}
+
+export type QuizQuestionKind = "mcq" | "true_false" | "short";
+
+export interface QuizQuestion {
+  id: string;
+  kind: QuizQuestionKind;
+  prompt: string;
+  /** mcq: 2 to 6 answer choices. */
+  choices?: string[];
+  /** mcq: index into `choices` of the correct one. */
+  answerIndex?: number;
+  /** true_false: the correct value. */
+  answerBool?: boolean;
+  /** short: a model answer the student compares against. */
+  answerText?: string;
+  explanation?: string;
+  topic?: string;
+  source?: SourceRef;
+  /** Running record of how the student has done on this question. */
+  stats?: { attempts: number; correct: number; lastAnsweredAt?: string };
+}
+
+export interface QuizAttempt {
+  at: string; // ISO datetime
+  mode: "practice" | "exam";
+  score: number;
+  total: number;
+}
+
+/** A practice quiz embedded in a page (practice and exam modes). */
+export interface QuizBlock extends BaseBlock {
+  type: "quiz";
+  title?: string;
+  questions: QuizQuestion[];
+  /** Most recent attempts, newest last, capped. */
+  attempts?: QuizAttempt[];
 }
 
 /** A spaced-repetition flashcard deck embedded in a page. */
@@ -296,6 +372,56 @@ export interface FlashcardsBlock extends BaseBlock {
   type: "flashcards";
   title?: string;
   cards: Flashcard[];
+}
+
+/**
+ * Which columns of the grades database hold what (property ids). A missing
+ * key is detected automatically; `null` means "this database has none" (the
+ * student said so in setup), so detection never re-adds it.
+ */
+export interface GradesColumns {
+  /** select, relation or text: which course a row belongs to. */
+  course?: string | null;
+  /** number: the score received. */
+  score?: string | null;
+  /** number: what the score is out of. Without it a score is a percentage. */
+  maxScore?: string | null;
+  /** number: percent of the course grade. */
+  weight?: string | null;
+  /** date: when the work is due. */
+  due?: string | null;
+}
+
+export type GradeScalePreset = "percent" | "us_letter" | "us_gpa" | "uk_degree" | "de_grade";
+
+/** One step of a grading scale: from `min` percent up, the grade is `label`. */
+export interface GradeBand {
+  min: number;
+  label: string;
+  /** Grade points (US GPA, German 1.0-5.0) when the scale has them. */
+  points?: number;
+}
+
+/**
+ * A live grade calculator over a database of graded work (one list of
+ * assignments, not a second copy). Scores, weights and courses are read from
+ * the rows at render time; the block itself only stores settings. The math
+ * lives in src/lib/grades.
+ */
+export interface GradesBlock extends BaseBlock {
+  type: "grades";
+  title?: string;
+  /** The database whose rows are graded work. Absent until set up. */
+  databaseId?: string;
+  columns?: GradesColumns;
+  /** Defaults to "percent". */
+  scale?: GradeScalePreset;
+  /** Thresholds the student edited, best first; absent = the preset's. */
+  bands?: GradeBand[];
+  /** Target percentage per course key (select option id, related row id or course name). */
+  targets?: Record<string, number>;
+  /** Target percentage for courses without their own. */
+  defaultTarget?: number;
 }
 
 /** Discriminated union of every block kind (switch on `block.type`). */
@@ -311,7 +437,9 @@ export type Block =
   | MediaBlock
   | DatabaseViewBlock
   | ReactArtifactBlock
-  | FlashcardsBlock;
+  | FlashcardsBlock
+  | QuizBlock
+  | GradesBlock;
 
 export interface Page {
   id: string;

@@ -118,21 +118,11 @@ export function useToday(): string | null {
   );
 }
 
-/** First day of the week for a locale: 0 Sunday, 1 Monday, 6 Saturday. */
-export function weekStartFor(locale: string): number {
-  try {
-    const loc = new Intl.Locale(locale) as Intl.Locale & {
-      getWeekInfo?: () => { firstDay: number };
-      weekInfo?: { firstDay: number };
-    };
-    const info = loc.getWeekInfo?.() ?? loc.weekInfo;
-    if (info?.firstDay) return info.firstDay % 7;
-  } catch {
-    // Older engines: fall through to the table below.
-  }
-  const fallback: Record<string, number> = { en: 0, ja: 0, pt: 0, ar: 6 };
-  return fallback[locale.slice(0, 2)] ?? 1;
-}
+/**
+ * First day of the week for the interface language in the student's region
+ * (0 Sunday, 1 Monday, 6 Saturday): English in the UK starts on Monday.
+ */
+export { weekStartFor } from "@/lib/i18n/regional";
 
 export function formatDay(day: string, locale: string, options: Intl.DateTimeFormatOptions): string {
   const [y, m, d] = day.split("-").map(Number);

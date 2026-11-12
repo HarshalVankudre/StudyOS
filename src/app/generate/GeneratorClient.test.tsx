@@ -101,25 +101,80 @@ describe("GeneratorClient", () => {
     expect(typeof body.generationId).toBe("string");
   });
 
-  it("cancel aborts the request and tells the server to stop", async () => {
+  /** A /api/generate response whose stream the test feeds by hand. */
+  function openStream() {
+    let push!: (event: unknown) => void;
+    let close!: () => void;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const encoder = new TextEncoder();
+        push = (event) => controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+        close = () => controller.close();
+      },
+    });
+    return { response: new Response(body, { status: 200 }), push: (e: unknown) => push(e), close: () => close() };
+  }
+
+  it("cancel tells the server to stop, then says what the stop cost", async () => {
     const user = await goToQuestions();
-    let signal: AbortSignal | undefined;
-    fetchMock.mockImplementation((url: string, init: RequestInit) => {
-      if (url === "/api/generate") {
-        signal = init.signal ?? undefined;
-        return new Promise(() => {});
-      }
+    const stream = openStream();
+    fetchMock.mockImplementation((url: string) => {
+      if (url === "/api/generate") return Promise.resolve(stream.response);
+      // The server stopped the run: its stream then reports the charge.
+      setTimeout(() => {
+        stream.push({ type: "cancelled", credits: 6 });
+        stream.close();
+      }, 0);
       return Promise.resolve(Response.json({ cancelled: true }));
     });
     await user.click(screen.getByRole("button", { name: /build my workspace/i }));
     await user.click(await screen.findByRole("button", { name: "Cancel generation" }));
 
-    expect(signal?.aborted).toBe(true);
     const generationId = JSON.parse(fetchMock.mock.calls[0][1].body).generationId;
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/generate/cancel",
       expect.objectContaining({ method: "POST", body: JSON.stringify({ generationId }) }),
     );
+    expect(await screen.findByText(en.generate.cancelled.title)).toBeInTheDocument();
+    expect(screen.getByText(en.generate.cancelled.charged.replace("{credits}", "6"))).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: en.generate.cancelled.history })).toHaveAttribute("href", "/app/credits");
+    // A stop is not a failure.
+    expect(screen.queryByText(en.generate.failed.title)).not.toBeInTheDocument();
+  });
+
+  it("a stop before any AI work says nothing was charged", async () => {
+    const user = await goToQuestions();
+    const stream = openStream();
+    fetchMock.mockImplementation((url: string) => {
+      if (url === "/api/generate") return Promise.resolve(stream.response);
+      setTimeout(() => {
+        stream.push({ type: "cancelled", credits: 0 });
+        stream.close();
+      }, 0);
+      return Promise.resolve(Response.json({ cancelled: true }));
+    });
+    await user.click(screen.getByRole("button", { name: /build my workspace/i }));
+    await user.click(await screen.findByRole("button", { name: "Cancel generation" }));
+    expect(await screen.findByText(en.generate.cancelled.free)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: en.generate.cancelled.history })).not.toBeInTheDocument();
+  });
+
+  it("when the server cannot be told, cancel disconnects and is honest about a possible charge", async () => {
+    const user = await goToQuestions();
+    let signal: AbortSignal | undefined;
+    fetchMock.mockImplementation((url: string, init: RequestInit) => {
+      if (url === "/api/generate") {
+        signal = init.signal ?? undefined;
+        return new Promise((_, reject) => {
+          init.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+        });
+      }
+      return Promise.resolve(Response.json({ cancelled: false }));
+    });
+    await user.click(screen.getByRole("button", { name: /build my workspace/i }));
+    await user.click(await screen.findByRole("button", { name: "Cancel generation" }));
+    await waitFor(() => expect(signal?.aborted).toBe(true));
+    expect(await screen.findByText(en.generate.cancelled.unknown)).toBeInTheDocument();
   });
 });
 

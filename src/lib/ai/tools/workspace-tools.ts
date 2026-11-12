@@ -64,17 +64,33 @@ export function registerWorkspaceTools(registry: ToolRegistry = toolRegistry): v
   registry.register({
     id: "read_area",
     description:
-      "Return the full JSON of one page or database by id, so you can see its exact current contents before changing it.",
-    input: z.object({ id: z.string().min(1).max(100) }),
-    output: z.object({ kind: z.enum(["page", "database", "none"]), json: z.string() }),
+      "Return the JSON of one page or database by id (its current, staged contents). Large ones are paged: pass offset/limit to read further rows (database) or blocks (page); `total` says how many there are.",
+    input: z.object({
+      id: z.string().min(1).max(100),
+      offset: z.number().int().min(0).optional(),
+      limit: z.number().int().min(1).max(200).optional(),
+    }),
+    output: z.object({
+      kind: z.enum(["page", "database", "none"]),
+      json: z.string(),
+      total: z.number().int().optional(),
+    }),
     limits: { timeoutMs: 5_000 },
     networkPermission: "none",
     handler: (input, ctx) => {
       const ws = parseSnapshot(ctx.workspaceJson);
+      const from = input.offset ?? 0;
+      const to = from + (input.limit ?? 60);
       const page = ws.pages.find((p) => p.id === input.id);
-      if (page) return { kind: "page" as const, json: JSON.stringify(page) };
+      if (page) {
+        const blocks = page.blocks.slice(from, to);
+        return { kind: "page" as const, json: JSON.stringify({ ...page, blocks }), total: page.blocks.length };
+      }
       const db = ws.databases.find((d) => d.id === input.id);
-      if (db) return { kind: "database" as const, json: JSON.stringify(db) };
+      if (db) {
+        const rows = db.rows.slice(from, to);
+        return { kind: "database" as const, json: JSON.stringify({ ...db, rows }), total: db.rows.length };
+      }
       return { kind: "none" as const, json: "{}" };
     },
   });

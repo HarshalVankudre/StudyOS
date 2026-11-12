@@ -11,6 +11,8 @@ import {
   type GenerationEvent,
   type GenerationComponentKind,
 } from "@/lib/ai/generation-progress";
+import { createLiveProgress } from "@/lib/ai/generation-live";
+import { findDeadlineDatabase } from "@/lib/ai/generate-polish";
 import { formatPreferences } from "@/lib/ai/onboarding";
 import { modelForPlan } from "@/lib/ai/plans";
 import {
@@ -22,17 +24,28 @@ import { registerActiveTask } from "@/lib/ai/tasks/cancellation";
 import { addUsage, withUsageMeter, type TokenUsage } from "@/lib/ai/usage-meter";
 import { getUserPlan } from "@/lib/billing";
 import {
-  chargeCredits,
+  type CreditHold,
   getCreditBalance,
-  hasCredits,
+  releaseCreditHold,
+  reserveCredits,
+  settleCreditHold,
   usageToCredits,
 } from "@/lib/credits";
-import { checkUsageLimit, recordFunnelEvent } from "@/lib/usage-limits";
+import { MIN_GENERATION_BALANCE } from "@/lib/credits-info";
+import {
+  checkUsageLimit,
+  isUsageLimitReached,
+  MAX_WORKSPACES_PER_USER,
+  recordFunnelEvent,
+  recordUsageEvent,
+  workspaceLimitReached,
+} from "@/lib/usage-limits";
 import { getLocale } from "@/lib/i18n/server";
 import { MAX_SOURCE_INPUT, normalizeSourceText } from "@/lib/import/syllabus";
 import { getDictionary, type Dictionary } from "@/lib/i18n/dictionaries";
 import { fmt } from "@/lib/i18n/interpolate";
 import { saveNewWorkspace } from "@/lib/workspace/store";
+import { reportError } from "@/lib/ops/report-error";
 import type { Workspace } from "@/lib/workspace/types";
 
 export const runtime = "nodejs";
@@ -50,7 +63,8 @@ const requestSchema = z.object({
     .array(
       z.object({
         question: z.string().trim().min(1).max(300),
-        answers: z.array(z.string().trim().min(1).max(120)).max(10),
+        // 240: the "Other" answer field allows that much.
+        answers: z.array(z.string().trim().min(1).max(240)).max(10),
       }),
     )
     .max(10)
@@ -128,13 +142,17 @@ export async function POST(request: Request) {
       // consumed) on cancel. A failed generation is never billed.
       let usage: TokenUsage = NO_USAGE;
 
-      const send = (event: GenerationEvent) => {
-        if (closed || signal.aborted) return;
+      const sendFinal = (event: GenerationEvent) => {
+        if (closed) return;
         try {
           controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
         } catch {
           closed = true;
         }
+      };
+      // Nothing but the final "cancelled" event goes out after a cancel.
+      const send = (event: GenerationEvent) => {
+        if (!signal.aborted) sendFinal(event);
       };
 
       const finish = () => {
@@ -153,23 +171,48 @@ export async function POST(request: Request) {
         if (signal.aborted) throw new GenerationCancelledError();
       };
 
+      // Set once the gates passed and model work began: only such a run
+      // counts against the failed-generation quota.
+      let started = false;
+      // This build's credits, reserved before any model work (see below).
+      let hold: CreditHold | null = null;
       try {
         const { prompt, answers } = parsed.data;
-        const sourceText = normalizeSourceText(parsed.data.sourceText);
-        const preferences = formatPreferences(answers);
-        const model = modelForPlan(await getUserPlan());
-        const clock = studentClock(
-          resolveTimeZone([
-            parsed.data.timeZone,
-            timeZoneFromCookieHeader(request.headers.get("cookie")),
-          ]),
-        );
 
-        if (!(await hasCredits(userId))) {
+        // A build starts only with about one build's worth of credits: a
+        // run is charged at most the remaining balance, so a near-empty
+        // account would otherwise get a full build almost free.
+        const balance = await getCreditBalance(userId);
+        if (balance < MIN_GENERATION_BALANCE) {
           send({
             type: "error",
             code: "out_of_credits",
-            message: T.credits.outGenerate,
+            message:
+              balance <= 0
+                ? T.credits.outGenerate
+                : fmt(T.credits.belowGenerateMinimum, { min: MIN_GENERATION_BALANCE }),
+          });
+          finish();
+          return;
+        }
+
+        if (await workspaceLimitReached(userId)) {
+          send({
+            type: "error",
+            code: "workspace_limit",
+            message: fmt(T.limits.workspaceCap, { max: MAX_WORKSPACES_PER_USER }),
+          });
+          finish();
+          return;
+        }
+
+        // Failed builds are never charged, so they are bounded separately:
+        // after a few in a day, new builds wait (see USAGE_LIMITS).
+        if (await isUsageLimitReached(userId, "generate_failed")) {
+          send({
+            type: "error",
+            code: "too_many_failures",
+            message: T.limits.failedGenerations,
           });
           finish();
           return;
@@ -182,6 +225,36 @@ export async function POST(request: Request) {
           finish();
           return;
         }
+
+        // Reserve the build's credits before any model work, so parallel
+        // builds cannot all start on the same balance. Settled to the real
+        // cost once the work is done; given back when it is free (a failure).
+        hold = await reserveCredits(userId, {
+          estimate: MIN_GENERATION_BALANCE,
+          min: MIN_GENERATION_BALANCE,
+          reason: "generate",
+        });
+        if (!hold) {
+          send({
+            type: "error",
+            code: "out_of_credits",
+            message: fmt(T.credits.belowGenerateMinimum, { min: MIN_GENERATION_BALANCE }),
+          });
+          finish();
+          return;
+        }
+
+        // Only now, past every gate, do any work on the request's text.
+        const sourceText = normalizeSourceText(parsed.data.sourceText);
+        const preferences = formatPreferences(answers);
+        const model = modelForPlan(await getUserPlan());
+        const clock = studentClock(
+          resolveTimeZone([
+            parsed.data.timeZone,
+            timeZoneFromCookieHeader(request.headers.get("cookie")),
+          ]),
+        );
+        started = true;
 
         send({
           type: "phase",
@@ -220,36 +293,22 @@ export async function POST(request: Request) {
           progress: 30,
         });
 
-        const componentProgress = new Map(
-          plan.components.map((component) => [component.id, 6]),
-        );
-        let tick = 0;
+        // Progress follows what the model has actually written (databases,
+        // rows, pages as they stream); the timer only fills the gaps.
+        const live = createLiveProgress(plan, {
+          generating: T.ai.generate.phase.generating,
+          ...T.ai.generate.live,
+        });
         ticker = setInterval(() => {
-          if (signal.aborted || plan.components.length === 0) return;
-          const activeCount = Math.min(
-            plan.components.length,
-            1 + Math.floor(tick / 2),
-          );
-          for (let index = 0; index < activeCount; index += 1) {
-            const component = plan.components[index];
-            const current = componentProgress.get(component.id) ?? 6;
-            const next = Math.min(82, current + 5 + ((tick + index) % 4));
-            componentProgress.set(component.id, next);
-            send({
-              type: "component",
-              componentId: component.id,
-              status: "generating",
-              progress: next,
-            });
-          }
-          tick += 1;
-        }, 550);
+          if (!signal.aborted) live.tick().forEach(send);
+        }, 700);
 
         const generated = await metered(() =>
           generateWorkspace(prompt, model, preferences, plan, locale, sourceText, {
             clock,
             signal,
             deadline: requestStartedAt + GENERATION_BUDGET_MS,
+            onProgress: (event) => live.handle(event).forEach(send),
           }),
         );
         usage = addUsage(usage, generated.usage);
@@ -286,13 +345,10 @@ export async function POST(request: Request) {
         // Last gate before anything irreversible: a cancelled run is never saved.
         throwIfCancelled();
         const workspaceId = await saveNewWorkspace(workspace);
-        // Charge only now that the student has a workspace.
-        const creditsCost = await chargeCredits(
-          userId,
-          usageToCredits(usage),
-          "generate",
-        ).catch((error) => {
-          console.error("[StudyOS] charging a generation failed:", error);
+        // Charge only now that the student has a workspace: the real cost,
+        // through the hold.
+        const creditsCost = await settleCreditHold(hold, usageToCredits(usage)).catch((error) => {
+          reportError(error, { source: "api", route: "/api/generate", method: "POST", userId });
           return 0;
         });
         recordFunnelEvent(userId, "generate_complete");
@@ -307,14 +363,21 @@ export async function POST(request: Request) {
         if (error instanceof GenerationCancelledError || signal.aborted) {
           // Stopped by the student: nothing saved, and only the tokens the
           // model really consumed before the stop are billed.
-          await chargeCredits(userId, usageToCredits(usage), "generate_cancelled").catch(
-            () => 0,
-          );
+          const charged = hold
+            ? await settleCreditHold(hold, usageToCredits(usage), {
+                reason: "generate_cancelled",
+              }).catch(() => 0)
+            : 0;
+          // Tell the student what the stop cost, when they are still
+          // listening (Cancel waits a moment for this before it disconnects).
+          sendFinal({ type: "cancelled", credits: charged });
           finish();
           return;
         }
-        console.error("[StudyOS] streamed generation failed:", error);
-        // Nothing usable was delivered, so nothing is charged.
+        reportError(error, { source: "api", route: "/api/generate", method: "POST", userId });
+        // Nothing usable was delivered, so nothing is charged; the failure
+        // counts against the small failed-generation quota instead.
+        if (started) await recordUsageEvent(userId, "generate_failed");
         send({
           type: "error",
           code: "generation_failed",
@@ -325,6 +388,9 @@ export async function POST(request: Request) {
         });
         finish();
       } finally {
+        // Any outcome not settled above (a failure, an unexpected error) is
+        // free: the held credits go back. A no-op after a settle.
+        if (hold) await releaseCreditHold(hold).catch(() => false);
         unregister();
         request.signal.removeEventListener("abort", cancel);
       }
@@ -364,7 +430,7 @@ function componentDetail(
     case "projects":
     case "exams":
       return fmt(d.trackedItems, {
-        count: database("assignment")?.rows.length ?? 0,
+        count: (database("assignment") ?? findDeadlineDatabase(workspace))?.rows.length ?? 0,
       });
     case "planner": {
       const datedRows = workspace.databases.reduce(
@@ -379,14 +445,20 @@ function componentDetail(
           ).length,
         0,
       );
-      return fmt(d.scheduled, { count: datedRows });
+      // No dates yet (the student gave none, and none are invented).
+      return datedRows > 0 ? fmt(d.scheduled, { count: datedRows }) : d.scheduledNone;
     }
     case "readings":
       return fmt(d.readings, { count: database("reading")?.rows.length ?? 0 });
     case "habits":
       return fmt(d.habits, { count: database("habit")?.rows.length ?? 0 });
-    case "grades":
-      return fmt(d.grades, { count: database("grade")?.rows.length ?? 0 });
+    case "grades": {
+      // Grades are a calculator over the graded-work list (no grades table):
+      // report how many graded items it reads.
+      const block = workspace.pages.flatMap((page) => page.blocks).find((b) => b.type === "grades");
+      const graded = block?.type === "grades" ? workspace.databases.find((db) => db.id === block.databaseId) : undefined;
+      return fmt(d.grades, { count: graded?.rows.length ?? 0 });
+    }
     case "notes":
       return d.notes;
     default:

@@ -6,6 +6,9 @@ const mocks = vi.hoisted(() => ({
   usageDeleteMany: vi.fn(),
   executeRaw: vi.fn(),
   workspaceDeleteMany: vi.fn(),
+  chatDeleteMany: vi.fn(),
+  notificationLogDeleteMany: vi.fn(),
+  billing: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -15,8 +18,13 @@ vi.mock("@/lib/db", () => ({
     usageEvent: { deleteMany: mocks.usageDeleteMany },
     $executeRaw: mocks.executeRaw,
     workspace: { deleteMany: mocks.workspaceDeleteMany },
+    agentChatMessage: { deleteMany: mocks.chatDeleteMany },
+    notificationLog: { deleteMany: mocks.notificationLogDeleteMany },
   },
 }));
+
+vi.mock("@/lib/billing", () => ({ runBillingMaintenance: mocks.billing }));
+vi.mock("@/lib/ops/report-error", () => ({ reportError: vi.fn() }));
 
 import { USAGE_LIMITS } from "@/lib/usage-limits";
 import { RETENTION, STUDY_EVENT_KIND, purgeTrashedWorkspaces, runRetention } from "./retention";
@@ -32,9 +40,21 @@ beforeEach(() => {
   mocks.usageDeleteMany.mockResolvedValue({ count: 3 });
   mocks.executeRaw.mockResolvedValue(4);
   mocks.workspaceDeleteMany.mockResolvedValue({ count: 6 });
+  mocks.chatDeleteMany.mockResolvedValue({ count: 7 });
+  mocks.notificationLogDeleteMany.mockResolvedValue({ count: 8 });
+  mocks.billing.mockResolvedValue(BILLING);
 });
 
+const BILLING = { jobsCompleted: 1, jobsFailed: 0, holdsReleased: 2, subscriptionsResynced: 0 };
+
 describe("data retention", () => {
+  it("still prunes when the billing sweep fails (it is retried next run)", async () => {
+    mocks.billing.mockRejectedValue(new Error("stripe down"));
+    const result = await runRetention(NOW);
+    expect(result.billing).toBeNull();
+    expect(result.agentTasks).toBe(1);
+  });
+
   it("prunes each table with its own window", async () => {
     const result = await runRetention(NOW);
 
@@ -48,7 +68,7 @@ describe("data retention", () => {
     const usageCalls = mocks.usageDeleteMany.mock.calls.map((c) => c[0].where);
     // Rate-limit kinds: 7 days.
     expect(usageCalls[0]).toEqual({
-      kind: { in: [...Object.keys(USAGE_LIMITS), "data_export"] },
+      kind: { in: [...Object.keys(USAGE_LIMITS), "data_export", "agent_free_failure"] },
       createdAt: { lt: daysBefore(7) },
     });
     // Study streak: at least 400 days are kept.
@@ -73,7 +93,25 @@ describe("data retention", () => {
       studyEvents: 3,
       analyticsEvents: 3,
       trashedWorkspaces: 6,
+      agentChatMessagesExpired: 7,
+      agentChatMessagesOverCap: 4,
+      notificationLogs: 8,
+      billing: BILLING,
     });
+    // Notification sent-log: kept well past the longest reminder lead (14 days).
+    expect(RETENTION.notificationLogDays).toBeGreaterThan(14);
+    expect(mocks.notificationLogDeleteMany).toHaveBeenCalledWith({
+      where: { createdAt: { lt: daysBefore(RETENTION.notificationLogDays) } },
+    });
+    // The billing sweep (pending refunds and deleted-account cancels, expired
+    // credit holds, lapsed subscription rows) runs with the same clock.
+    expect(mocks.billing).toHaveBeenCalledWith(NOW);
+    // Agent chat: an age limit and a per-workspace cap.
+    expect(mocks.chatDeleteMany).toHaveBeenCalledWith({
+      where: { createdAt: { lt: daysBefore(RETENTION.agentChatMessageDays) } },
+    });
+    expect(sql(mocks.executeRaw.mock.calls[1])).toContain('"AgentChatMessage"');
+    expect(mocks.executeRaw.mock.calls[1][1]).toBe(RETENTION.agentChatMaxPerWorkspace);
   });
 
   it("purges only workspaces trashed more than 30 days ago", async () => {

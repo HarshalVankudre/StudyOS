@@ -33,6 +33,31 @@ describe("reportError", () => {
     }
   });
 
+  it("redacts Daytona and Google API keys", () => {
+    const text = scrub("sandbox failed for dtn_0123456789abcdef0123 key AIzaSyA1234567890abcdefghijklmnopqrstu");
+    expect(text).not.toContain("dtn_0123456789abcdef0123");
+    expect(text).not.toContain("AIzaSyA1234567890");
+    expect(text).toContain("[redacted-daytona-key]");
+  });
+
+  it("drops short quoted user content but keeps codes and identifiers", () => {
+    const parse = scrub(`Unexpected token 'M', "Midterm on Oct 3" is not valid JSON`);
+    expect(parse).not.toContain("Midterm");
+    const zod = scrub(`Invalid option: expected one of "todo"|"done", received “Call Dr. Lee”`);
+    expect(zod).not.toContain("Dr. Lee");
+    expect(zod).toContain('"todo"');
+    expect(zod).toContain('"done"');
+    const code = scrub(`Unique constraint failed on the fields: (\`idempotencyKey\`) code 'P2002'`);
+    expect(code).toContain("`idempotencyKey`");
+    expect(code).toContain("'P2002'");
+    // Apostrophes are not quotes.
+    expect(scrub("the model didn't return the student's plan")).toBe(
+      "the model didn't return the student's plan",
+    );
+    // Short inline JSON documents go too.
+    expect(scrub('bad row {"title":"Essay due"} skipped')).not.toContain("Essay");
+  });
+
   it("drops embedded documents and caps length", () => {
     const doc = JSON.stringify({ title: "My secret essay", body: "x".repeat(400) });
     const entry = buildErrorEntry(new Error(`could not save ${doc}`));

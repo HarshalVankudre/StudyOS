@@ -29,6 +29,8 @@ import {
 } from "@/lib/workspace/view-logic";
 import { useI18n } from "@/lib/i18n/client";
 import { useWorkspace } from "../WorkspaceContext";
+import { ImportDeadlinesButton } from "../feeds/ImportDeadlinesButton";
+import { DraftInput } from "../editor/DraftInput";
 import type { DbActions } from "./actions";
 import { ChipMultiSelect } from "./cells";
 import { deadlineProp, orderedProps, rowTitle } from "./shared";
@@ -111,6 +113,7 @@ export function ViewToolbar({
         {tab("filter", dict.dbViews.filter, ListFilter, activeFilters)}
         {tab("sort", dict.dbViews.sort, ArrowUpDown, sortCount)}
         {tab("fields", dict.dbViews.fields, Columns3, hiddenCount)}
+        <ImportDeadlinesButton db={db} />
       </div>
 
       {panel === "filter" && (
@@ -192,21 +195,8 @@ function FilterPanel({
           {dict.dbViews.addFilter}
         </button>
         {upcoming && (
-          <button
-            type="button"
-            onClick={() =>
-              actions.updateView(view.id, (v) => {
-                v.filters = upcoming.filters;
-                v.filterMatch = undefined;
-                if (!v.sorts?.length) v.sorts = upcoming.sorts;
-              })
-            }
-            className="min-h-9 rounded-md border border-line px-2 text-sm text-ink-soft hover:bg-hover hover:text-ink"
-          >
-            {dict.dbViews.thisWeekPreset}
-          </button>
-        )}
-        {upcoming && (
+          // The preset always goes into its own view: the view the student is
+          // looking at keeps its filters and sorts exactly as they were.
           <button
             type="button"
             onClick={() =>
@@ -217,9 +207,10 @@ function FilterPanel({
                 ...upcoming,
               })
             }
-            className="min-h-9 rounded-md border border-line px-2 text-sm text-ink-soft hover:bg-hover hover:text-ink"
+            className="flex min-h-9 flex-col items-start rounded-md border border-line px-2 py-1 text-start text-sm text-ink-soft hover:bg-hover hover:text-ink"
           >
-            {dict.dbViews.createThisWeekView}
+            <span>{dict.dbViews.createThisWeekView}</span>
+            <span className="text-xs text-ink-faint">{dict.dbViews.thisWeekPreset}</span>
           </button>
         )}
         {filters.length > 0 && (
@@ -325,20 +316,22 @@ function FilterValue({
   const value = filter.value;
   const label = dict.dbViews.filterValue;
 
-  // Text-like inputs commit on blur / Enter, so typing does not save a new
-  // version of the view on every keystroke.
+  // Text-like inputs buffer typing (commit after a pause for text, on blur /
+  // Enter for numbers) so typing does not save a new version of the view on
+  // every keystroke. Like cells, they register the buffered text with the
+  // sync engine, so it is written before the tab is hidden or closed.
   const textInput = (type: "text" | "number", current: string, parse: (raw: string) => CellValue) => (
-    <input
-      key={`${filter.propertyId}:${filter.operator}:${current}`}
+    <DraftInput
       type={type}
       inputMode={type === "number" ? "decimal" : undefined}
-      defaultValue={current}
-      aria-label={label}
-      placeholder={label}
-      onBlur={(e) => {
-        const next = parse(e.target.value);
+      value={current}
+      commitOnPause={type === "text"}
+      onCommit={(raw) => {
+        const next = parse(raw);
         if (next !== value) onChange(next);
       }}
+      aria-label={label}
+      placeholder={label}
       onKeyDown={(e) => {
         if (e.key === "Enter") e.currentTarget.blur();
       }}

@@ -2,7 +2,8 @@ import "server-only";
 import { randomBytes } from "node:crypto";
 import { prisma } from "@/lib/db";
 import { repairWorkspace } from "@/lib/workspace/repair";
-import { workspaceEvents, type CalendarEvent } from "./events";
+import type { Workspace } from "@/lib/workspace/types";
+import { mergeWorkspaceEvents, type FeedOptions } from "./events";
 import { buildIcs } from "./ics";
 
 /** New unguessable, URL-safe token. */
@@ -44,13 +45,19 @@ export async function resolveUserByToken(token: string): Promise<string | null> 
 }
 
 /** Build the ICS body aggregating every dated row across the user's workspaces. */
-export async function buildUserFeed(userId: string, now: Date): Promise<string> {
+export async function buildUserFeed(
+  userId: string,
+  now: Date,
+  opts: FeedOptions = {},
+): Promise<string> {
   const rows = await prisma.workspace.findMany({
     // Trashed workspaces must not leak deadlines into the feed.
     where: { ownerId: userId, deletedAt: null },
-    select: { data: true },
+    // Oldest first: an untouched copy's events give way to the original's.
+    orderBy: { createdAt: "asc" },
+    select: { id: true, name: true, data: true },
   });
-  const events: CalendarEvent[] = [];
+  const workspaces: Workspace[] = [];
   for (const row of rows) {
     let parsed: unknown;
     try {
@@ -59,9 +66,8 @@ export async function buildUserFeed(userId: string, now: Date): Promise<string> 
       continue;
     }
     // Tolerant, like the editor: one imperfect block never hides every deadline.
-    const result = repairWorkspace(parsed);
-    if (result) events.push(...workspaceEvents(result.workspace));
+    const result = repairWorkspace(parsed, { id: row.id, name: row.name });
+    if (result) workspaces.push({ ...result.workspace, id: row.id });
   }
-  events.sort((a, b) => a.date.localeCompare(b.date));
-  return buildIcs(events, { name: "StudyOS deadlines", now });
+  return buildIcs(mergeWorkspaceEvents(workspaces, opts), { name: "StudyOS deadlines", now });
 }

@@ -3,9 +3,10 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import {
-  cancelAllBillingForUser,
   isPro,
   markAccountDeleted,
+  stopBillingForDeletedAccount,
+  unmarkAccountDeleted,
 } from "@/lib/billing";
 import { getCreditBalance } from "@/lib/credits";
 import { eraseUserData } from "@/lib/account/erase-user-data";
@@ -34,21 +35,22 @@ export async function deleteAccountAction(): Promise<{ error: string } | void> {
   const { userId } = await auth();
   if (!userId) redirect("/sign-in");
 
-  // Stop billing first so nothing renews: every subscription the user has on
-  // Stripe (not just the tracked one), plus open checkouts. Crucially, only
-  // proceed to purge the local record if we KNOW billing is stopped. On a
-  // transient Stripe failure a subscription may still be active and charging
-  // the card — deleting the row that maps to it would orphan live billing with
-  // no way to reconcile. Abort instead; the user can retry.
-  try {
-    await cancelAllBillingForUser(userId);
-  } catch {
+  // Tombstone first: from here on no credit account can be recreated and no
+  // credits granted (a pack paid now is refunded), so nothing slips in while
+  // the data is erased. It also queues the durable cancellation job with the
+  // Stripe ids captured before they are erased.
+  await markAccountDeleted(userId);
+
+  // Stop billing now: every subscription the user has on Stripe (not just
+  // the tracked one), plus open checkouts. If Stripe cannot be reached, a
+  // subscription may still be live: withdraw the tombstone, keep everything,
+  // and let the user retry (they are still signed in to do so).
+  if (!(await stopBillingForDeletedAccount(userId))) {
+    await unmarkAccountDeleted(userId);
     return { error: "billing_cancel_failed" };
   }
 
   await eraseUserData(userId);
-  // Tombstone so a late Stripe webhook cannot recreate billing rows or credits.
-  await markAccountDeleted(userId);
 
   try {
     const client = await clerkClient();

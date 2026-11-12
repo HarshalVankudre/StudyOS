@@ -6,6 +6,7 @@ import { Dialog as DialogPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { rememberOpener, restoreFocus } from "@/components/ui/focus-return"
 
 function Dialog({
   ...props
@@ -51,19 +52,53 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  returnFocus,
+  onOpenAutoFocus,
+  onCloseAutoFocus,
+  ref,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
+  /**
+   * Where focus goes on close when the control that opened the dialog is no
+   * longer on the page (it is otherwise returned there automatically).
+   */
+  returnFocus?: () => HTMLElement | null | undefined
 }) {
+  // The last mounted content node, kept after unmount: Radix reports the
+  // close only after the node has been removed.
+  const contentRef = React.useRef<HTMLDivElement | null>(null)
+  const setRef = React.useCallback(
+    (node: HTMLDivElement | null) => {
+      if (node) contentRef.current = node
+      if (typeof ref === "function") ref(node)
+      else if (ref) ref.current = node
+    },
+    [ref]
+  )
   return (
     <DialogPortal data-slot="dialog-portal">
       <DialogOverlay />
       <DialogPrimitive.Content
+        ref={setRef}
         data-slot="dialog-content"
         className={cn(
           "fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border bg-background p-6 shadow-lg duration-200 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
           className
         )}
+        onOpenAutoFocus={(event) => {
+          // Runs before Radix moves focus inside: the opener still has it.
+          const node = contentRef.current ?? (event.target as Element | null)
+          if (node) rememberOpener(node)
+          onOpenAutoFocus?.(event)
+        }}
+        onCloseAutoFocus={(event) => {
+          onCloseAutoFocus?.(event)
+          if (event.defaultPrevented) return
+          // Radix would only focus a <DialogTrigger> (we use none), else <body>.
+          event.preventDefault()
+          restoreFocus(contentRef.current ?? (event.target as Element | null), returnFocus)
+        }}
         {...props}
       >
         {children}

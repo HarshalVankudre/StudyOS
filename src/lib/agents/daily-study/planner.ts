@@ -1,444 +1,676 @@
 import type {
   Block,
   Database,
-  DatabaseProperty,
   DatabaseRow,
+  FlashcardsBlock,
   Page,
+  QuizBlock,
+  QuizQuestion,
   Workspace,
 } from "@/lib/workspace/types";
-import type { DailyStudyPlanItem } from "./types";
+import { pageForDatabase } from "@/lib/workspace/deep-link";
+import { completionField, dayDiff, isRowComplete } from "@/lib/workspace/view-logic";
+import { isNew, isStudyable } from "@/lib/study/srs";
+import {
+  classifyExam,
+  cleanText,
+  courseKeywords,
+  estimateEffortMinutes,
+  examPrepMinutes,
+  mentions,
+  rowCourse,
+  rowDueDate,
+  rowTitle,
+  rowWeight,
+} from "./classify";
+import {
+  DEFAULT_DAILY_MINUTES,
+  RESTART_AFTER_CARRIES,
+  type DailyStudyPlanItem,
+  type ExamCountdown,
+  type PlanDetails,
+  type PlanItemMode,
+  type PlanReason,
+  type PlanTarget,
+  type Workload,
+} from "./types";
+
+/**
+ * The Daily Study Agent's planner. Deterministic on purpose: it costs no AI
+ * credits, cannot invent coursework, and every item points at its source.
+ *
+ * It reads every workspace (deadlines in databases, exams, flashcard decks,
+ * quizzes and open to-dos), estimates the effort ahead, and fills the
+ * student's time for today with a short list, each item with a time estimate,
+ * a structured reason (rendered in the student's language at display time)
+ * and a deep link. Unfinished items from the last plan roll forward with a
+ * small priority boost; nothing is ever marked as failed.
+ */
 
 const MAX_PLAN_ITEMS = 6;
+const MAX_TASK_ITEMS = 3;
 const MIN_SESSION_MINUTES = 10;
-const MAX_TITLE_LENGTH = 180;
+/** New cards introduced per deck session; the rest wait for later days. */
+export const NEW_CARDS_PER_SESSION = 10;
+/** Overdue work older than this is left out of the plan (no nagging). */
+const OVERDUE_WINDOW_DAYS = 14;
+/** Exams further out than this get a countdown but no sessions yet. */
+const EXAM_PREP_WINDOW_DAYS = 21;
+/** Exams within this many days get a countdown. */
+const EXAM_COUNTDOWN_DAYS = 45;
+/** How far ahead the workload check looks. */
+const WORKLOAD_HORIZON_DAYS = 10;
+const RESTART_MINUTES = 15;
+const MAX_LEDGER_KEYS = 300;
 
-const COMPLETE_WORDS = [
-  "done",
-  "complete",
-  "completed",
-  "finished",
-  "submitted",
-  "archived",
-  "read",
-  "hecho",
-  "completado",
-  "terminado",
-  "entregado",
-  "erledigt",
-  "abgeschlossen",
-  "eingereicht",
-  "terminé",
-  "fini",
-  "soumis",
-  "completato",
-  "concluído",
-  "concluido",
-  "voltooid",
-  "完成",
-  "已完成",
-  "完了",
-  "済",
-  "مكتمل",
-  "تم",
-] as const;
+export interface PreviousPlan {
+  localDate: string;
+  items: Pick<DailyStudyPlanItem, "id" | "completed" | "kind" | "mode" | "minutes" | "carry" | "ledgerKey">[];
+  progress: Record<string, number>;
+}
 
-const COMPLETION_PROPERTY_WORDS = [
-  ...COMPLETE_WORDS,
-  "status",
-  "state",
-  "progress",
-  "estado",
-  "statut",
-  "stato",
-  "status",
-  "状态",
-  "ステータス",
-  "الحالة",
-] as const;
+/** Plug-in point for a grades module: the weight (percent) of an assessment row. */
+export type WeightResolver = (
+  workspace: Workspace,
+  database: Database,
+  row: DatabaseRow,
+) => number | null | undefined;
 
-const TITLE_PROPERTY_WORDS = [
-  "assignment",
-  "task",
-  "name",
-  "title",
-  "exam",
-  "assessment",
-  "item",
-  "topic",
-  "reading",
-] as const;
-
-const DUE_PROPERTY_WORDS = [
-  "due",
-  "deadline",
-  "exam",
-  "test",
-  "quiz",
-  "date",
-  "fecha",
-  "frist",
-  "fällig",
-  "echeance",
-  "échéance",
-  "scadenza",
-  "prazo",
-  "datum",
-  "日期",
-  "締切",
-  "موعد",
-] as const;
-
-const WEIGHT_WORDS = [
-  "weight",
-  "grade",
-  "percent",
-  "%",
-  "gewicht",
-  "peso",
-  "poids",
-  "ponderazione",
-  "权重",
-  "重み",
-  "الوزن",
-] as const;
-
-interface Candidate {
-  id: string;
-  kind: DailyStudyPlanItem["kind"];
-  title: string;
-  source: string;
-  reason: string;
-  workspaceId: string;
-  href: string;
-  score: number;
-  recommendedMinutes: number;
-  dueDate?: string;
-  dueCount?: number;
+export interface PlannerInput {
+  workspaces: Workspace[];
+  /** The student's local day, YYYY-MM-DD. */
+  localDate: string;
+  /** The student's usual minutes per day. */
+  dailyMinutes: number;
+  /** Minutes for today only ("I have 30 minutes today"). */
+  todayMinutes?: number;
+  /** The most recent plan before today, for roll-forward. */
+  previous?: PreviousPlan | null;
+  /** Today's plan when rebuilding: items already done are kept as done. */
+  current?: { items: DailyStudyPlanItem[]; progress?: Record<string, number> } | null;
+  /**
+   * Optional weight source (e.g. the grades module). Returning a number
+   * overrides the row's own weight column; undefined falls back to it.
+   */
+  weightOf?: WeightResolver;
 }
 
 export interface BuiltDailyStudyPlan {
-  summary: string;
   items: DailyStudyPlanItem[];
+  details: PlanDetails;
   sourceCount: number;
   candidateCount: number;
 }
 
-/**
- * Observe all workspace data and turn it into a bounded, explainable study day.
- * This planner is deterministic on purpose: it costs no AI credits, cannot
- * hallucinate coursework, and every recommendation points to its source.
- */
-export function buildDailyStudyPlan(
-  workspaces: Workspace[],
-  localDate: string,
-  dailyMinutes: number,
-): BuiltDailyStudyPlan {
-  const budget = normalizeDailyMinutes(dailyMinutes);
-  const candidates = workspaces
-    .flatMap((workspace) => collectWorkspaceCandidates(workspace, localDate))
-    .sort(compareCandidates);
+type PlanItemDraft = Omit<DailyStudyPlanItem, "completed">;
 
-  const items: DailyStudyPlanItem[] = [];
-  let remaining = budget;
+interface Candidate {
+  item: PlanItemDraft;
+  score: number;
+}
 
-  for (const candidate of candidates) {
-    if (items.length >= MAX_PLAN_ITEMS || remaining < MIN_SESSION_MINUTES) break;
+interface DeckInfo {
+  workspaceId: string;
+  page: Page;
+  block: FlashcardsBlock;
+  text: string;
+  reviewsDue: number;
+  newPlanned: number;
+  studyable: number;
+}
 
-    const durationMinutes = Math.min(candidate.recommendedMinutes, remaining);
-    items.push({
-      id: candidate.id,
-      kind: candidate.kind,
-      title: candidate.title,
-      source: candidate.source,
-      reason: candidate.reason,
-      workspaceId: candidate.workspaceId,
-      href: candidate.href,
-      durationMinutes,
-      ...(candidate.dueDate ? { dueDate: candidate.dueDate } : {}),
-      ...(candidate.dueCount ? { dueCount: candidate.dueCount } : {}),
-      completed: false,
-    });
-    remaining -= durationMinutes;
-  }
+interface QuizInfo {
+  workspaceId: string;
+  page: Page;
+  block: QuizBlock;
+  text: string;
+  playable: number;
+}
 
-  const selectedWorkspaces = new Set(items.map((item) => item.workspaceId)).size;
-  const summary =
-    items.length === 0
-      ? "No open deadlines, due flashcards, or unfinished tasks were found."
-      : `${items.length} focused ${plural(items.length, "session", "sessions")} across ${selectedWorkspaces} ${plural(selectedWorkspaces, "workspace", "workspaces")}, starting with “${items[0].title}”.`;
+interface ExamRow {
+  workspace: Workspace;
+  database: Database;
+  row: DatabaseRow;
+  title: string;
+  course: string | null;
+  days: number;
+  date: string;
+  major: boolean;
+  weight: number | null;
+  target: PlanTarget;
+  ledgerKey: string;
+}
 
-  return {
-    summary,
-    items,
-    sourceCount: workspaces.length,
-    candidateCount: candidates.length,
-  };
+interface WorkloadEntry {
+  candidateId: string | null;
+  title: string;
+  /** Days until it must be done (0 = today). */
+  due: number;
+  minutes: number;
 }
 
 export function normalizeDailyMinutes(value: number): number {
-  if (!Number.isFinite(value)) return 60;
+  if (!Number.isFinite(value)) return DEFAULT_DAILY_MINUTES;
   return Math.min(240, Math.max(15, Math.round(value)));
 }
 
-function collectWorkspaceCandidates(
-  workspace: Workspace,
-  localDate: string,
-): Candidate[] {
+/** Minutes for a one-day override ("I only have 15 minutes today"). */
+export function normalizeTodayMinutes(value: number | undefined): number | undefined {
+  if (value === undefined || !Number.isFinite(value)) return undefined;
+  return Math.min(480, Math.max(10, Math.round(value)));
+}
+
+export function buildDailyStudyPlan(input: PlannerInput): BuiltDailyStudyPlan {
+  const { workspaces, localDate } = input;
+  const dailyBudget = normalizeDailyMinutes(input.dailyMinutes);
+  const todayOverride = normalizeTodayMinutes(input.todayMinutes);
+  const budget = todayOverride ?? dailyBudget;
+
+  // ---- Roll-forward bookkeeping -------------------------------------------
+  const previous =
+    input.previous && input.previous.localDate < localDate ? input.previous : null;
+  const ledger: Record<string, number> = { ...(previous?.progress ?? input.current?.progress ?? {}) };
+  if (previous) {
+    for (const item of previous.items) {
+      if (item.completed && item.ledgerKey && item.mode !== "study") {
+        ledger[item.ledgerKey] = (ledger[item.ledgerKey] ?? 0) + item.minutes;
+      }
+    }
+  }
+  const carried = new Map<string, { from: string; count: number }>();
+  if (previous) {
+    for (const item of previous.items) {
+      if (!item.completed) {
+        carried.set(item.id, { from: previous.localDate, count: (item.carry?.count ?? 0) + 1 });
+      }
+    }
+  }
+
+  // ---- Observe ------------------------------------------------------------
   const candidates: Candidate[] = [];
+  const workload: WorkloadEntry[] = [];
+  const exams: ExamRow[] = [];
+  const decks: DeckInfo[] = [];
+  const quizzes: QuizInfo[] = [];
+  const openLedgerKeys = new Set<string>();
 
-  for (const database of workspace.databases) {
-    candidates.push(...collectDatabaseCandidates(workspace, database, localDate));
-  }
-
-  for (const page of workspace.pages) {
-    for (const block of page.blocks) {
-      const candidate = collectBlockCandidate(workspace, page, block, localDate);
-      if (candidate) candidates.push(candidate);
+  for (const workspace of workspaces) {
+    for (const database of workspace.databases) {
+      collectRows(workspace, database);
+    }
+    for (const page of workspace.pages) {
+      for (const block of page.blocks) collectBlock(workspace, page, block);
     }
   }
 
-  return candidates;
-}
-
-function collectDatabaseCandidates(
-  workspace: Workspace,
-  database: Database,
-  localDate: string,
-): Candidate[] {
-  const dateProperties = orderedProperties(
-    database.properties.filter((property) => property.type === "date"),
-    DUE_PROPERTY_WORDS,
-  );
-  if (dateProperties.length === 0) return [];
-
-  return database.rows.flatMap((row) => {
-    if (isCompletedRow(database, row)) return [];
-
-    const due = dateProperties
-      .map((property) => row.cells[property.id])
-      .find(isIsoDay);
-    if (!due) return [];
-
-    const days = calendarDayDifference(localDate, due);
-    if (days > 30) return [];
-
-    const weight = findWeight(database, row);
-    const title =
-      findRowTitle(database, row) ??
-      (cleanText(database.name) || "Untitled study item");
-    const source = sourceLabel(workspace.name, database.name);
-    return [
-      {
-        id: `deadline:${workspace.id}:${database.id}:${row.id}`,
-        kind: "deadline" as const,
-        title,
-        source,
-        reason: deadlineReason(days, weight),
+  function collectRows(workspace: Workspace, database: Database) {
+    if (!database.properties.some((p) => p.type === "date")) return;
+    const field = completionField(database);
+    const pageId = pageForDatabase(workspace, database.id);
+    for (const row of database.rows) {
+      if (isRowComplete(database, row, field)) continue;
+      const due = rowDueDate(database, row);
+      if (!due) continue;
+      const days = dayDiff(localDate, due);
+      const title = rowTitle(database, row) ?? cleanText(database.name);
+      if (!title) continue;
+      const weight = input.weightOf?.(workspace, database, row) ?? rowWeight(database, row);
+      const ledgerKey = `${workspace.id}:${database.id}:${row.id}`;
+      const target: PlanTarget = {
         workspaceId: workspace.id,
-        href: `/app/${encodeURIComponent(workspace.id)}`,
+        ...(pageId ? { pageId } : {}),
+        databaseId: database.id,
+        rowId: row.id,
+      };
+      const exam = classifyExam(database, row, title, weight);
+
+      if (exam.isExam) {
+        if (days < 0 || days > EXAM_COUNTDOWN_DAYS) continue;
+        openLedgerKeys.add(ledgerKey);
+        exams.push({
+          workspace,
+          database,
+          row,
+          title,
+          course: rowCourse(workspace, database, row),
+          days,
+          date: due,
+          major: exam.major,
+          weight,
+          target,
+          ledgerKey,
+        });
+        continue;
+      }
+
+      if (days < -OVERDUE_WINDOW_DAYS) continue;
+      openLedgerKeys.add(ledgerKey);
+      const effort = Math.max(
+        15,
+        estimateEffortMinutes(database, row, title, weight) - (ledger[ledgerKey] ?? 0),
+      );
+      const id = `deadline:${workspace.id}:${database.id}:${row.id}`;
+      if (days <= WORKLOAD_HORIZON_DAYS) {
+        workload.push({ candidateId: id, title, due: Math.max(0, days), minutes: effort });
+      }
+      if (days > EXAM_PREP_WINDOW_DAYS) continue;
+
+      // Due within a day (or already passed): finish it. Further out: a
+      // work session toward it, sized to spread the effort over the days left.
+      const finishing = days <= 1;
+      const mode: PlanItemMode = finishing && field ? "finish" : "session";
+      const minutes = finishing
+        ? clampRound(effort, 15, 60)
+        : clampRound(Math.ceil(effort / Math.max(days, 1)), 15, 60);
+      candidates.push({
         score: deadlineScore(days, weight),
-        recommendedMinutes: deadlineDuration(days),
-        dueDate: due,
-      },
-    ];
-  });
-}
-
-function collectBlockCandidate(
-  workspace: Workspace,
-  page: Page,
-  block: Block,
-  localDate: string,
-): Candidate | null {
-  if (block.type === "flashcards") {
-    const dueCount = block.cards.filter(
-      (card) => !card.dueAt || card.dueAt <= localDate,
-    ).length;
-    if (dueCount === 0) return null;
-
-    const deckTitle = cleanText(block.title || page.title || "Flashcards");
-    return {
-      id: `flashcards:${workspace.id}:${page.id}:${block.id}`,
-      kind: "flashcards",
-      title: `Review ${deckTitle}`,
-      source: sourceLabel(workspace.name, page.title),
-      reason: `${dueCount} ${plural(dueCount, "card is", "cards are")} due for spaced-repetition review.`,
-      workspaceId: workspace.id,
-      href: `/app/${encodeURIComponent(workspace.id)}`,
-      score: 620 + Math.min(dueCount, 50) * 4,
-      recommendedMinutes: clamp(Math.ceil(dueCount * 1.5), 15, 35),
-      dueCount,
-    };
-  }
-
-  if (block.type === "todo" && !block.checked && cleanText(block.text)) {
-    return {
-      id: `task:${workspace.id}:${page.id}:${block.id}`,
-      kind: "task",
-      title: cleanText(block.text),
-      source: sourceLabel(workspace.name, page.title),
-      reason: `This is still open on “${cleanText(page.title)}”.`,
-      workspaceId: workspace.id,
-      href: `/app/${encodeURIComponent(workspace.id)}`,
-      score: 120,
-      recommendedMinutes: 20,
-    };
-  }
-
-  return null;
-}
-
-function isCompletedRow(database: Database, row: DatabaseRow): boolean {
-  for (const property of database.properties) {
-    const value = row.cells[property.id];
-    const propertyName = normalize(property.name);
-
-    if (
-      property.type === "checkbox" &&
-      value === true &&
-      includesAny(propertyName, COMPLETION_PROPERTY_WORDS)
-    ) {
-      return true;
-    }
-
-    if ((property.type === "status" || property.type === "select") && typeof value === "string") {
-      const label = property.options?.find((option) => option.id === value)?.label ?? value;
-      if (isCompleteLabel(label)) return true;
+        item: {
+          id,
+          kind: "deadline",
+          mode,
+          title,
+          workspaceName: cleanText(workspace.name),
+          section: cleanText(database.name),
+          target,
+          minutes,
+          reason: { code: deadlineCode(days), days, effortMinutes: effort },
+          ...(weight !== null ? { weight } : {}),
+          dueDate: due,
+          ledgerKey,
+        },
+      });
     }
   }
-  return false;
-}
 
-function findRowTitle(database: Database, row: DatabaseRow): string | null {
-  const textProperties = orderedProperties(
-    database.properties.filter((property) => property.type === "text"),
-    TITLE_PROPERTY_WORDS,
+  function collectBlock(workspace: Workspace, page: Page, block: Block) {
+    if (block.type === "flashcards") {
+      let reviewsDue = 0;
+      let fresh = 0;
+      let studyable = 0;
+      for (const card of block.cards) {
+        // A card with an empty side cannot be studied, so it is never "due".
+        if (!isStudyable(card)) continue;
+        studyable += 1;
+        if (isNew(card)) fresh += 1;
+        else if (card.dueAt && card.dueAt <= localDate) reviewsDue += 1;
+      }
+      if (studyable === 0) return;
+      const newPlanned = Math.min(fresh, NEW_CARDS_PER_SESSION);
+      const deckTitle = cleanText(block.title || page.title || workspace.name);
+      decks.push({
+        workspaceId: workspace.id,
+        page,
+        block,
+        text: `${page.title} ${block.title ?? ""}`,
+        reviewsDue,
+        newPlanned,
+        studyable,
+      });
+      const planned = reviewsDue + newPlanned;
+      if (planned === 0 || !deckTitle) return;
+      candidates.push({
+        score: reviewsDue > 0 ? 600 + Math.min(reviewsDue, 50) * 4 : 360 + newPlanned * 2,
+        item: {
+          id: `flashcards:${workspace.id}:${page.id}:${block.id}`,
+          kind: "flashcards",
+          mode: "study",
+          title: deckTitle,
+          workspaceName: cleanText(workspace.name),
+          section: cleanText(page.title),
+          target: { workspaceId: workspace.id, pageId: page.id, blockId: block.id },
+          minutes: deckMinutes(reviewsDue, newPlanned),
+          reason: { code: reviewsDue > 0 ? "cards_due" : "new_cards", count: planned },
+          dueCount: planned,
+        },
+      });
+      return;
+    }
+
+    if (block.type === "quiz") {
+      const playable = (block.questions ?? []).filter(isPlayableQuestion).length;
+      if (playable === 0) return;
+      quizzes.push({
+        workspaceId: workspace.id,
+        page,
+        block,
+        text: `${page.title} ${block.title ?? ""}`,
+        playable,
+      });
+      return;
+    }
+
+    if (block.type === "todo" && !block.checked) {
+      const text = cleanText(block.text);
+      if (!text) return;
+      candidates.push({
+        score: 140,
+        item: {
+          id: `task:${workspace.id}:${page.id}:${block.id}`,
+          kind: "task",
+          mode: "finish",
+          title: text,
+          workspaceName: cleanText(workspace.name),
+          section: cleanText(page.title),
+          target: { workspaceId: workspace.id, pageId: page.id, blockId: block.id },
+          minutes: 15,
+          reason: { code: "open_task" },
+        },
+      });
+    }
+  }
+
+  // ---- Exams: countdowns and review sessions planned backwards -------------
+  const countdowns: ExamCountdown[] = exams
+    .slice()
+    .sort((a, b) => a.date.localeCompare(b.date) || a.title.localeCompare(b.title))
+    .slice(0, 6)
+    .map((exam) => ({
+      id: `exam:${exam.ledgerKey}`,
+      title: exam.title,
+      workspaceName: cleanText(exam.workspace.name),
+      date: exam.date,
+      days: exam.days,
+      major: exam.major,
+      target: exam.target,
+    }));
+
+  const usedDecks = new Set<string>();
+  for (const exam of exams) {
+    const prepTotal = examPrepMinutes(exam.major, exam.weight);
+    const prepLeft = Math.max(0, prepTotal - (ledger[exam.ledgerKey] ?? 0));
+    if (exam.days >= 1 && exam.days <= WORKLOAD_HORIZON_DAYS && prepLeft > 0) {
+      workload.push({
+        candidateId: null,
+        title: exam.title,
+        due: exam.days,
+        minutes: prepLeft,
+      });
+    }
+    if (exam.days > EXAM_PREP_WINDOW_DAYS) continue;
+
+    const baseId = `exam:${exam.ledgerKey}`;
+    const wasCarried = [...carried.keys()].some((id) => id.startsWith(`${baseId}:`));
+    if (!isReviewDay(exam.days, exam.major) && !wasCarried) continue;
+
+    const sameWorkspaceExams = exams.filter((e) => e.workspace.id === exam.workspace.id);
+    const singleCourse =
+      new Set(sameWorkspaceExams.map((e) => e.course ?? e.title)).size <= 1;
+    const keywords = courseKeywords(exam.course ?? exam.title);
+    const matches = <T extends { workspaceId: string; text: string }>(list: T[]) => {
+      const inWorkspace = list.filter((x) => x.workspaceId === exam.workspace.id);
+      const named = inWorkspace.filter((x) => mentions(x.text, keywords));
+      return named.length > 0 ? named : singleCourse ? inWorkspace : [];
+    };
+
+    const reason = (count?: number): PlanReason => ({
+      code: exam.days === 0 ? "exam_today" : exam.days === 1 ? "exam_tomorrow" : "exam_review",
+      days: exam.days,
+      examTitle: exam.title,
+      ...(count ? { count } : {}),
+    });
+    const score =
+      (exam.days === 0 ? 920 : exam.days === 1 ? 880 : exam.days <= 3 ? 800 : 720 - exam.days * 8) +
+      (exam.major ? 40 : 0);
+    const sessionMinutes =
+      exam.days === 0 ? 20 : clampRound(Math.ceil(prepLeft / Math.max(exam.days, 1)), 20, 45);
+    const common = {
+      workspaceName: cleanText(exam.workspace.name),
+      ...(exam.weight !== null ? { weight: exam.weight } : {}),
+      dueDate: exam.date,
+      ledgerKey: exam.ledgerKey,
+    };
+
+    const deck = matches(decks)
+      .filter((d) => !usedDecks.has(d.block.id))
+      .sort((a, b) => b.reviewsDue + b.newPlanned - (a.reviewsDue + a.newPlanned) || b.studyable - a.studyable)[0];
+    const quiz = matches(quizzes).sort((a, b) => b.playable - a.playable)[0];
+    let planned = 0;
+
+    if (deck) {
+      usedDecks.add(deck.block.id);
+      const due = deck.reviewsDue + deck.newPlanned;
+      planned += 1;
+      candidates.push({
+        score,
+        item: {
+          ...common,
+          id: `${baseId}:${deck.block.id}`,
+          kind: "exam",
+          // With cards due, finishing them is the session (completes by
+          // itself). With none due it is a practice run the student ticks off.
+          mode: due > 0 ? "study" : "session",
+          title: cleanText(deck.block.title || deck.page.title || exam.title),
+          section: cleanText(deck.page.title),
+          target: { workspaceId: exam.workspace.id, pageId: deck.page.id, blockId: deck.block.id },
+          minutes: due > 0 ? Math.max(deckMinutes(deck.reviewsDue, deck.newPlanned), sessionMinutes) : sessionMinutes,
+          reason: reason(due > 0 ? due : undefined),
+          ...(due > 0 ? { dueCount: due } : {}),
+        },
+      });
+    }
+    // A practice quiz on the last three days, and every other review day.
+    if (quiz && (exam.days <= 3 || exam.days % 2 === 1 || !deck)) {
+      planned += 1;
+      candidates.push({
+        score: score - 5,
+        item: {
+          ...common,
+          id: `${baseId}:${quiz.block.id}`,
+          kind: "quiz",
+          mode: "study",
+          title: cleanText(quiz.block.title || quiz.page.title || exam.title),
+          section: cleanText(quiz.page.title),
+          target: { workspaceId: exam.workspace.id, pageId: quiz.page.id, blockId: quiz.block.id },
+          minutes: clampRound(Math.min(quiz.playable * 2, 30), 10, 30),
+          reason: reason(),
+        },
+      });
+    }
+    if (planned === 0) {
+      candidates.push({
+        score,
+        item: {
+          ...common,
+          id: `${baseId}:notes`,
+          kind: "exam",
+          mode: "session",
+          title: exam.title,
+          section: cleanText(exam.database.name),
+          target: exam.target,
+          minutes: sessionMinutes,
+          reason: reason(),
+        },
+      });
+    }
+  }
+
+  // A deck used for exam prep replaces its plain review item.
+  const pool = candidates.filter(
+    (c) =>
+      !(c.item.kind === "flashcards" && c.item.target.blockId && usedDecks.has(c.item.target.blockId)),
   );
-  for (const property of textProperties) {
-    const value = row.cells[property.id];
-    if (typeof value === "string" && cleanText(value)) return cleanText(value);
+
+  // ---- Honest workload ---------------------------------------------------
+  const deckLoad = pool
+    .filter((c) => c.item.kind === "flashcards" && c.item.reason.code === "cards_due")
+    .reduce((sum, c) => sum + c.item.minutes, 0);
+  const capacity = Math.max(dailyBudget - Math.min(deckLoad, dailyBudget / 2), dailyBudget / 2);
+  const overload = checkWorkload(workload, capacity);
+  if (overload) {
+    for (const c of pool) {
+      if (overload.startIds.has(c.item.id)) {
+        c.score += 250;
+        if (c.item.reason.code === "due_soon" || c.item.reason.code === "due_later") {
+          c.item = { ...c.item, reason: { ...c.item.reason, code: "start_early" } };
+        }
+      }
+    }
+  }
+
+  // ---- Roll forward --------------------------------------------------------
+  for (const c of pool) {
+    const carry = carried.get(c.item.id);
+    if (!carry) continue;
+    c.item = { ...c.item, carry };
+    if (c.item.mode !== "study") c.score += 100;
+    if (carry.count >= RESTART_AFTER_CARRIES && c.item.mode !== "study") {
+      // Waiting a while: make the next step small instead of bigger.
+      c.item = { ...c.item, minutes: Math.min(c.item.minutes, RESTART_MINUTES) };
+    }
+  }
+
+  pool.sort(compareCandidates);
+
+  // ---- Fit today's time ------------------------------------------------------
+  const kept = (input.current?.items ?? []).filter((item) => item.completed);
+  const keptIds = new Set(kept.map((item) => item.id));
+  const items: DailyStudyPlanItem[] = [];
+  let remaining = budget;
+  let tasks = 0;
+
+  for (const c of pool) {
+    if (items.length >= MAX_PLAN_ITEMS || remaining < MIN_SESSION_MINUTES) break;
+    if (keptIds.has(c.item.id)) continue;
+    if (c.item.kind === "task" && tasks >= MAX_TASK_ITEMS) continue;
+    const minutes = Math.min(c.item.minutes, remaining);
+    if (minutes < MIN_SESSION_MINUTES) continue;
+    if (c.item.kind === "task") tasks += 1;
+    items.push({ ...c.item, minutes: roundDown5(minutes), completed: false });
+    remaining -= roundDown5(minutes);
+  }
+  if (items[0]) items[0] = { ...items[0], startHere: true };
+
+  const progress: Record<string, number> = {};
+  for (const key of Object.keys(ledger)) {
+    if (openLedgerKeys.has(key) && Object.keys(progress).length < MAX_LEDGER_KEYS) {
+      progress[key] = ledger[key];
+    }
+  }
+
+  const all = [...items, ...kept];
+  const details: PlanDetails = {
+    budgetMinutes: budget,
+    ...(todayOverride !== undefined ? { budgetOverride: true } : {}),
+    workload: overload?.workload ?? null,
+    exams: countdowns,
+    progress,
+    ...(previous ? { previousDate: previous.localDate } : {}),
+    ...(previous ? { carried: all.filter((i) => i.carry).length } : {}),
+  };
+
+  return {
+    items: all,
+    details,
+    sourceCount: workspaces.length,
+    candidateCount: pool.length,
+  };
+}
+
+/**
+ * Review days counted backwards from an exam: every one of the last three
+ * days, every day of the last week for a major exam, and spaced sessions
+ * (5, 7, 10, 14, 21 days out) before that.
+ */
+export function isReviewDay(daysToExam: number, major: boolean): boolean {
+  if (daysToExam < 0) return false;
+  if (daysToExam <= 3) return true;
+  if (major && daysToExam <= 7) return true;
+  return [5, 7, 10, 14, 21].includes(daysToExam);
+}
+
+/**
+ * Does the work due in the coming days fit the student's daily time? For each
+ * due day D (two or more days out) in the horizon, everything due by D must
+ * be done on the D days before it (today counts). Reports the first window that does not fit, with
+ * the largest pieces in it as what to start today.
+ */
+function checkWorkload(
+  entries: WorkloadEntry[],
+  capacityPerDay: number,
+): { workload: Workload; startIds: Set<string> } | null {
+  const dues = [...new Set(entries.map((e) => e.due))].sort((a, b) => a - b);
+  for (const due of dues) {
+    // Look ahead: a window of at least two days, so there is still time to
+    // act on the warning (work due sooner still counts toward later windows).
+    if (due < 2) continue;
+    const inWindow = entries.filter((e) => e.due <= due);
+    const needed = inWindow.reduce((sum, e) => sum + e.minutes, 0);
+    const days = Math.max(1, due);
+    const available = Math.round(capacityPerDay * days);
+    if (needed <= available) continue;
+    const start = inWindow
+      .filter((e) => e.due >= 1 || inWindow.every((x) => x.due === 0))
+      .sort((a, b) => b.minutes - a.minutes || a.due - b.due)
+      .slice(0, 2);
+    return {
+      workload: {
+        overloaded: true,
+        days,
+        neededMinutes: Math.round(needed),
+        availableMinutes: available,
+        startToday: start.map((e) => e.title),
+      },
+      startIds: new Set(start.map((e) => e.candidateId).filter((id): id is string => Boolean(id))),
+    };
   }
   return null;
-}
-
-function findWeight(database: Database, row: DatabaseRow): number | null {
-  const property = orderedProperties(
-    database.properties.filter((candidate) => candidate.type === "number"),
-    WEIGHT_WORDS,
-  ).find((candidate) => includesAny(normalize(candidate.name), WEIGHT_WORDS));
-  if (!property) return null;
-  const value = row.cells[property.id];
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function orderedProperties(
-  properties: DatabaseProperty[],
-  preferredWords: readonly string[],
-): DatabaseProperty[] {
-  return [...properties].sort((a, b) => {
-    const aPreferred = includesAny(normalize(a.name), preferredWords) ? 1 : 0;
-    const bPreferred = includesAny(normalize(b.name), preferredWords) ? 1 : 0;
-    return bPreferred - aPreferred;
-  });
 }
 
 function compareCandidates(a: Candidate, b: Candidate): number {
   if (a.score !== b.score) return b.score - a.score;
-  if (a.dueDate && b.dueDate) return a.dueDate.localeCompare(b.dueDate);
-  if (a.dueDate) return -1;
-  if (b.dueDate) return 1;
-  return a.title.localeCompare(b.title);
+  const ad = a.item.dueDate;
+  const bd = b.item.dueDate;
+  if (ad && bd && ad !== bd) return ad.localeCompare(bd);
+  if (ad && !bd) return -1;
+  if (bd && !ad) return 1;
+  return a.item.title.localeCompare(b.item.title) || a.item.id.localeCompare(b.item.id);
 }
 
 function deadlineScore(days: number, weight: number | null): number {
   let score: number;
-  if (days < 0) score = 1_000 + Math.min(Math.abs(days), 30) * 10;
+  if (days < 0) score = Math.max(650, 860 - Math.abs(days) * 15);
   else if (days === 0) score = 900;
-  else if (days === 1) score = 760;
-  else if (days <= 3) score = 650 - days * 10;
-  else if (days <= 7) score = 500 - days * 5;
+  else if (days === 1) score = 780;
+  else if (days <= 3) score = 660 - days * 10;
+  else if (days <= 7) score = 520 - days * 5;
   else if (days <= 14) score = 340 - days * 3;
   else score = 200 - days;
-  return score + Math.min(Math.max(weight ?? 0, 0), 100) * 2;
+  return score + Math.min(Math.max(weight ?? 0, 0), 60) * 2;
 }
 
-function deadlineDuration(days: number): number {
-  if (days <= 0) return 45;
-  if (days <= 3) return 35;
-  if (days <= 7) return 30;
-  return 25;
+function deadlineCode(days: number): PlanReason["code"] {
+  if (days < 0) return "overdue";
+  if (days === 0) return "due_today";
+  if (days === 1) return "due_tomorrow";
+  if (days <= 7) return "due_soon";
+  return "due_later";
 }
 
-function deadlineReason(days: number, weight: number | null): string {
-  let reason: string;
-  if (days < 0) {
-    const overdue = Math.abs(days);
-    reason = `Overdue by ${overdue} ${plural(overdue, "day", "days")} — move this first.`;
-  } else if (days === 0) {
-    reason = "Due today — protect time for it now.";
-  } else if (days === 1) {
-    reason = "Due tomorrow — make visible progress today.";
-  } else if (days <= 7) {
-    reason = `Due in ${days} days — an early session lowers deadline risk.`;
-  } else {
-    reason = `Due in ${days} days — keep it moving before it becomes urgent.`;
+function deckMinutes(reviewsDue: number, newPlanned: number): number {
+  return clampRound(Math.ceil(reviewsDue * 0.6 + newPlanned * 1.5), 10, 30);
+}
+
+function isPlayableQuestion(q: QuizQuestion): boolean {
+  if (!q.prompt?.trim()) return false;
+  if (q.kind === "mcq") {
+    const choices = q.choices ?? [];
+    return (
+      choices.length >= 2 &&
+      typeof q.answerIndex === "number" &&
+      q.answerIndex < choices.length &&
+      choices.every((c) => c.trim() !== "")
+    );
   }
-
-  if (weight !== null && weight > 0) {
-    reason += ` It carries ${formatNumber(weight)}% weight.`;
-  }
-  return reason;
+  if (q.kind === "true_false") return typeof q.answerBool === "boolean";
+  return Boolean(q.answerText?.trim());
 }
 
-function calendarDayDifference(from: string, to: string): number {
-  return Math.round((isoDayTime(to) - isoDayTime(from)) / 86_400_000);
+/** Clamp, then round to a friendly multiple of five minutes. */
+function clampRound(value: number, min: number, max: number): number {
+  const clamped = Math.min(max, Math.max(min, value));
+  return Math.min(max, Math.max(min, Math.round(clamped / 5) * 5));
 }
 
-function isoDayTime(day: string): number {
-  const [year, month, date] = day.split("-").map(Number);
-  return Date.UTC(year, month - 1, date);
-}
-
-function isIsoDay(value: unknown): value is string {
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const [year, month, day] = value.split("-").map(Number);
-  const parsed = new Date(Date.UTC(year, month - 1, day));
-  return (
-    parsed.getUTCFullYear() === year &&
-    parsed.getUTCMonth() === month - 1 &&
-    parsed.getUTCDate() === day
-  );
-}
-
-function normalize(value: string): string {
-  return value.trim().toLowerCase();
-}
-
-function isCompleteLabel(value: string): boolean {
-  const normalized = normalize(value);
-  return COMPLETE_WORDS.some((word) => normalized === word);
-}
-
-function includesAny(value: string, words: readonly string[]): boolean {
-  return words.some((word) => value.includes(word));
-}
-
-function cleanText(value: string): string {
-  return value.replace(/\s+/g, " ").trim().slice(0, MAX_TITLE_LENGTH);
-}
-
-function sourceLabel(workspaceName: string, sectionName: string): string {
-  return cleanText(`${workspaceName} · ${sectionName}`) || "StudyOS workspace";
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
-
-function plural(count: number, singular: string, pluralValue: string): string {
-  return count === 1 ? singular : pluralValue;
-}
-
-function formatNumber(value: number): string {
-  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+function roundDown5(value: number): number {
+  return value >= 10 ? Math.floor(value / 5) * 5 : value;
 }

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { createFakeDb } from "@/test/billing-fakes";
 
 const h = vi.hoisted(() => ({
@@ -14,13 +14,20 @@ vi.mock("@/lib/db", async () => {
 import {
   addMonthsUtc,
   chargeCredits,
+  CREDIT_HOLD_TTL_MS,
   debitCredits,
   dueAllowanceMonths,
   FREE_MONTHLY_CREDITS,
   FREE_SIGNUP_CREDITS,
   getCreditBalance,
   grantCredits,
+  hasCredits,
+  releaseCreditHold,
+  releaseExpiredHolds,
+  reserveCredits,
+  settleCreditHold,
   usageToCredits,
+  withUserCreditLock,
 } from "./credits";
 
 const USER = "user_1";
@@ -39,6 +46,9 @@ async function seed(balance: number, status?: string) {
 
 beforeEach(() => {
   h.db.reset();
+});
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("monthly free refresh", () => {
@@ -143,5 +153,149 @@ describe("usageToCredits", () => {
   });
   it("charges nothing when nothing ran", () => {
     expect(usageToCredits({ promptTokens: 0, completionTokens: 0 })).toBe(0);
+  });
+});
+
+// ---- Review findings (wave 1 billing) ---------------------------------------
+
+/** An account at `balance` reached through the ledger (so ledger == balance). */
+async function funded(balance: number) {
+  await getCreditBalance(USER);
+  if (balance < FREE_SIGNUP_CREDITS) await chargeCredits(USER, FREE_SIGNUP_CREDITS - balance, "test");
+  if (balance > FREE_SIGNUP_CREDITS) await grantCredits(USER, balance - FREE_SIGNUP_CREDITS, "test");
+  expect(h.db.balance(USER)).toBe(balance);
+}
+
+const tombstone = () =>
+  withUserCreditLock(USER, (tx) =>
+    tx.deletedAccount.upsert({ where: { userId: USER }, create: { userId: USER }, update: {} }),
+  );
+
+describe("finding 7: a deleted account stays deleted", () => {
+  it("an AI request after the tombstone recreates neither the account nor its signup credits", async () => {
+    await tombstone();
+    expect(await getCreditBalance(USER)).toBe(0);
+    expect(await hasCredits(USER)).toBe(false);
+    expect(await chargeCredits(USER, 5, "agent")).toBe(0);
+    expect(await reserveCredits(USER, { estimate: 5, reason: "agent" })).toBeNull();
+    expect(h.db.state.accounts.has(USER)).toBe(false);
+    expect(h.db.state.ledger).toHaveLength(0);
+  });
+
+  it("grants are refused once the tombstone exists", async () => {
+    await getCreditBalance(USER);
+    await tombstone();
+    expect(await grantCredits(USER, 1000, "credit_purchase", "credit_purchase:cs_1")).toBe("deleted_account");
+    expect(h.db.balance(USER)).toBe(FREE_SIGNUP_CREDITS);
+  });
+
+  it("a grant racing the tombstone lands before it or not at all", async () => {
+    const [granted] = await Promise.all([
+      grantCredits(USER, 1000, "credit_purchase", "credit_purchase:cs_2"),
+      tombstone(),
+    ]);
+    const rows = h.db.ledgerFor(USER).filter((l) => l.reason === "credit_purchase");
+    expect(rows).toHaveLength(granted === "granted" ? 1 : 0);
+  });
+});
+
+describe("finding 10: hold and settle", () => {
+  it("reserves before the work and settles to the real cost, once", async () => {
+    await funded(200);
+    const hold = await reserveCredits(USER, { estimate: 40, reason: "generate" });
+    expect(hold).toMatchObject({ amount: 40 });
+    expect(await getCreditBalance(USER)).toBe(160);
+    expect(await settleCreditHold(hold!, 25)).toBe(25);
+    expect(await settleCreditHold(hold!, 25)).toBe(25);
+    expect(h.db.balance(USER)).toBe(175);
+    expect(h.db.ledgerSum(USER)).toBe(175);
+  });
+
+  it("credits on hold still count as the user's for the free monthly refresh", async () => {
+    await funded(160);
+    await reserveCredits(USER, { estimate: 40, reason: "generate" });
+    expect(await getCreditBalance(USER)).toBe(120);
+    expect(h.db.ledgerFor(USER).some((l) => l.reason === "free_monthly")).toBe(false);
+  });
+
+  it("a cost above the hold takes the rest from the balance, never below zero", async () => {
+    await funded(50);
+    const hold = await reserveCredits(USER, { estimate: 40, reason: "generate" });
+    expect(await settleCreditHold(hold!, 70)).toBe(50);
+    expect(h.db.balance(USER)).toBe(0);
+    expect(h.db.ledgerSum(USER)).toBe(0);
+  });
+
+  it("releasing returns the hold once; a release after a settle changes nothing", async () => {
+    await funded(100);
+    const a = await reserveCredits(USER, { estimate: 40, reason: "generate" });
+    await releaseCreditHold(a!);
+    await releaseCreditHold(a!);
+    expect(h.db.balance(USER)).toBe(100);
+    const b = await reserveCredits(USER, { estimate: 40, reason: "generate" });
+    await settleCreditHold(b!, 10);
+    await releaseCreditHold(b!);
+    expect(h.db.balance(USER)).toBe(90);
+    expect(h.db.ledgerSum(USER)).toBe(90);
+  });
+
+  it("parallel requests at a balance of 1: exactly one gets to run", async () => {
+    await funded(1);
+    const holds = await Promise.all(
+      Array.from({ length: 10 }, () => reserveCredits(USER, { estimate: 40, reason: "generate" })),
+    );
+    expect(holds.filter(Boolean)).toHaveLength(1);
+    expect(h.db.balance(USER)).toBe(0);
+  });
+
+  it("refuses when less than the minimum is available, and holds no more than the estimate", async () => {
+    await funded(30);
+    expect(await reserveCredits(USER, { estimate: 40, min: 40, reason: "generate" })).toBeNull();
+    expect(h.db.balance(USER)).toBe(30);
+    const hold = await reserveCredits(USER, { estimate: 20, min: 10, reason: "generate" });
+    expect(hold?.amount).toBe(20);
+  });
+
+  it("an abandoned hold is given back once it expires (on the next read, or by the sweep)", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-12T10:00:00Z"));
+    await funded(200);
+    await reserveCredits(USER, { estimate: 40, reason: "generate" });
+    expect(await getCreditBalance(USER)).toBe(160);
+    vi.setSystemTime(new Date(Date.now() + CREDIT_HOLD_TTL_MS + 1000));
+    expect(await getCreditBalance(USER)).toBe(200);
+    await reserveCredits(USER, { estimate: 40, reason: "generate" });
+    vi.setSystemTime(new Date(Date.now() + CREDIT_HOLD_TTL_MS + 1000));
+    expect(await releaseExpiredHolds()).toBe(1);
+    expect(h.db.balance(USER)).toBe(200);
+    expect(h.db.ledgerSum(USER)).toBe(200);
+  });
+
+  it("work that finishes after its hold expired is still charged what it used", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-12T10:00:00Z"));
+    await funded(100);
+    const hold = await reserveCredits(USER, { estimate: 40, reason: "generate" });
+    vi.setSystemTime(new Date(Date.now() + CREDIT_HOLD_TTL_MS + 1000));
+    await releaseExpiredHolds();
+    expect(await settleCreditHold(hold!, 30)).toBe(30);
+    expect(h.db.balance(USER)).toBe(70);
+    expect(h.db.ledgerSum(USER)).toBe(70);
+  });
+});
+
+describe("finding 4: the allowance schedule", () => {
+  const d = (s: string) => new Date(s);
+  it("never yields more than eleven further months, whatever the period end", () => {
+    const start = d("2028-02-29T12:00:00Z");
+    expect(dueAllowanceMonths(start, d("2029-03-01T12:00:00Z"), d("2030-01-01Z"))).toEqual([
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
+    ]);
+  });
+  it("stops at the stop instant (subscription ended, refunded or disputed)", () => {
+    const start = d("2026-01-01T00:00:00Z");
+    expect(
+      dueAllowanceMonths(start, d("2027-01-01Z"), d("2030-01-01Z"), d("2026-03-15Z")),
+    ).toEqual([1, 2]);
   });
 });

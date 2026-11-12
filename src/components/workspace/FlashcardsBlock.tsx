@@ -6,7 +6,6 @@ import { useI18n } from "@/lib/i18n/client";
 import type { Flashcard, FlashcardsBlock as FlashcardsBlockData } from "@/lib/workspace/types";
 import { MAX_FLASHCARDS } from "@/lib/workspace/schema";
 import {
-  assignSchedule,
   deckStats,
   dueQueue,
   isStudyable,
@@ -19,6 +18,7 @@ import { StudySession, type ReviewItem, type StudyMode } from "./StudySession";
 import { useWorkspace } from "./WorkspaceContext";
 import { CardEditor } from "./study/CardEditor";
 import { CatchUpBanner } from "./study/CatchUpBanner";
+import { applyGrade } from "./study/gradeEdit";
 import { ImportDialog } from "./study/ImportDialog";
 import { useReviewRecorder } from "./study/useReviewRecorder";
 
@@ -41,7 +41,7 @@ export function FlashcardsBlock({
   block: FlashcardsBlockData;
 }) {
   const { workspace, update } = useWorkspace();
-  const { dict, t } = useI18n();
+  const { dict, t, plural } = useI18n();
   const S = dict.study;
   const T = dict.studyTools;
   const record = useReviewRecorder(workspace.id);
@@ -67,11 +67,13 @@ export function FlashcardsBlock({
       if (b?.type === "flashcards") fn(b);
     });
 
-  const onGrade = (item: ReviewItem, _grade: Grade, next: Flashcard) =>
-    mutateBlock((b) => {
-      const card = b.cards.find((c) => c.id === item.card.id);
-      if (card) assignSchedule(card, next);
-    });
+  // Computed from the card as it is when the edit runs, and re-run (not
+  // replayed) if the workspace changed elsewhere first (study/gradeEdit.ts).
+  const onGrade = (item: ReviewItem, grade: Grade, _next: Flashcard, at: Date) =>
+    update(
+      (d) => applyGrade(d, { pageId: item.pageId, blockId: item.blockId, cardId: item.card.id }, grade, at),
+      { rebase: "rerun" },
+    );
 
   const spreadOut = () => {
     if (!catchUp) return;
@@ -124,6 +126,7 @@ export function FlashcardsBlock({
       <div className="flex flex-wrap items-center gap-3 border-b border-line px-3 py-3 sm:px-4">
         <Layers className="size-5 shrink-0 text-lime-deep" aria-hidden />
         <input
+          dir="auto"
           value={block.title ?? ""}
           onChange={(e) =>
             mutateBlock((b) => {
@@ -135,7 +138,7 @@ export function FlashcardsBlock({
           className="min-w-0 flex-1 rounded bg-transparent px-1 font-display text-base font-bold text-ink outline-none placeholder:text-ink-soft/40 hover:bg-hover focus:bg-hover"
         />
         <div className="flex items-center gap-1.5 font-mono text-[11px] text-ink-soft">
-          <Chip label={t(S.stats.cards, { count: block.cards.length })} />
+          <Chip label={plural(dict.counts.cards, block.cards.length)} />
           {stats.due > 0 && <Chip label={t(S.stats.due, { count: stats.due })} tone="due" />}
           {stats.mature > 0 && <Chip label={t(S.stats.mature, { count: stats.mature })} tone="mature" />}
         </div>
@@ -200,10 +203,8 @@ export function FlashcardsBlock({
         {moreOpen && (
           <div className="flex flex-wrap gap-2 rounded-lg bg-hover/60 p-2">
             <button
-              onClick={() => {
-                setMoreOpen(false);
-                setImporting(true);
-              }}
+              // The panel stays open so closing the dialog returns focus here.
+              onClick={() => setImporting(true)}
               className={secondary}
             >
               <Upload className="size-4" aria-hidden />
@@ -239,7 +240,7 @@ export function FlashcardsBlock({
               b.cards.push(...cards.slice(0, Math.max(0, MAX_FLASHCARDS - b.cards.length)));
             });
             setImporting(false);
-            setNotice(t(T.imported, { count: cards.length }));
+            setNotice(plural(dict.counts.importedCards, cards.length));
           }}
         />
       )}

@@ -9,6 +9,7 @@
  */
 import type { Dictionary } from "@/lib/i18n/dictionaries/en";
 import type { Block, Database } from "@/lib/workspace/types";
+import { duplicateQuiz } from "@/lib/study/quiz";
 
 export const newId = (): string => crypto.randomUUID();
 
@@ -123,6 +124,8 @@ export function blockHasContent(b: Block): boolean {
       return false;
     case "flashcards":
       return b.cards.length > 0;
+    case "quiz":
+      return b.questions.length > 0;
     default:
       return true;
   }
@@ -200,14 +203,23 @@ export function moveBlockTo(blocks: Block[], id: string, beforeIndex: number): b
 
 /**
  * A copy of `b` with a fresh id. A copied flashcard deck gets fresh card ids
- * and starts unscheduled, so a duplicate never doubles the "due" count.
+ * and starts unscheduled, so a duplicate never doubles the "due" count. A
+ * copied quiz gets fresh question ids and starts with no stats or attempts.
  */
 export function duplicateBlock(b: Block, id: string = newId()): Block {
   const copy = structuredClone(b);
   copy.id = id;
   if (copy.type === "flashcards") {
-    copy.cards = copy.cards.map((c) => ({ id: newId(), front: c.front, back: c.back }));
+    copy.cards = copy.cards.map((c) => ({
+      id: newId(),
+      front: c.front,
+      back: c.back,
+      ...(c.source ? { source: c.source } : {}),
+    }));
   }
+  if (copy.type === "quiz") return duplicateQuiz(copy, id, newId);
+  // A grades block is a live view of a database: the copy keeps every setting
+  // (scale, targets, columns) and reads the same rows; nothing is duplicated.
   return copy;
 }
 
@@ -268,7 +280,11 @@ export type InsertAction =
   | { kind: "divider" }
   | { kind: "database" }
   | { kind: "flashcards" }
-  | { kind: "linked"; databaseId: string; viewId: string };
+  | { kind: "quiz" }
+  | { kind: "grades" }
+  | { kind: "linked"; databaseId: string; viewId: string }
+  /** Opens the study-kit dialog instead of inserting a block ("/" menu only). */
+  | { kind: "studyKit"; make: StudyKitMenuAction };
 
 export interface InsertItem {
   id: string;
@@ -345,6 +361,18 @@ export function buildInsertItems(
       keywords: ["flashcards", "cards", "deck", "study", "srs", "anki"],
       action: { kind: "flashcards" },
     },
+    {
+      id: "quiz",
+      label: dict.quiz.insertLabel,
+      keywords: ["quiz", "test", "exam", "practice", "questions", "mcq", "multiple choice"],
+      action: { kind: "quiz" },
+    },
+    {
+      id: "grades",
+      label: dict.grades.insertLabel,
+      keywords: ["grades", "grade", "gpa", "score", "marks", "target", "final", "calculator"],
+      action: { kind: "grades" },
+    },
   );
   for (const db of databases) {
     const view = db.views[0];
@@ -359,6 +387,65 @@ export function buildInsertItems(
   return items;
 }
 
+// ---------------------------------------------------------------------------
+// "Make from material" actions (the "+" menu's study-kit section)
+// ---------------------------------------------------------------------------
+
+/**
+ * Actions that open the study-kit dialog rather than inserting a block: make
+ * notes, flashcards and a quiz from uploaded material, or flashcards / a quiz
+ * from the text of the current page. Kept apart from InsertItem because they
+ * create a whole page through a dialog, not a block in place.
+ */
+export type StudyKitMenuAction = "material" | "page_flashcards" | "page_quiz";
+
+export interface StudyKitMenuItem {
+  id: string;
+  label: string;
+  keywords: string[];
+  action: StudyKitMenuAction;
+}
+
+export function buildStudyKitItems(dict: Dictionary): StudyKitMenuItem[] {
+  const M = dict.materials;
+  const study = ["study", "ai", "generate", "make", "lecture", "slides", "notes"];
+  return [
+    {
+      id: "study-kit:material",
+      label: M.menuStudyKit,
+      keywords: [...study, "pdf", "upload", "reading", "material", "summary", "flashcards", "quiz"],
+      action: "material",
+    },
+    {
+      id: "study-kit:page-flashcards",
+      label: M.menuFlashcardsFromPage,
+      keywords: [...study, "flashcards", "cards", "deck", "page"],
+      action: "page_flashcards",
+    },
+    {
+      id: "study-kit:page-quiz",
+      label: M.menuQuizFromPage,
+      keywords: [...study, "quiz", "test", "questions", "page"],
+      action: "page_quiz",
+    },
+  ];
+}
+
+/**
+ * The study-kit actions as "/" menu entries, so "make flashcards or a quiz
+ * from your material" is reachable while typing, not only from "+".
+ */
+export function studyKitSlashItems(dict: Dictionary, onPage: boolean): InsertItem[] {
+  return buildStudyKitItems(dict)
+    .filter((item) => onPage || item.action === "material")
+    .map((item) => ({
+      id: item.id,
+      label: item.label,
+      keywords: item.keywords,
+      action: { kind: "studyKit", make: item.action },
+    }));
+}
+
 /** Lower-case and strip accents so "título" matches "titulo". */
 export function normalizeSearch(s: string): string {
   return s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
@@ -368,10 +455,13 @@ export function normalizeSearch(s: string): string {
  * Filter and rank insert items by `query`: label prefix first, then keyword
  * prefix, then substring matches; ties keep menu order.
  */
-export function filterInsertItems(items: readonly InsertItem[], query: string): InsertItem[] {
+export function filterInsertItems<T extends Pick<InsertItem, "label" | "keywords">>(
+  items: readonly T[],
+  query: string,
+): T[] {
   const q = normalizeSearch(query);
   if (!q) return [...items];
-  const scored: { item: InsertItem; score: number; order: number }[] = [];
+  const scored: { item: T; score: number; order: number }[] = [];
   items.forEach((item, order) => {
     const label = normalizeSearch(item.label);
     const keywords = item.keywords.map(normalizeSearch);

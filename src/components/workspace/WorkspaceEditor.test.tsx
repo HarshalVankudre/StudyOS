@@ -109,7 +109,8 @@ describe("WorkspaceEditor responsive navigation", () => {
     const user = userEvent.setup();
     renderEditor();
 
-    const menu = screen.getByRole("button", { name: "Test workspace" });
+    const menu = screen.getByRole("button", { name: "Open menu" });
+    expect(screen.getByRole("button", { name: "Close menu", hidden: true })).toBeInTheDocument();
     const sidebar = screen.getByRole("complementary", { name: "Test workspace" });
     expect(menu).toHaveAttribute("aria-expanded", "false");
     expect(sidebar).toHaveClass("-translate-x-full");
@@ -121,6 +122,41 @@ describe("WorkspaceEditor responsive navigation", () => {
     await user.click(screen.getByRole("button", { name: /^\W*Biology$/u }));
     expect(menu).toHaveAttribute("aria-expanded", "false");
     expect(sidebar).toHaveClass("-translate-x-full");
+  });
+
+  it("keeps destructive page actions out of the Tab order between pages", () => {
+    renderEditor();
+    const nav = screen.getByRole("complementary", { name: "Test workspace" });
+    const tabbable = [...nav.querySelectorAll<HTMLElement>("button, a, input")].filter((el) => el.tabIndex >= 0);
+    const names = tabbable.map((el) => el.getAttribute("aria-label") ?? el.textContent?.trim());
+    // No delete buttons at all; only the open page's actions menu is a stop.
+    expect(names.some((n) => /delete/i.test(n ?? ""))).toBe(false);
+    expect(names.filter((n) => n?.startsWith("Actions for page"))).toEqual(["Actions for page Biology"]);
+  });
+
+  it("labels Ask AI and gathers the other header actions in one menu on phones", async () => {
+    const user = userEvent.setup();
+    renderEditor();
+    expect(screen.getByRole("button", { name: "Ask AI" })).toHaveTextContent("Ask AI");
+    await user.click(screen.getByRole("button", { name: "More actions" }));
+    const items = (await screen.findAllByRole("menuitem")).map((i) => i.textContent);
+    expect(items).toEqual([
+      "Search",
+      "Undo",
+      "Redo",
+      "Show the getting-started guide",
+      "Export or print…",
+    ]);
+  });
+
+  it("starts a new page with one empty line, not an \"Untitled\" heading", async () => {
+    const user = userEvent.setup();
+    renderEditor();
+    await user.click(screen.getByRole("button", { name: /New page/ }));
+    expect(screen.getByText("Page: Untitled")).toBeInTheDocument();
+    await waitFor(() => expect(actions.saveWorkspaceAction).toHaveBeenCalled(), { timeout: 3000 });
+    const [, saved] = actions.saveWorkspaceAction.mock.calls.at(-1)!;
+    expect(saved.pages[2].blocks).toEqual([{ id: expect.any(String), type: "paragraph", text: "" }]);
   });
 
   it("exposes save feedback as an announced status", () => {
@@ -182,7 +218,8 @@ describe("WorkspaceEditor undo history", () => {
   it("deleting a page shows an Undo toast that brings it back", async () => {
     const user = userEvent.setup();
     renderEditor();
-    await user.click(screen.getByRole("button", { name: "Delete page: Chemistry" }));
+    await user.click(screen.getByRole("button", { name: "Actions for page Chemistry" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Delete page" }));
     expect(screen.queryByRole("button", { name: /^\W*Chemistry$/u })).toBeNull();
 
     expect(await screen.findByText("Page “Chemistry” deleted")).toBeInTheDocument();
@@ -197,9 +234,9 @@ describe("WorkspaceEditor undo history", () => {
 });
 
 describe("WorkspaceEditor save safety", () => {
-  it("surfaces a stale-version save as a clear choice, without overwriting", async () => {
+  it("merges a stale-version save with the newer version and says what it replaced", async () => {
     const user = userEvent.setup();
-    actions.saveWorkspaceAction.mockResolvedValue({ status: "conflict", version: 2 });
+    actions.saveWorkspaceAction.mockResolvedValueOnce({ status: "conflict", version: 2 });
     actions.getWorkspaceStateAction.mockResolvedValue({
       workspace: { ...workspace, name: "Renamed in another tab" },
       version: 2,
@@ -207,15 +244,10 @@ describe("WorkspaceEditor save safety", () => {
     renderEditor();
     await user.type(screen.getByRole("textbox", { name: "Test workspace" }), "?");
 
+    // No "keep mine / load latest" choice: the edit is merged onto version 2.
     expect(
-      await screen.findByText("This workspace changed somewhere else", undefined, {
-        timeout: 2000,
-      }),
+      await screen.findByText("Merged with changes made elsewhere", undefined, { timeout: 3000 }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("status", { name: "Not saved yet" })).toBeInTheDocument();
-
-    actions.saveWorkspaceAction.mockResolvedValue({ status: "saved", version: 3 });
-    await user.click(screen.getByRole("button", { name: "Keep my version" }));
     await waitFor(() =>
       expect(actions.saveWorkspaceAction).toHaveBeenLastCalledWith(
         "workspace-1",
@@ -224,6 +256,19 @@ describe("WorkspaceEditor save safety", () => {
       ),
     );
     expect(await screen.findByRole("status", { name: "Saved" })).toBeInTheDocument();
+
+    // The other tab's name was replaced by this edit; it can be put back.
+    await user.click(screen.getByRole("button", { name: "Use the other version for those" }));
+    await waitFor(
+      () =>
+        expect(actions.saveWorkspaceAction).toHaveBeenLastCalledWith(
+          "workspace-1",
+          expect.objectContaining({ name: "Renamed in another tab" }),
+          3,
+        ),
+      { timeout: 3000 },
+    );
+    expect(screen.queryByText("Merged with changes made elsewhere")).toBeNull();
   });
 
   it("shows Retry after a failed save and saves when tapped", async () => {

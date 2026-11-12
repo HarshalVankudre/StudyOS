@@ -1,3 +1,4 @@
+import { retryOrphanedAssetDeletes } from "@/lib/account/erase-user-data";
 import { reportError } from "@/lib/ops/report-error";
 import { runRetention } from "@/lib/ops/retention";
 import { bearerToken, secretsMatch } from "@/lib/ops/secret";
@@ -22,8 +23,16 @@ export async function POST(req: Request) {
 
   try {
     const result = await runRetention();
-    console.log(JSON.stringify({ severity: "INFO", message: "[StudyOS] retention run", result }));
-    return Response.json({ ok: true, result });
+    // Files of deleted accounts that could not be removed at deletion time.
+    const orphanedAssets = await retryOrphanedAssetDeletes().catch((error) => {
+      reportError(error, { source: "api", route: "/api/ops/maintenance", method: "POST" });
+      return null;
+    });
+    // One structured INFO line (counts only) for Cloud Logging.
+    console.log(
+      JSON.stringify({ severity: "INFO", message: "[StudyOS] retention run", result, orphanedAssets }),
+    );
+    return Response.json({ ok: true, result, orphanedAssets });
   } catch (error) {
     reportError(error, { source: "api", route: "/api/ops/maintenance", method: "POST" });
     return Response.json({ ok: false }, { status: 500 });

@@ -55,7 +55,7 @@ function icsDate(day: string): string {
 }
 
 export function buildIcs(
-  events: CalendarEvent[],
+  events: Pick<CalendarEvent, "uid" | "date" | "summary" | "description" | "categories">[],
   opts: { name: string; now: Date },
 ): string {
   const stamp = icsTimestamp(opts.now);
@@ -75,6 +75,10 @@ export function buildIcs(
     lines.push(foldLine(`SUMMARY:${escapeText(ev.summary)}`));
     if (ev.description) {
       lines.push(foldLine(`DESCRIPTION:${escapeText(ev.description)}`));
+    }
+    if (ev.categories?.length) {
+      // Each value escaped (its commas too); the commas between them separate.
+      lines.push(foldLine(`CATEGORIES:${ev.categories.map(escapeText).join(",")}`));
     }
     lines.push("END:VEVENT");
   }

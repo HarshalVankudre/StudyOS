@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useDeferredValue, useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { CalendarDays, Columns3, LayoutGrid, List, Table2 } from "lucide-react";
 import type { CellValue, Database, DatabaseView as DBView } from "@/lib/workspace/types";
 import { applyView, newRowCells } from "@/lib/workspace/view-logic";
 import { useI18n } from "@/lib/i18n/client";
 import { useWorkspace } from "./WorkspaceContext";
+import { revealElement, useDeepLink } from "./DeepLinkContext";
 import { useDbActions } from "./database/actions";
 import { BoardView } from "./database/BoardView";
 import { CalendarView } from "./database/CalendarView";
@@ -14,9 +15,10 @@ import { ListView } from "./database/ListView";
 import type { ViewBodyProps } from "./database/parts";
 import { RowDetail } from "./database/RowDetail";
 import { DatabaseSettings } from "./database/Settings";
-import { relationLabeler, useToday } from "./database/shared";
+import { relationLabeler, useToday, visibleProps } from "./database/shared";
 import { TableView } from "./database/TableView";
 import { ViewToolbar } from "./database/Toolbar";
+import { useNarrowScreen } from "./useMediaQuery";
 
 const VIEW_ICON: Record<DBView["type"], typeof Table2> = {
   table: Table2,
@@ -25,6 +27,25 @@ const VIEW_ICON: Record<DBView["type"], typeof Table2> = {
   list: List,
   gallery: LayoutGrid,
 };
+
+const TABLE_CHOICE_KEY = "studyos:table-on-phone:";
+
+function readTableChoice(viewId: string): boolean {
+  try {
+    return window.localStorage.getItem(TABLE_CHOICE_KEY + viewId) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeTableChoice(viewId: string, table: boolean) {
+  try {
+    if (table) window.localStorage.setItem(TABLE_CHOICE_KEY + viewId, "1");
+    else window.localStorage.removeItem(TABLE_CHOICE_KEY + viewId);
+  } catch {
+    // Private mode: the choice lasts until the page is reloaded.
+  }
+}
 
 /**
  * A database embedded in a page: view tabs, a search / filter / sort / fields
@@ -47,10 +68,36 @@ function DatabaseBody({ database, initialViewId }: { database: Database; initial
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
   const [openRowId, setOpenRowId] = useState<string | null>(null);
+  const sectionRef = useRef<HTMLElement>(null);
+
+  // A deep link (?db=&row=) to one of this database's rows: bring the
+  // database into view and open the row's detail sheet.
+  const { focus: linkFocus, claim: claimLink } = useDeepLink();
+  useEffect(() => {
+    if (linkFocus?.kind !== "row" || linkFocus.databaseId !== database.id) return;
+    if (!database.rows.some((r) => r.id === linkFocus.rowId) || !claimLink(linkFocus.seq)) return;
+    if (sectionRef.current) revealElement(sectionRef.current);
+    // Open the sheet once the scroll has started (claimed: must not be lost).
+    const rowId = linkFocus.rowId;
+    window.setTimeout(() => setOpenRowId(rowId), 0);
+  }, [claimLink, database.id, database.rows, linkFocus]);
   // Rows added here stay visible even if they don't match the filters yet.
   const [pinned, setPinned] = useState<ReadonlySet<string>>(() => new Set());
 
   const view = database.views.find((v) => v.id === activeViewId) ?? database.views[0];
+
+  // On a phone a table with more than a couple of columns is unreadable, so
+  // a table view shows as a list there, unless the student asked for the
+  // table on this device (remembered per view).
+  const narrow = useNarrowScreen();
+  const [tableChoice, setTableChoice] = useState<Record<string, boolean>>({});
+  const tableChosen = tableChoice[view.id] ?? readTableChoice(view.id);
+  const chooseLayout = (table: boolean) => {
+    setTableChoice((prev) => ({ ...prev, [view.id]: table }));
+    writeTableChoice(view.id, table);
+  };
+  const phoneList = narrow && view.type === "table" && visibleProps(database, view).length > 2;
+  const showAsList = phoneList && !tableChosen;
   const labeler = useMemo(() => relationLabeler(workspace, dict.db.untitled), [workspace, dict.db.untitled]);
 
   const rows = useMemo(() => {
@@ -76,6 +123,18 @@ function DatabaseBody({ database, initialViewId }: { database: Database; initial
   };
 
   const createView = (next: DBView) => {
+    // A preset view that already exists (same name, layout, filters and
+    // sorts) is opened rather than duplicated.
+    const same = (v: DBView) =>
+      v.name === next.name &&
+      v.type === next.type &&
+      JSON.stringify(v.filters ?? []) === JSON.stringify(next.filters ?? []) &&
+      JSON.stringify(v.sorts ?? []) === JSON.stringify(next.sorts ?? []);
+    const existing = database.views.find(same);
+    if (existing) {
+      switchView(existing.id);
+      return;
+    }
     actions.withDb((db) => {
       db.views.push(next);
     });
@@ -121,7 +180,7 @@ function DatabaseBody({ database, initialViewId }: { database: Database; initial
   };
 
   return (
-    <section className="my-4 min-w-0">
+    <section ref={sectionRef} className="my-4 min-w-0">
       <div className="mb-2 flex flex-wrap items-center gap-x-3 border-b border-line">
         <div className="flex min-w-0 items-center gap-1.5 pb-2 text-sm font-medium text-ink-soft">
           <input
@@ -142,6 +201,7 @@ function DatabaseBody({ database, initialViewId }: { database: Database; initial
                 db.name = e.target.value;
               })
             }
+            dir="auto"
             aria-label={dict.db.nameAria}
             className="h-8 w-40 min-w-0 rounded bg-transparent px-1 text-sm font-medium text-ink-soft outline-none hover:bg-hover focus:bg-card focus:ring-1 focus:ring-ink/20"
           />
@@ -161,7 +221,7 @@ function DatabaseBody({ database, initialViewId }: { database: Database; initial
                 }`}
               >
                 <Icon className="h-3.5 w-3.5" aria-hidden />
-                {v.name}
+                <bdi>{v.name}</bdi>
               </button>
             );
           })}
@@ -179,8 +239,23 @@ function DatabaseBody({ database, initialViewId }: { database: Database; initial
 
       <DatabaseSettings database={database} activeViewId={view.id} setActiveViewId={switchView} />
 
+      {phoneList && today && (
+        <div className="mb-2 flex items-center justify-between gap-2 text-xs text-ink-faint">
+          <span>{showAsList ? dict.dbViews.shownAsList : null}</span>
+          <button
+            type="button"
+            onClick={() => chooseLayout(showAsList)}
+            className="min-h-9 shrink-0 rounded-md px-2 text-xs font-medium text-ink-soft hover:bg-hover hover:text-ink"
+          >
+            {showAsList ? dict.dbViews.showAsTable : dict.dbViews.showAsList}
+          </button>
+        </div>
+      )}
+
       {!today ? (
         <div className="min-h-32 rounded-md border border-line bg-card" aria-busy />
+      ) : showAsList ? (
+        <ListView {...body} />
       ) : view.type === "board" ? (
         <BoardView {...body} />
       ) : view.type === "calendar" ? (

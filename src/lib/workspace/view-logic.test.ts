@@ -14,6 +14,7 @@ import {
   isRowComplete,
   monthGrid,
   newRowCells,
+  numberColumnSums,
   relativeUnit,
   resolveDayValue,
   safeHttpUrl,
@@ -367,13 +368,41 @@ describe("saved views", () => {
       },
       TODAY,
     );
-    expect(cells).toEqual({ course: "cs", due: TODAY, flag: true, tags: ["t1"] });
+    // The status starts at the first open option ("Not started").
+    expect(cells).toEqual({ course: "cs", due: TODAY, flag: true, tags: ["t1"], status: "todo" });
     const row = r("new", cells);
     expect(filterRows(SAMPLE, [row], [
       { propertyId: "course", operator: "is", value: "cs" },
       { propertyId: "due", operator: "next_days", value: 7 },
+      { propertyId: "status", operator: "is_not", value: ["done"] },
     ], "all", { today: TODAY })).toHaveLength(1);
-    expect(newRowCells(SAMPLE, { filterMatch: "any", filters: [{ propertyId: "course", operator: "is", value: "cs" }] }, TODAY)).toEqual({});
+    expect(newRowCells(SAMPLE, { filterMatch: "any", filters: [{ propertyId: "course", operator: "is", value: "cs" }] }, TODAY)).toEqual({ status: "todo" });
+  });
+
+  it("starts a new row in the first open status unless a filter picks one", () => {
+    expect(newRowCells(SAMPLE, {}, TODAY)).toEqual({ status: "todo" });
+    expect(
+      newRowCells(SAMPLE, { filters: [{ propertyId: "status", operator: "is", value: "doing" }] }, TODAY),
+    ).toEqual({ status: "doing" });
+    // A status whose first options are all "done"-like still starts open.
+    const odd: Database = {
+      ...SAMPLE,
+      properties: [{ id: "s", name: "State", type: "status", options: [
+        { id: "x", label: "Done", color: "green" }, { id: "y", label: "Waiting", color: "zinc" },
+      ] }],
+    };
+    expect(newRowCells(odd, {}, TODAY)).toEqual({ s: "y" });
+  });
+
+  it("only sums number columns whose total means something", () => {
+    expect(numberColumnSums({ name: "Credits" })).toBe(true);
+    expect(numberColumnSums({ name: "Minutes" })).toBe(true);
+    expect(numberColumnSums({ name: "Weight %" })).toBe(true);
+    expect(numberColumnSums({ name: "Gewichtung %" })).toBe(true);
+    expect(numberColumnSums({ name: "Target %" })).toBe(false);
+    expect(numberColumnSums({ name: "Score" })).toBe(false);
+    expect(numberColumnSums({ name: "Progress" })).toBe(false);
+    expect(numberColumnSums({ name: "Zielnote" })).toBe(false);
   });
 
   it("returns null without a date field", () => {

@@ -5,6 +5,15 @@
  * dropped is filled in (weight → the weight % number column, date → the due
  * date column). Existing values the model wrote are never overwritten.
  *
+ * The merge exists to restore what the model dropped, so it must never create
+ * a second row for something the model already has under a slightly different
+ * title. Each extracted item therefore gets one of three treatments
+ * (see ./assessment-match):
+ *   - exactly one row is confidently the same item → fill that row's empty
+ *     weight / date cells;
+ *   - some row might be the same item (or two rows tie) → do nothing;
+ *   - no row resembles it at all → add it as a new row.
+ *
  * Pure: takes a workspace, returns a new one.
  */
 import type {
@@ -14,12 +23,9 @@ import type {
   DatabaseRow,
   Workspace,
 } from "@/lib/workspace/types";
-import {
-  namesMatch,
-  normalizeName,
-  type SyllabusAssessment,
-  type SyllabusFacts,
-} from "./syllabus-facts";
+import { completionField } from "@/lib/workspace/view-logic";
+import { matchAssessments } from "./assessment-match";
+import type { SyllabusAssessment, SyllabusFacts } from "./syllabus-facts";
 
 /** Localized names used only when a new assessments database must be created. */
 export interface AssessmentLabels {
@@ -28,6 +34,8 @@ export interface AssessmentLabels {
   name: string;
   course: string;
   weight: string;
+  /** Number column for the score received (empty until graded); see src/lib/grades. */
+  score?: string;
   due: string;
   table: string;
   calendar: string;
@@ -73,15 +81,18 @@ export function applySyllabusFacts(
     (p) =>
       (p.type === "select" || p.type === "text") && COURSE_NAME.test(p.name) && p !== titleProp,
   );
+  const completion = completionField(db);
   const statusProp = db.properties.find((p) => p.type === "status");
   const rowIds = new Set(db.rows.map((row) => row.id));
+  // Without a title column nothing can be matched, so nothing is added either.
+  if (!titleProp) return next;
 
   for (const item of items) {
     const courseValue = courseProp ? resolveCourse(courseProp, item.course) : undefined;
-    const existing = titleProp
-      ? db.rows.find((row) => rowMatches(row, item, titleProp, courseProp, courseValue))
-      : undefined;
-    if (existing) {
+    const decision = matchRow(db.rows, item, titleProp, dateProp, courseProp, courseValue);
+    if (decision.kind === "unsure") continue;
+    if (decision.kind === "match") {
+      const existing = decision.row;
       if (item.weight !== undefined && weightProp && isEmpty(existing.cells[weightProp.id])) {
         existing.cells[weightProp.id] = item.weight;
       }
@@ -90,17 +101,64 @@ export function applySyllabusFacts(
       }
       continue;
     }
-    if (!titleProp) continue;
     const cells: Record<string, CellValue> = { [titleProp.id]: item.name };
     if (item.weight !== undefined && weightProp) cells[weightProp.id] = item.weight;
     if (item.date && dateProp) cells[dateProp.id] = item.date;
     if (courseProp && courseValue) cells[courseProp.id] = courseValue;
-    if (statusProp?.options?.[0]) cells[statusProp.id] = statusProp.options[0].id;
+    // A row starts open ("Not started"), or done when the syllabus says it
+    // was already handed in or graded.
+    if (completion && item.done) cells[completion.property.id] = completion.doneValue;
+    else if (completion?.openValue !== null && completion?.openValue !== undefined) {
+      cells[completion.property.id] = completion.openValue;
+    } else if (statusProp?.options?.[0]) cells[statusProp.id] = statusProp.options[0].id;
     const id = uniqueId("syllabus-item", rowIds);
     rowIds.add(id);
     db.rows.push({ id, cells });
   }
   return next;
+}
+
+type RowDecision = { kind: "match"; row: DatabaseRow } | { kind: "unsure" } | { kind: "none" };
+
+/**
+ * The row this item is, if exactly one row is confidently it; "unsure" when
+ * a row might be it (or several tie); "none" when nothing resembles it.
+ */
+function matchRow(
+  rows: DatabaseRow[],
+  item: SyllabusAssessment,
+  titleProp: DatabaseProperty,
+  dateProp: DatabaseProperty | undefined,
+  courseProp: DatabaseProperty | undefined,
+  courseValue: string | undefined,
+): RowDecision {
+  let best: { row: DatabaseRow; score: number } | undefined;
+  let tie = false;
+  let maybe = false;
+  for (const row of rows) {
+    const title = row.cells[titleProp.id];
+    if (typeof title !== "string" || !title.trim()) continue;
+    if (courseProp && courseValue) {
+      const rowCourse = row.cells[courseProp.id];
+      if (!isEmpty(rowCourse) && rowCourse !== courseValue) continue;
+    }
+    const rowDate = dateProp ? row.cells[dateProp.id] : undefined;
+    const result = matchAssessments(item.name, title, {
+      dateA: item.date,
+      dateB: typeof rowDate === "string" ? rowDate.slice(0, 10) : undefined,
+    });
+    if (result.strength === "maybe") maybe = true;
+    if (result.strength !== "same") continue;
+    if (!best || result.score > best.score) {
+      best = { row, score: result.score };
+      tie = false;
+    } else if (result.score === best.score) {
+      tie = true;
+    }
+  }
+  if (best && !tie) return { kind: "match", row: best.row };
+  if (best || maybe) return { kind: "unsure" };
+  return { kind: "none" };
 }
 
 /** The database that holds assignments: has a date column, prefers a weight column. */
@@ -123,23 +181,6 @@ function pickTitleProperty(db: Database): DatabaseProperty | undefined {
   return (
     texts.find((p) => /name|title|assignment|item|assessment|task/i.test(p.name)) ?? texts[0]
   );
-}
-
-function rowMatches(
-  row: DatabaseRow,
-  item: SyllabusAssessment,
-  titleProp: DatabaseProperty,
-  courseProp: DatabaseProperty | undefined,
-  courseValue: string | undefined,
-): boolean {
-  const title = row.cells[titleProp.id];
-  if (typeof title !== "string") return false;
-  if (!namesMatch(normalizeName(title), normalizeName(item.name))) return false;
-  if (courseProp && courseValue) {
-    const rowCourse = row.cells[courseProp.id];
-    if (!isEmpty(rowCourse) && rowCourse !== courseValue) return false;
-  }
-  return true;
 }
 
 /** Map a syllabus course header onto the course column (option id, or text). */
@@ -189,6 +230,7 @@ function addAssessmentsDatabase(
       "sa-name": item.name,
       "sa-course": item.course ?? null,
       "sa-weight": item.weight ?? null,
+      ...(labels.score ? { "sa-score": null } : {}),
       "sa-due": item.date ?? null,
     },
   }));
@@ -201,6 +243,7 @@ function addAssessmentsDatabase(
       { id: "sa-name", name: labels.name, type: "text" },
       { id: "sa-course", name: labels.course, type: "text" },
       { id: "sa-weight", name: labels.weight, type: "number" },
+      ...(labels.score ? [{ id: "sa-score", name: labels.score, type: "number" as const }] : []),
       { id: "sa-due", name: labels.due, type: "date" },
     ],
     rows,

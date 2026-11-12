@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, type RefObject } from "react";
-import { ArrowDown, ArrowUp, Check, Copy, GripVertical, Plus, Repeat2, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, ChevronDown, Copy, GripVertical, Plus, Repeat2, Trash2 } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import type { Block } from "@/lib/workspace/types";
 import { blockHasContent, isTextBlock, kindOf, TEXT_KINDS, textKindLabel } from "./blockOps";
 import { useEditor } from "./EditorContext";
+import { useNarrowScreen } from "../useMediaQuery";
 import { TEXT_KIND_ICONS } from "./InsertList";
 
 /**
@@ -53,6 +54,10 @@ export function BlockMenu({
   const L = dict.page.blockMenu;
   const [open, setOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  // Phones have no room for a side submenu (it would run off the screen):
+  // "Turn into" opens its choices inside the menu instead.
+  const narrow = useNarrowScreen();
+  const [kindsOpen, setKindsOpen] = useState(false);
   // What to do once the menu has closed (Radix restores focus on close; we
   // redirect it to where the action left the student).
   const after = useRef<(() => void) | null>(null);
@@ -67,7 +72,10 @@ export function BlockMenu({
       open={open}
       onOpenChange={(o) => {
         setOpen(o);
-        if (!o) setConfirming(false);
+        if (!o) {
+          setConfirming(false);
+          setKindsOpen(false);
+        }
       }}
       dir={dir}
     >
@@ -94,7 +102,8 @@ export function BlockMenu({
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="start"
-        className="w-56"
+        collisionPadding={8}
+        className="w-56 max-h-[var(--radix-dropdown-menu-content-available-height)] overflow-y-auto"
         onCloseAutoFocus={(e) => {
           const fn = after.current;
           after.current = null;
@@ -113,13 +122,47 @@ export function BlockMenu({
           <Plus aria-hidden />
           {L.addBelow}
         </DropdownMenuItem>
-        {textBlock && (
+        {textBlock && narrow && (
+          <>
+            <DropdownMenuItem
+              className={ITEM}
+              aria-expanded={kindsOpen}
+              onSelect={(e) => {
+                e.preventDefault();
+                setKindsOpen((v) => !v);
+              }}
+            >
+              <Repeat2 aria-hidden />
+              <span className="flex-1">{L.turnInto}</span>
+              <ChevronDown className={cn("transition", kindsOpen && "rotate-180")} aria-hidden />
+            </DropdownMenuItem>
+            {kindsOpen &&
+              TEXT_KINDS.map((kind) => {
+                const Icon = TEXT_KIND_ICONS[kind];
+                return (
+                  <DropdownMenuItem
+                    key={kind}
+                    className={cn(ITEM, "ps-8")}
+                    onSelect={() => {
+                      const target = editor.convert(block.id, kind);
+                      after.current = () => editor.focus(target);
+                    }}
+                  >
+                    <Icon aria-hidden />
+                    <span className="flex-1">{textKindLabel(kind, dict)}</span>
+                    {kind === currentKind && <Check aria-hidden />}
+                  </DropdownMenuItem>
+                );
+              })}
+          </>
+        )}
+        {textBlock && !narrow && (
           <DropdownMenuSub>
             <DropdownMenuSubTrigger className={ITEM}>
               <Repeat2 aria-hidden />
               {L.turnInto}
             </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent className="w-52">
+            <DropdownMenuSubContent className="w-52" collisionPadding={8}>
               {TEXT_KINDS.map((kind) => {
                 const Icon = TEXT_KIND_ICONS[kind];
                 return (

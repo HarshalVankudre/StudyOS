@@ -26,12 +26,19 @@ export type AgentPlanDecision =
   | { action: "execute"; skillId: string; summary: string; affectedAreaIds: string[] };
 
 export const agentStepSchema = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("tool"), tool: z.string().min(1), input: z.unknown() }),
+  // `reply` lets a step finish the turn in the same call: when the tool is
+  // apply_ops and it succeeds, the loop ends with that reply (no extra call).
+  z.object({
+    action: z.literal("tool"),
+    tool: z.string().min(1),
+    input: z.unknown(),
+    reply: z.string().min(1).max(2000).optional(),
+  }),
   z.object({ action: z.literal("final"), reply: z.string().min(1) }),
 ]);
 
 export type AgentStep =
-  | { action: "tool"; tool: string; input: unknown }
+  | { action: "tool"; tool: string; input: unknown; reply?: string }
   | { action: "final"; reply: string };
 
 export function parseAgentPlan(raw: string): AgentPlanDecision {

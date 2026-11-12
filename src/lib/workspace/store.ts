@@ -17,11 +17,24 @@
  */
 import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/db";
+import { reportError } from "@/lib/ops/report-error";
 import { prepareWorkspaceForSave, repairWorkspace } from "./repair";
 import type { Workspace } from "./types";
 
 export const TRASH_RETENTION_DAYS = 30;
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * A workspace's name or icon as stored in its own text column. Postgres
+ * rejects a NUL character (and the driver an unpaired surrogate) in a text
+ * column, which would make every save of that workspace fail; inside the JSON
+ * `data` column they are escaped and harmless, so only the columns are
+ * cleaned (the document itself is stored exactly as given).
+ */
+export function columnText(value: string): string {
+  const clean = value.replace(/\u0000/g, "");
+  return typeof clean.toWellFormed === "function" ? clean.toWellFormed() : clean;
+}
 
 /** Prisma filter for workspaces that are not in the trash. */
 export const NOT_TRASHED = { deletedAt: null } as const;
@@ -49,12 +62,19 @@ export function parseStoredWorkspace(row: {
   try {
     raw = JSON.parse(row.data);
   } catch {
-    console.error(`[StudyOS] workspace ${row.id} holds unreadable JSON`);
+    // The parser's message quotes the stored text, so it is not reported.
+    reportError(new Error("Stored workspace holds unreadable JSON"), {
+      source: "workspace-store",
+      workspaceId: row.id,
+    });
     return null;
   }
   const result = repairWorkspace(raw, { id: row.id, name: row.name });
   if (!result) {
-    console.error(`[StudyOS] workspace ${row.id} could not be recovered`);
+    reportError(new Error("Stored workspace could not be recovered"), {
+      source: "workspace-store",
+      workspaceId: row.id,
+    });
     return null;
   }
   if (result.issues.length > 0) {
@@ -75,8 +95,8 @@ export async function saveNewWorkspace(ws: Workspace): Promise<string> {
     data: {
       id,
       ownerId,
-      name: workspace.name,
-      icon: workspace.icon ?? null,
+      name: columnText(workspace.name),
+      icon: workspace.icon == null ? null : columnText(workspace.icon),
       data,
     },
   });
@@ -151,8 +171,8 @@ export async function saveWorkspace(
   const updated = await prisma.workspace.updateMany({
     where: { id, ownerId, version: baseVersion, ...NOT_TRASHED },
     data: {
-      name: workspace.name,
-      icon: workspace.icon ?? null,
+      name: columnText(workspace.name),
+      icon: workspace.icon == null ? null : columnText(workspace.icon),
       data,
       version: { increment: 1 },
     },
@@ -165,6 +185,39 @@ export async function saveWorkspace(
   });
   if (!current) return { status: "not_found" };
   return { status: "conflict", version: current.version };
+}
+
+export type UpdateWorkspaceResult<T> =
+  | { status: "saved"; version: number; result: T }
+  | { status: "unchanged"; result: T }
+  | { status: "conflict" }
+  | { status: "not_found" };
+
+/**
+ * Server-side read-modify-write of a workspace the current user owns, through
+ * the same version-checked save as autosave. `mutate` edits a fresh copy and
+ * returns `{ changed, result }`; nothing is written when nothing changed. A
+ * concurrent save (another tab, the AI agent) makes the save conflict, in
+ * which case the latest version is re-read and `mutate` runs again, up to
+ * `attempts` times. An open editor sees the new version as "updated
+ * elsewhere" and reloads it.
+ */
+export async function updateWorkspaceWith<T>(
+  id: string,
+  mutate: (draft: Workspace) => { changed: boolean; result: T },
+  attempts = 3,
+): Promise<UpdateWorkspaceResult<T>> {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const state = await getWorkspaceState(id);
+    if (!state) return { status: "not_found" };
+    const draft = structuredClone(state.workspace);
+    const { changed, result } = mutate(draft);
+    if (!changed) return { status: "unchanged", result };
+    const saved = await saveWorkspace(id, draft, state.version);
+    if (saved.status === "saved") return { status: "saved", version: saved.version, result };
+    if (saved.status === "not_found") return { status: "not_found" };
+  }
+  return { status: "conflict" };
 }
 
 /** Move a workspace to the trash (restorable for TRASH_RETENTION_DAYS). */

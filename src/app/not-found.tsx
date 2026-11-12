@@ -20,7 +20,7 @@ export default async function NotFound() {
           className="mt-8 inline-flex items-center gap-2 rounded-lg bg-lime px-6 py-3 text-sm font-semibold text-lime-on transition hover:bg-lime-deep"
         >
           {E.backHome}
-          <span aria-hidden>→</span>
+          <span aria-hidden className="rtl:-scale-x-100">→</span>
         </Link>
       </div>
     </div>

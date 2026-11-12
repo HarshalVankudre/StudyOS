@@ -16,10 +16,22 @@
  *    someone gives them a retention rule here.
  *  - Trashed workspaces (Workspace.deletedAt): purged 30 days after deletion,
  *    see purgeTrashedWorkspaces.
+ *  - AgentChatMessage (the agent chat's memory): the model only ever reads the
+ *    last few turns and the panel redraws the last 60, so messages older than
+ *    180 days go, and at most the newest 200 per workspace are kept. A purged
+ *    workspace takes its chat with it (ON DELETE CASCADE).
+ *  - NotificationLog (what the notifications dispatch sent or skipped): its
+ *    de-duplication keys only matter until the reminder's day has passed
+ *    (the earliest reminder is 14 days ahead, the daily cap is per day), so
+ *    rows older than 60 days go. Push subscriptions are not aged out here:
+ *    the dispatch deletes the ones a push service reports gone.
  */
 import { prisma } from "@/lib/db";
 import { EXPORT_KIND } from "@/lib/account/export-user-data";
 import { USAGE_LIMITS } from "@/lib/usage-limits";
+import { AGENT_FREE_FAILURE_KIND } from "@/lib/ai/agent-charging";
+import { runBillingMaintenance, type BillingMaintenanceResult } from "@/lib/billing";
+import { reportError } from "@/lib/ops/report-error";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -31,6 +43,9 @@ export const RETENTION = {
   studyEventDays: 430,
   analyticsEventDays: 760,
   trashedWorkspaceDays: 30,
+  agentChatMessageDays: 180,
+  agentChatMaxPerWorkspace: 200,
+  notificationLogDays: 60,
 } as const;
 
 /** UsageEvent kinds used only for rate-limit windows. */
@@ -38,6 +53,7 @@ export const RATE_LIMIT_KINDS: readonly string[] = [
   // Every kind lib/usage-limits enforces (new limits are covered automatically).
   ...Object.keys(USAGE_LIMITS),
   EXPORT_KIND,
+  AGENT_FREE_FAILURE_KIND,
 ];
 export const STUDY_EVENT_KIND = "evt:study_reviewed";
 
@@ -49,6 +65,11 @@ export interface RetentionResult {
   studyEvents: number;
   analyticsEvents: number;
   trashedWorkspaces: number;
+  agentChatMessagesExpired: number;
+  agentChatMessagesOverCap: number;
+  notificationLogs: number;
+  /** The billing sweep (null when it failed; reported, retried next run). */
+  billing: BillingMaintenanceResult | null;
 }
 
 const ago = (now: Date, days: number) => new Date(now.getTime() - days * DAY);
@@ -110,6 +131,33 @@ export async function runRetention(now = new Date()): Promise<RetentionResult> {
 
   const trashedWorkspaces = await purgeTrashedWorkspaces(now);
 
+  const agentChatMessagesExpired = await prisma.agentChatMessage.deleteMany({
+    where: { createdAt: { lt: ago(now, RETENTION.agentChatMessageDays) } },
+  });
+  const agentChatMessagesOverCap = await prisma.$executeRaw`
+    DELETE FROM "AgentChatMessage"
+    WHERE "id" IN (
+      SELECT "id" FROM (
+        SELECT "id", ROW_NUMBER() OVER (
+          PARTITION BY "workspaceId" ORDER BY "createdAt" DESC, "id" DESC
+        ) AS rn
+        FROM "AgentChatMessage"
+      ) ranked
+      WHERE ranked.rn > ${RETENTION.agentChatMaxPerWorkspace}
+    )`;
+
+  const notificationLogs = await prisma.notificationLog.deleteMany({
+    where: { createdAt: { lt: ago(now, RETENTION.notificationLogDays) } },
+  });
+
+  // Billing jobs Stripe failed part-way and stopped retrying (a refund, a
+  // deleted account's cancellation), abandoned credit holds, rows past their
+  // paid period. Never stops data retention; failures are retried next run.
+  const billing = await runBillingMaintenance(now).catch((error) => {
+    reportError(error, { source: "retention", route: "runBillingMaintenance" });
+    return null;
+  });
+
   return {
     agentTasks: agentTasks.count,
     workspaceChangesExpired: workspaceChangesExpired.count,
@@ -118,5 +166,9 @@ export async function runRetention(now = new Date()): Promise<RetentionResult> {
     studyEvents: studyEvents.count,
     analyticsEvents: analyticsEvents.count,
     trashedWorkspaces,
+    agentChatMessagesExpired: agentChatMessagesExpired.count,
+    agentChatMessagesOverCap: Number(agentChatMessagesOverCap),
+    notificationLogs: notificationLogs.count,
+    billing,
   };
 }

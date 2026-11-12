@@ -48,7 +48,7 @@ beforeEach(() => {
   mocks.trashWorkspaceAction.mockResolvedValue(true);
   mocks.restoreWorkspaceAction.mockResolvedValue(true);
   mocks.deleteWorkspaceForeverAction.mockResolvedValue(true);
-  mocks.duplicateWorkspaceAction.mockResolvedValue("copy-1");
+  mocks.duplicateWorkspaceAction.mockResolvedValue({ ok: true, id: "copy-1" });
 });
 
 const items = [
@@ -114,5 +114,24 @@ describe("workspace card actions", () => {
     await user.click(await screen.findByRole("menuitem", { name: "Duplicate" }));
     await waitFor(() => expect(mocks.duplicateWorkspaceAction).toHaveBeenCalledWith("w1"));
     await waitFor(() => expect(mocks.refresh).toHaveBeenCalled());
+  });
+
+  it("explains why a duplicate was refused (workspace cap)", async () => {
+    mocks.duplicateWorkspaceAction.mockResolvedValue({
+      ok: false,
+      code: "limit",
+      message: "You’ve reached the limit of 200 workspaces.",
+    });
+    const user = userEvent.setup();
+    render(
+      <>
+        <Toaster />
+        <DeleteWorkspaceButton id="w1" name="Fall semester" />
+      </>,
+    );
+    await user.click(screen.getByRole("button", { name: "Actions for Fall semester" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Duplicate" }));
+    expect(await screen.findByText("You’ve reached the limit of 200 workspaces.")).toBeInTheDocument();
+    expect(mocks.refresh).not.toHaveBeenCalled();
   });
 });

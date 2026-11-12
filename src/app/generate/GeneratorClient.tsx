@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { Coins, LoaderCircle, RotateCcw, TriangleAlert, Upload } from "lucide-react";
+import { CircleStop, Coins, LoaderCircle, RotateCcw, TriangleAlert, Upload } from "lucide-react";
 import { AiActivity } from "@/components/AiActivity";
 import { GenerationActivity } from "@/components/GenerationActivity";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
@@ -15,6 +15,7 @@ import type {
 } from "@/lib/ai/generation-progress";
 import type { GenQuestion, QuestionAnswer } from "@/lib/ai/onboarding";
 import { TIME_ZONE_COOKIE, validTimeZone } from "@/lib/ai/student-clock";
+import { MIN_GENERATION_BALANCE } from "@/lib/credits-info";
 import {
   MAX_SOURCE_INPUT,
   MAX_SOURCE_TEXT,
@@ -33,6 +34,15 @@ function browserTimeZone(): string | undefined {
     return undefined;
   }
 }
+
+/**
+ * After Cancel, how long the page keeps listening for the server's
+ * "cancelled" event (which says what the stop cost) before it disconnects.
+ */
+const CANCEL_LISTEN_MS = 6_000;
+
+/** What a stopped build cost; `credits: null` when the server could not say. */
+type CancelNotice = { credits: number | null };
 
 function newGenerationId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
@@ -74,8 +84,12 @@ export function GeneratorClient({
     dict.ai.generate.phase.analyzing,
   );
   const [overallProgress, setOverallProgress] = useState(4);
+  // A build the student stopped: what it cost (shown after the overlay closes).
+  const [cancelNotice, setCancelNotice] = useState<CancelNotice | null>(null);
+  const [cancelling, setCancelling] = useState(false);
   const generationController = useRef<AbortController | null>(null);
   const generationIdRef = useRef<string | null>(null);
+  const cancelRequested = useRef(false);
 
   useEffect(() => {
     // Remember the browser's time zone so every AI request (including the
@@ -173,6 +187,9 @@ export function GeneratorClient({
 
     setError(null);
     setFailure(null);
+    setCancelNotice(null);
+    setCancelling(false);
+    cancelRequested.current = false;
     setBuilding(true);
     setGenerationPlan(null);
     setComponentProgress({});
@@ -185,6 +202,7 @@ export function GeneratorClient({
     const generationId = newGenerationId();
     generationIdRef.current = generationId;
     let completed = false;
+    let stopped = false;
 
     try {
       const response = await fetch("/api/generate", {
@@ -258,6 +276,10 @@ export function GeneratorClient({
             completed = true;
             setOverallProgress(100);
             router.push(`/app/${event.workspaceId}`);
+          } else if (event.type === "cancelled") {
+            // The server stopped the build and says what that cost.
+            stopped = true;
+            setCancelNotice({ credits: event.credits });
           } else if (event.type === "error") {
             if (event.code === "out_of_credits") {
               setOutOfCredits(true);
@@ -274,9 +296,13 @@ export function GeneratorClient({
         if (done) break;
       }
 
-      if (!completed) setFailure(dict.generate.errorBuild);
+      if (!completed && !stopped && !cancelRequested.current) setFailure(dict.generate.errorBuild);
+      if (!completed && !stopped && cancelRequested.current) setCancelNotice({ credits: null });
     } catch (cause) {
-      if (!controller.signal.aborted) {
+      if (cancelRequested.current || controller.signal.aborted) {
+        // Disconnected before the server said what the stop cost.
+        if (cancelRequested.current && !stopped) setCancelNotice({ credits: null });
+      } else {
         setError(
           cause instanceof Error && cause.message
             ? cause.message
@@ -284,31 +310,48 @@ export function GeneratorClient({
         );
       }
     } finally {
-      generationController.current = null;
-      generationIdRef.current = null;
-      if (!completed) setBuilding(false);
+      if (generationController.current === controller) generationController.current = null;
+      if (generationIdRef.current === generationId) generationIdRef.current = null;
+      setCancelling(false);
+      if (!completed) {
+        setBuilding(false);
+        if (cancelRequested.current) {
+          setGenerationPlan(null);
+          setComponentProgress({});
+          setOverallProgress(4);
+        }
+      }
     }
   };
 
-  const cancelBuild = () => {
+  // Stop the build. The server stops the model, saves nothing, charges only
+  // the tokens already used and says how many credits that was; the page
+  // waits a moment for that answer, then disconnects either way.
+  const cancelBuild = async () => {
+    const controller = generationController.current;
     const generationId = generationIdRef.current;
-    generationController.current?.abort();
-    generationController.current = null;
-    generationIdRef.current = null;
-    // Tell the server too, so it stops the model and never saves the
-    // workspace even if a proxy keeps the aborted connection open.
+    if (!controller || cancelRequested.current) return;
+    cancelRequested.current = true;
+    setCancelling(true);
+    let listening = false;
     if (generationId) {
-      void fetch("/api/generate/cancel", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ generationId }),
-        keepalive: true,
-      }).catch(() => {});
+      try {
+        const response = await fetch("/api/generate/cancel", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ generationId }),
+          keepalive: true,
+        });
+        const body = (await response.json().catch(() => null)) as { cancelled?: boolean } | null;
+        listening = body?.cancelled === true;
+      } catch {
+        listening = false;
+      }
     }
-    setBuilding(false);
-    setGenerationPlan(null);
-    setComponentProgress({});
-    setOverallProgress(4);
+    // When the server could not find the run here, disconnecting is what
+    // stops it; otherwise give its "cancelled" event a moment to arrive.
+    if (!listening) controller.abort();
+    else window.setTimeout(() => controller.abort(), CANCEL_LISTEN_MS);
   };
 
   const answeredCount = questions.filter(
@@ -333,7 +376,8 @@ export function GeneratorClient({
           phase={generationPhase}
           phaseMessage={phaseMessage}
           overallProgress={overallProgress}
-          onCancel={cancelBuild}
+          onCancel={() => void cancelBuild()}
+          cancelling={cancelling}
         />
       )}
 
@@ -390,6 +434,7 @@ export function GeneratorClient({
           />
         )}
 
+        {cancelNotice && !building && <CancelledPanel credits={cancelNotice.credits} />}
         {failure && !building && (
           <FailurePanel message={failure} onRetry={build} />
         )}
@@ -408,7 +453,7 @@ export function GeneratorClient({
 // ---------------------------------------------------------------------------
 
 function OutOfCreditsPanel() {
-  const { dict } = useI18n();
+  const { dict, t } = useI18n();
   const C = dict.generate.outOfCredits;
   return (
     <section
@@ -419,7 +464,9 @@ function OutOfCreditsPanel() {
         <Coins className="mt-0.5 h-5 w-5 shrink-0 text-lime-deep" aria-hidden />
         <div className="min-w-0">
           <h2 className="font-display text-lg font-bold text-ink">{C.title}</h2>
-          <p className="mt-1 text-sm leading-relaxed text-ink-soft">{C.body}</p>
+          <p className="mt-1 text-sm leading-relaxed text-ink-soft">
+            {t(C.body, { min: MIN_GENERATION_BALANCE })}
+          </p>
           <div className="mt-4 flex flex-wrap gap-2">
             <Link
               href="/app/credits"
@@ -434,6 +481,47 @@ function OutOfCreditsPanel() {
               {C.plans}
             </Link>
           </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * After the student stops a build: nothing was saved, and what (if anything)
+ * the AI work done before the stop cost. Charging for used tokens is the
+ * policy; saying so is the point of this panel.
+ */
+function CancelledPanel({ credits }: { credits: number | null }) {
+  const { dict, t } = useI18n();
+  const C = dict.generate.cancelled;
+  const message =
+    credits === null
+      ? C.unknown
+      : credits <= 0
+        ? C.free
+        : credits === 1
+          ? C.chargedOne
+          : t(C.charged, { credits });
+  return (
+    <section
+      role="status"
+      aria-live="polite"
+      className="mt-7 rounded-xl border border-line-strong bg-card p-5 shadow-card"
+    >
+      <div className="flex items-start gap-3">
+        <CircleStop className="mt-0.5 h-5 w-5 shrink-0 text-ink-soft" aria-hidden />
+        <div className="min-w-0">
+          <h2 className="font-display text-base font-bold text-ink">{C.title}</h2>
+          <p className="mt-1 text-sm leading-relaxed text-ink-soft">{message}</p>
+          {credits !== 0 && (
+            <Link
+              href="/app/credits"
+              className="mt-3 inline-flex min-h-11 items-center text-sm font-semibold text-ink underline-offset-4 hover:underline"
+            >
+              {C.history}
+            </Link>
+          )}
         </div>
       </div>
     </section>
@@ -568,6 +656,8 @@ type UploadErrorCode =
   | "no_text"
   | "unreadable"
   | "timeout"
+  | "busy"
+  | "rate_limited"
   | "failed";
 
 // Optional syllabus grounding: paste text or upload a PDF / Word / text file
@@ -602,6 +692,10 @@ export function SyllabusImport({
         return S.errors.unreadable;
       case "timeout":
         return S.errors.timeout;
+      case "busy":
+        return S.errors.busy;
+      case "rate_limited":
+        return S.errors.rateLimited;
       default:
         return S.errors.failed;
     }

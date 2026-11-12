@@ -5,6 +5,9 @@ import {
   extractSourceText,
 } from "@/lib/import/extract";
 import { MAX_SOURCE_TEXT } from "@/lib/import/syllabus";
+import { readFormCapped } from "@/lib/import/upload-body";
+import { reportError } from "@/lib/ops/report-error";
+import { checkUsageLimit } from "@/lib/usage-limits";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -18,29 +21,35 @@ const FORM_OVERHEAD_BYTES = 64 * 1024;
  * what will be used) and is re-normalized and fenced as untrusted data when it
  * is later sent with a generation request.
  *
+ * Order of checks: signed in, then the per-user upload rate limit (before
+ * any body is read), then the body is read with a hard byte cap (a declared
+ * Content-Length past the cap is refused unread; an undeclared or lying one
+ * is cut off as soon as the cap is passed), then extraction runs in an
+ * isolated, memory- and time-capped process (lib/import/extract).
+ *
  * Responses: 200 { text, totalChars, usedChars, kind, pages?, pagesTruncated? }
  * or an error status with { code } (too_large | unsupported | no_text |
- * unreadable | timeout | invalid), plus `kind` for no_text so the client can
- * say "scanned PDF".
+ * unreadable | timeout | busy | rate_limited | invalid), plus `kind` for
+ * no_text so the client can say "scanned PDF".
  */
 export async function POST(request: Request) {
   const { userId } = await auth();
   if (!userId) return Response.json({ code: "not_authenticated" }, { status: 401 });
 
-  // Refuse oversized bodies before buffering them.
-  const declared = Number(request.headers.get("content-length") ?? "0");
-  if (declared > MAX_UPLOAD_BYTES + FORM_OVERHEAD_BYTES) {
+  const maxBody = MAX_UPLOAD_BYTES + FORM_OVERHEAD_BYTES;
+  const declared = Number(request.headers.get("content-length") ?? "");
+  if (Number.isFinite(declared) && declared > maxBody) {
     return Response.json({ code: "too_large" }, { status: 413 });
   }
 
-  let file: File | null = null;
-  try {
-    const form = await request.formData();
-    const value = form.get("file");
-    file = value instanceof File ? value : null;
-  } catch {
-    file = null;
+  if (!(await checkUsageLimit(userId, "syllabus_upload")).allowed) {
+    return Response.json({ code: "rate_limited" }, { status: 429 });
   }
+
+  const form = await readFormCapped(request, maxBody);
+  if (form === "too_large") return Response.json({ code: "too_large" }, { status: 413 });
+  const value = form?.get("file");
+  const file = value instanceof File ? value : null;
   if (!file) return Response.json({ code: "invalid" }, { status: 400 });
   if (file.size > MAX_UPLOAD_BYTES) {
     return Response.json({ code: "too_large" }, { status: 413 });
@@ -64,6 +73,12 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     if (error instanceof ExtractError) {
+      if (error.code === "busy") {
+        return Response.json(
+          { code: "busy" },
+          { status: 503, headers: { "Retry-After": "30" } },
+        );
+      }
       const status =
         error.code === "too_large" ? 413 : error.code === "unsupported" ? 415 : 422;
       return Response.json(
@@ -71,7 +86,7 @@ export async function POST(request: Request) {
         { status },
       );
     }
-    console.error("[StudyOS] syllabus extraction failed:", error);
+    reportError(error, { route: "/api/import/syllabus", method: "POST", userId });
     return Response.json({ code: "unreadable" }, { status: 422 });
   }
 }

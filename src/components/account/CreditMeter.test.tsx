@@ -1,16 +1,23 @@
 import { render, screen } from "@testing-library/react";
 import { act } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { LOW_CREDIT_THRESHOLD } from "@/lib/credits-info";
-import { emitCreditsBalance } from "@/lib/credits-bus";
+import { emitCreditsBalance, resetCreditsBusForTests } from "@/lib/credits-bus";
+
+// The meter re-reads the balance on mount; keep that read pending here.
+vi.mock("@/app/app/account-actions", () => ({ getAccountSummaryAction: () => new Promise(() => {}) }));
+beforeEach(() => resetCreditsBusForTests());
 
 vi.mock("@/lib/i18n/client", () => ({
   useI18n: () => ({
     dict: {
       credits: { label: "AI credits", amount: "{count} credits", low: "Low", runningLow: "Running low" },
+      counts: { credits: { one: "{count} credit", other: "{count} credits" } },
     },
     t: (s: string, vars: Record<string, unknown>) =>
       s.replace(/\{(\w+)\}/g, (_, k) => String(vars[k])),
+    plural: (forms: { one?: string; other: string }, n: number) =>
+      (n === 1 && forms.one ? forms.one : forms.other).replace("{count}", String(n)),
     locale: "en",
   }),
 }));

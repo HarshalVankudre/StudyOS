@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { auth } from "@clerk/nextjs/server";
 import Link from "next/link";
-import { ArrowRight, Bot, Check, Clock3 } from "lucide-react";
+import { Bot } from "lucide-react";
 import { getDailyStudyAgentOverview } from "@/lib/agents/daily-study/store";
 import { isPro, reconcileCheckoutSession } from "@/lib/billing";
 import { getCreditBalance } from "@/lib/credits";
@@ -12,14 +12,12 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { AccountMenu } from "@/components/account/AccountMenu";
 import { CreditChip } from "@/components/account/CreditChip";
 import { Toaster } from "@/components/ui/sonner";
+import { TodayPlan } from "@/components/today/TodayPlan";
 import { loadDemoAction } from "./actions";
 import { manageBillingAction } from "./billing-actions";
 import { DeleteWorkspaceButton } from "./DeleteWorkspaceButton";
 import { TrashList } from "./TrashList";
 import { DailyAgentBootstrap } from "./agents/DailyAgentBootstrap";
-import { PendingButton } from "./agents/PendingButton";
-import { TimezoneInput } from "./agents/TimezoneInput";
-import { runDailyStudyAgentAction } from "./agents/actions";
 
 export async function generateMetadata(): Promise<Metadata> {
   const { dict } = await getI18n();
@@ -50,13 +48,8 @@ export default async function AppHome({
   const A = dict.app;
   const Agent = dict.agentCenter;
   const promptExample = dict.generate.describe.placeholder;
-  const nextAgentItems = agent.plan?.items
-    .filter((item) => !item.completed)
-    .slice(0, 3) ?? [];
-  const planMinutes = agent.plan?.items.reduce(
-    (total, item) => total + item.durationMinutes,
-    0,
-  ) ?? 0;
+  // A new student starts with the generator; everyone else starts with Today.
+  const hasWorkspaces = workspaces.length > 0;
 
   return (
     <main className="min-h-screen bg-paper text-ink antialiased">
@@ -64,7 +57,7 @@ export default async function AppHome({
       <DailyAgentBootstrap
         enabled={agent.config.enabled}
         planLocalDate={agent.plan?.localDate ?? null}
-        planningLabel={Agent.running}
+        planningLabel={dict.today.planning}
       />
       <header className="sticky top-0 z-40 border-b border-line bg-surface/95 backdrop-blur-md">
         <div className="mx-auto max-w-5xl px-4 py-3.5 sm:px-7">
@@ -165,109 +158,39 @@ export default async function AppHome({
           </div>
         )}
 
-        {/* Generate prompt */}
-        <section className="overflow-hidden rounded-md border border-line-strong bg-card px-5 py-5 shadow-pop sm:px-7 sm:py-6">
-          <div className="flex items-center gap-3 font-mono text-[11px] uppercase tracking-[0.16em] text-ink-faint">
-            <span className="h-px w-6 bg-line-strong" aria-hidden />
-            {A.generate}
-          </div>
-          <h1 className="mt-3 font-display text-[1.7rem] font-bold leading-tight tracking-tight">
-            {dict.generate.describe.title}
-          </h1>
-          <Link
-            href="/generate"
-            className="group mt-4 flex max-w-xl items-center gap-2.5 rounded-md border border-line-strong bg-surface-2 py-2 pl-4 pr-2 transition hover:border-ink/30"
-          >
-            <span className="font-mono text-xs text-ink-faint" aria-hidden>
-              ›
-            </span>
-            <span className="min-w-0 flex-1 truncate text-sm text-ink-soft">
-              {promptExample}
-            </span>
-            <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md bg-ink px-4 py-2.5 text-[13.5px] font-semibold text-paper transition group-hover:opacity-90">
-              {A.generate}
-              <span className="transition group-hover:translate-x-0.5" aria-hidden>
-                →
-              </span>
-            </span>
-          </Link>
-        </section>
-
-        <section className="mt-6 overflow-hidden rounded-md border border-line-strong bg-card shadow-card">
-          <div className="flex flex-col gap-4 border-b border-line px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-7">
-            <div className="flex min-w-0 items-start gap-3.5">
-              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-lime-faint text-lime-deep">
-                <Bot className="h-5 w-5" aria-hidden />
-              </span>
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h2 className="font-display text-lg font-bold tracking-tight">
-                    {Agent.dashboardTitle}
-                  </h2>
-                  <span className="inline-flex items-center gap-1 rounded-full border border-lime/30 bg-lime-faint px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-lime-deep">
-                    <span className="h-1.5 w-1.5 rounded-full bg-lime-deep" aria-hidden />
-                    {agent.config.enabled ? Agent.enabled : Agent.paused}
-                  </span>
-                </div>
-                <p className="mt-1 text-sm text-ink-soft">{Agent.dashboardSubtitle}</p>
+        {hasWorkspaces ? (
+          <TodayPlan plan={agent.plan} dailyMinutes={agent.config.dailyMinutes} />
+        ) : (
+          <>
+            {/* Generate prompt */}
+            <section className="overflow-hidden rounded-md border border-line-strong bg-card px-5 py-5 shadow-pop sm:px-7 sm:py-6">
+              <div className="flex items-center gap-3 font-mono text-[11px] uppercase tracking-[0.16em] text-ink-faint">
+                <span className="h-px w-6 bg-line-strong" aria-hidden />
+                {A.generate}
               </div>
-            </div>
-            <Link
-              href="/app/agents"
-              className="inline-flex shrink-0 items-center gap-1.5 self-start text-sm font-semibold text-ink transition hover:text-lime-deep sm:self-auto"
-            >
-              {Agent.openCenter}
-              <ArrowRight className="h-4 w-4" aria-hidden />
-            </Link>
-          </div>
-
-          {agent.plan ? (
-            <div className="grid gap-px bg-line sm:grid-cols-3">
-              {nextAgentItems.length > 0 ? (
-                nextAgentItems.map((item) => (
-                  <Link
-                    key={item.id}
-                    href={item.href}
-                    className="group bg-card px-5 py-4 transition hover:bg-hover sm:px-6"
-                  >
-                    <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-wide text-ink-faint">
-                      <Clock3 className="h-3 w-3" aria-hidden />
-                      {t(Agent.minutes, { count: item.durationMinutes })}
-                    </div>
-                    <p className="mt-2 truncate text-sm font-semibold text-ink group-hover:text-lime-deep">
-                      {item.title}
-                    </p>
-                    <p className="mt-1 truncate text-xs text-ink-soft">{item.source}</p>
-                  </Link>
-                ))
-              ) : (
-                <div className="flex items-center gap-2 bg-card px-5 py-5 text-sm font-medium text-ink sm:col-span-3 sm:px-7">
-                  <Check className="h-4 w-4 text-lime-deep" aria-hidden />
-                  {agent.plan.items.length === 0 ? Agent.clearTitle : Agent.allDone}
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="flex flex-col gap-4 px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-7">
-              <p className="text-sm leading-6 text-ink-soft">{Agent.noPlanBody}</p>
-              <form action={runDailyStudyAgentAction} className="shrink-0">
-                <TimezoneInput initialValue={agent.config.timeZone} />
-                <PendingButton
-                  idleLabel={Agent.planToday}
-                  pendingLabel={Agent.running}
-                  size="sm"
-                />
-              </form>
-            </div>
-          )}
-
-          {agent.plan && (
-            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line bg-surface-2 px-5 py-2.5 font-mono text-[10px] text-ink-faint sm:px-7">
-              <span>{agent.plan.summary}</span>
-              <span>{t(Agent.minutes, { count: planMinutes })}</span>
-            </div>
-          )}
-        </section>
+              <h1 className="mt-3 font-display text-[1.7rem] font-bold leading-tight tracking-tight">
+                {dict.generate.describe.title}
+              </h1>
+              <Link
+                href="/generate"
+                className="group mt-4 flex max-w-xl items-center gap-2.5 rounded-md border border-line-strong bg-surface-2 py-2 pe-2 ps-4 transition hover:border-ink/30"
+              >
+                <span className="font-mono text-xs text-ink-faint rtl:-scale-x-100" aria-hidden>
+                  ›
+                </span>
+                <span className="min-w-0 flex-1 truncate text-sm text-ink-soft">
+                  {promptExample}
+                </span>
+                <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md bg-ink px-4 py-2.5 text-[13.5px] font-semibold text-paper transition group-hover:opacity-90">
+                  {A.generate}
+                  <span className="transition group-hover:translate-x-0.5 rtl:-scale-x-100 rtl:group-hover:-translate-x-0.5" aria-hidden>
+                    →
+                  </span>
+                </span>
+              </Link>
+            </section>
+          </>
+        )}
 
         <div className="mb-5 mt-9 flex items-end justify-between sm:mt-11">
           <div>
@@ -316,11 +239,11 @@ export default async function AppHome({
                     {w.icon ?? A.fallbackIcon}
                   </span>
                   <div className="mt-4 pe-10 font-display text-[1.05rem] font-bold text-ink">
-                    {w.name}
+                    <bdi>{w.name}</bdi>
                   </div>
                   <div className="mt-auto border-t border-line pt-3.5 font-mono text-[11px] text-ink-faint">
                     {t(A.updatedAt, {
-                      date: new Date(w.updatedAt).toLocaleDateString(locale),
+                      date: new Date(w.updatedAt).toLocaleDateString(locale, { dateStyle: "medium" }),
                     })}
                   </div>
                 </Link>
@@ -337,6 +260,21 @@ export default async function AppHome({
               <span className="text-[13px] font-medium">{A.emptyGenerate}</span>
             </Link>
           </div>
+        )}
+
+        {hasWorkspaces && (
+          <Link
+            href="/generate"
+            className="group mt-6 flex items-center gap-2.5 rounded-md border border-line-strong bg-card py-2 pe-2 ps-4 shadow-card transition hover:border-ink/30"
+          >
+            <span className="font-mono text-xs text-ink-faint rtl:-scale-x-100" aria-hidden>
+              ›
+            </span>
+            <span className="min-w-0 flex-1 truncate text-sm text-ink-soft">{promptExample}</span>
+            <span className="inline-flex min-h-10 items-center gap-1.5 whitespace-nowrap rounded-md bg-ink px-4 text-[13px] font-semibold text-paper transition group-hover:opacity-90">
+              {A.generate}
+            </span>
+          </Link>
         )}
 
         <TrashList

@@ -16,7 +16,9 @@ const badgeVariants = cva(
           "bg-destructive text-white focus-visible:ring-destructive/20 dark:bg-destructive/60 dark:focus-visible:ring-destructive/40 [a&]:hover:bg-destructive/90",
         outline:
           "border-border text-foreground [a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
-        teal: "bg-accent-faint text-accent ring-1 ring-inset ring-accent/30",
+        // `accent` in Tailwind is the neutral hover tint (--accent-bg), not the
+        // brand teal, so this uses the lime/teal tokens: 6.0:1 dark, 4.6:1 light.
+        teal: "bg-lime-faint font-semibold text-lime-deep ring-1 ring-inset ring-lime/40",
         ghost: "[a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
         link: "text-primary underline-offset-4 [a&]:hover:underline",
       },

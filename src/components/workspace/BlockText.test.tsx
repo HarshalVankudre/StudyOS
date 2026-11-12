@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 vi.mock("streamdown", () => ({
   Streamdown: ({ children }: { children: string }) => <div data-testid="md">{children}</div>,
 }));
-vi.mock("@/lib/streamdown-plugins", () => ({ streamdownPlugins: {} }));
+vi.mock("@/lib/streamdown-plugins", () => ({ streamdownPlugins: {}, streamdownRehypePlugins: [] }));
 
 import { BlockText } from "./BlockText";
 import { COMMIT_DELAY_MS } from "./editor/useCommittedDraft";

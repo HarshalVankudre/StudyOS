@@ -18,22 +18,43 @@ import type {
   Workspace,
 } from "@/lib/workspace/types";
 import { safeParseWorkspace } from "@/lib/workspace/schema";
+import { repairWorkspace } from "@/lib/workspace/repair";
 import { sampleWorkspace } from "@/lib/workspace/sample";
 import { normalizeSourceText, sourceTextBlock } from "@/lib/import/syllabus";
-import { extractSyllabusFacts, syllabusFactsBlock, type SyllabusFacts } from "@/lib/import/syllabus-facts";
+import {
+  datesInText,
+  extractSyllabusFacts,
+  syllabusFactsBlock,
+  type SyllabusFacts,
+} from "@/lib/import/syllabus-facts";
 import { applySyllabusFacts, type AssessmentLabels } from "@/lib/import/syllabus-merge";
+import { ensureGradeTracking, type GradeTrackingLabels } from "@/lib/grades/ensure";
+import { reportError } from "@/lib/ops/report-error";
 import { modelForPlan } from "./plans";
 import { streamChatCompletion } from "./openrouter";
 import { AiRefusalError } from "./anthropic";
 import { isAiConfigured, missingAiKeyMessage, providerForModel } from "./provider";
-import { recordUsage, withUsageMeter, type TokenUsage } from "./usage-meter";
+import {
+  forwardUsage as forwardMeteredUsage,
+  recordUsage,
+  withUsageMeter,
+  type TokenUsage,
+} from "./usage-meter";
 import { addDaysIso, clockPromptBlock, studentClock, type StudentClock } from "./student-clock";
-import { defaultQuestions, type GenQuestion } from "./onboarding";
+import { clipText, defaultQuestions, normalizeGenQuestions, oneEmoji, QUESTION_LIMITS, type GenQuestion } from "./onboarding";
 import {
   GENERATION_COMPONENT_KINDS,
   type GenerationComponent,
+  type GenerationComponentKind,
   type WorkspaceGenerationPlan,
 } from "./generation-progress";
+import {
+  inputEvidence,
+  polishGeneratedWorkspace,
+  removeUnsupportedFacts,
+  type InputEvidence,
+} from "./generate-polish";
+import { createWorkspaceStreamScanner, type WorkspaceStreamEvent } from "./workspace-stream";
 import { DEFAULT_LOCALE, englishName, type Locale } from "@/lib/i18n/config";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 
@@ -50,7 +71,8 @@ export function languageDirective(locale: Locale): string {
     "",
     "LANGUAGE:",
     `- Write ALL user-facing text in ${englishName(locale)}: workspace name, page titles, database names and descriptions, property names, select/status option labels, row text content, headings, callouts, replies, questions, and choice labels.`,
-    "- Do NOT translate or change JSON keys, ids, or the literal enum values for `type`, `kind`, and `color`. Keep all dates in ISO format (YYYY-MM-DD).",
+    "- Do NOT translate or change JSON keys, ids, or the literal enum values for `type`, `kind`, and `color`.",
+    `- Date values in JSON (date cells, filter values) stay in ISO format (YYYY-MM-DD). Dates written in text (callouts, paragraphs, to-dos, cards, questions, replies) use the natural ${englishName(locale)} format, never YYYY-MM-DD.`,
   ].join("\n");
   return [
     language,
@@ -115,7 +137,22 @@ export interface GenerateWorkspaceOptions {
   maxAttempts?: number;
   /** Epoch ms: no attempt starts that is unlikely to finish by then, and calls abort at it. */
   deadline?: number;
+  /**
+   * What the model has written so far (databases, row counts, pages), as it
+   * streams, so the build screen can show real progress. Best effort: only
+   * streaming providers report it, and a retry starts the count again.
+   */
+  onProgress?: (event: GenerationStreamProgress) => void;
 }
+
+/**
+ * A streamed piece of the workspace ("text" = just more of the reply), plus
+ * how many characters of the reply have arrived.
+ */
+export type GenerationStreamProgress = (WorkspaceStreamEvent | { type: "text" }) & {
+  chars: number;
+  attempt: number;
+};
 
 /** Upper bound for one generation call; the route's deadline may cut it shorter. */
 const GENERATION_CALL_TIMEOUT_MS = 200_000;
@@ -140,9 +177,22 @@ export async function generateWorkspace(
 ): Promise<Workspace> {
   const clock = options.clock ?? studentClock();
   const source = normalizeSourceText(sourceText);
-  const facts = extractSyllabusFacts(source, clock.date);
+  const facts = extractSyllabusFacts(source, clock.date, locale);
+  const given = [prompt, preferences, source].join("\n");
+  const evidence = inputEvidence(given, datesInText(given, clock.date, locale).length);
+  // Deterministic last steps: drop facts the student never gave (invented
+  // deadlines, weights, codes), tidy what models routinely get wrong, keep
+  // the syllabus's weights and dates, then make sure graded work has a score
+  // column and a grades block to read it.
   const finish = (workspace: Workspace) =>
-    applySyllabusFacts(workspace, facts, assessmentLabels(locale));
+    ensureGradeTracking(
+      applySyllabusFacts(
+        polish(removeUnsupportedFacts(workspace, evidence), locale, clock),
+        facts,
+        assessmentLabels(locale),
+      ),
+      gradeLabels(locale),
+    );
 
   if (!isAiConfigured(model)) {
     // The mock exists for local development without a key. In production a
@@ -165,7 +215,7 @@ export async function generateWorkspace(
     const metered = await withUsageMeter(async () => {
       try {
         const workspace = await openRouterGenerate(
-          prompt, model, preferences, plan, locale, source, clock, facts, options,
+          prompt, model, preferences, plan, locale, source, clock, facts, evidence, options, attempt,
         );
         return { ok: true as const, workspace };
       } catch (error) {
@@ -182,7 +232,10 @@ export async function generateWorkspace(
       throw new GenerationCancelledError();
     }
     lastError = metered.result.error;
-    console.error(`[StudyOS] generation attempt ${attempt}/${maxAttempts} failed:`, lastError);
+    reportError(lastError, {
+      source: "generateWorkspace",
+      status: `attempt ${attempt}/${maxAttempts} failed`,
+    });
     const tookMs = Date.now() - startedAt;
     const outOfTime = options.deadline !== undefined && Date.now() + tookMs > options.deadline;
     if (!isRetryable(lastError) || outOfTime) break;
@@ -192,7 +245,8 @@ export async function generateWorkspace(
 
 /** Re-report a nested meter's usage to the enclosing meter (if any). */
 function forwardUsage(usage: TokenUsage) {
-  recordUsage({ prompt_tokens: usage.promptTokens, completion_tokens: usage.completionTokens });
+  // Keeps the per-model priced cost (cache reads/writes included).
+  forwardMeteredUsage(usage);
 }
 
 function throwIfCancelled(signal?: AbortSignal) {
@@ -230,8 +284,33 @@ function toGenerationFailure(error: unknown): GenerationFailedError {
 }
 
 function assessmentLabels(locale: Locale): AssessmentLabels {
-  return getDictionary(locale).ai.generate.assessments;
+  const dict = getDictionary(locale);
+  return { ...dict.ai.generate.assessments, score: dict.grades.scoreColumnName };
 }
+
+function gradeLabels(locale: Locale): GradeTrackingLabels {
+  const g = getDictionary(locale).grades;
+  return { score: g.scoreColumnName, heading: g.generatedHeading, title: g.defaultTitle };
+}
+
+function polish(workspace: Workspace, locale: Locale, clock: StudentClock): Workspace {
+  const dict = getDictionary(locale);
+  return polishGeneratedWorkspace(workspace, {
+    locale,
+    today: clock.date,
+    labels: { thisWeek: dict.dbViews.thisWeekViewName, gradesTitle: dict.grades.defaultTitle },
+  });
+}
+
+/** Limits of a plan, stated in the planning prompt and enforced by trimming. */
+const PLAN_LIMITS = {
+  workspaceName: 60,
+  summary: 200,
+  label: 40,
+  description: 120,
+  id: 50,
+  components: 9,
+} as const;
 
 const generationPlanSchema = z.object({
   workspaceName: z.string().min(1).max(80),
@@ -280,16 +359,18 @@ export async function planWorkspace(
       ]
         .filter(Boolean)
         .join("\n\n"),
-      { signal: options.signal, timeoutMs: SMALL_CALL_TIMEOUT_MS },
+      { signal: options.signal, timeoutMs: SMALL_CALL_TIMEOUT_MS, effort: "low", smallStep: true, maxTokens: SMALL_CALL_MAX_TOKENS },
     );
-    const parsed = generationPlanSchema.safeParse(extractJson(raw));
+    const plan = normalizePlanReply(extractJson(raw));
+    if (!plan) throw new InvalidOutputError("plan reply has no usable components");
+    const parsed = generationPlanSchema.safeParse(normalizeWorkspacePlan(plan));
     if (!parsed.success) throw parsed.error;
-    return normalizeWorkspacePlan(parsed.data);
+    return parsed.data;
   } catch (err) {
     if (options.signal?.aborted) throw new GenerationCancelledError();
     // The plan only picks components; the deterministic plan is a fair
     // stand-in and the workspace itself is still built by the model.
-    console.error("[StudyOS] workspace planning failed; using fallback:", err);
+    reportError(err, { source: "planWorkspace", status: "failed; using fallback plan" });
     return mockWorkspacePlan(prompt, preferences);
   }
 }
@@ -297,6 +378,70 @@ export async function planWorkspace(
 /** Source characters the plan and question calls see (the build sees all of it). */
 const PLAN_SOURCE_CHARS = 12_000;
 const QUESTIONS_SOURCE_CHARS = 8_000;
+
+const DEFAULT_COMPONENT_ICONS: Record<GenerationComponentKind, string> = {
+  dashboard: "🏠",
+  courses: "📚",
+  assignments: "📝",
+  planner: "🗓️",
+  exams: "🎯",
+  readings: "📖",
+  notes: "🗒️",
+  habits: "🔥",
+  grades: "💯",
+  projects: "🧩",
+  resources: "🔗",
+  custom: "✨",
+};
+
+/**
+ * The model's plan, with every field brought within the stated limits:
+ * long text is trimmed, a multi-character icon is cut to one emoji (or the
+ * kind's default), an unknown kind becomes "custom", ids are made unique.
+ * Null only when there is no component to build.
+ */
+export function normalizePlanReply(raw: unknown): WorkspaceGenerationPlan | null {
+  if (!raw || typeof raw !== "object") return null;
+  const reply = raw as Record<string, unknown>;
+  const list = Array.isArray(reply.components) ? reply.components : [];
+  const ids = new Set<string>();
+  const components: GenerationComponent[] = [];
+  for (const item of list) {
+    if (components.length >= PLAN_LIMITS.components) break;
+    if (!item || typeof item !== "object") continue;
+    const c = item as Record<string, unknown>;
+    const label = typeof c.label === "string" ? clipText(c.label, PLAN_LIMITS.label) : "";
+    if (!label) continue;
+    const kind: GenerationComponentKind = (GENERATION_COMPONENT_KINDS as readonly string[]).includes(String(c.kind))
+      ? (c.kind as GenerationComponentKind)
+      : "custom";
+    const baseId =
+      (typeof c.id === "string" ? c.id : label)
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, PLAN_LIMITS.id - 4) || kind;
+    let id = baseId;
+    for (let n = 2; ids.has(id); n += 1) id = `${baseId}-${n}`;
+    ids.add(id);
+    const description = typeof c.description === "string" ? clipText(c.description, PLAN_LIMITS.description) : "";
+    components.push({
+      id,
+      kind,
+      label,
+      icon: oneEmoji(c.icon) || DEFAULT_COMPONENT_ICONS[kind],
+      description: description || label,
+    });
+  }
+  if (components.length === 0) return null;
+  const name = typeof reply.workspaceName === "string" ? clipText(reply.workspaceName, PLAN_LIMITS.workspaceName) : "";
+  const summary = typeof reply.summary === "string" ? clipText(reply.summary, PLAN_LIMITS.summary) : "";
+  return {
+    workspaceName: name || "Study HQ",
+    summary: summary || name || "Study HQ",
+    components,
+  };
+}
 
 function buildWorkspacePlanSystemPrompt(locale: Locale): string {
   return [
@@ -308,12 +453,19 @@ function buildWorkspacePlanSystemPrompt(locale: Locale): string {
     "- Always include dashboard and courses.",
     "- Include assignments and a planner when the student has scheduled coursework or deadlines.",
     "- Add exams, readings, notes, habits, grades, projects, or resources only when their description or answers make them useful.",
+    "- All graded work (homework, quizzes, labs, projects, exams) is ONE list in the final workspace. An exams or projects component is a page that views that list; a grades component is a page with the live grade calculator over that list, never a separate grade table.",
     "- Personalize every component to the student's actual subject — labels, icons and descriptions should fit their field (e.g. 'Lab Notebook' 🧪 for chemistry, 'Case Briefs' ⚖️ for law, 'Problem Sets' ✏️ for math), never generic placeholders.",
     "- Map their answers directly to components: whatever they say they want to track or struggle with should each surface as a relevant page or tracker.",
-    "- Use 4–8 components total. Keep labels short and student-friendly.",
-    "- Every component id must be a unique lowercase kebab-case string.",
+    "- Use 4–8 components total.",
+    "",
+    "LIMITS (stay well inside them):",
+    `- workspaceName: at most ${PLAN_LIMITS.workspaceName - 20} characters. summary: one sentence, at most ${PLAN_LIMITS.summary - 60} characters.`,
+    `- label: 1–3 words, at most ${PLAN_LIMITS.label - 15} characters. description: one short sentence, at most ${PLAN_LIMITS.description - 40} characters.`,
+    "- icon: exactly one emoji.",
+    "- id: a unique lowercase kebab-case string, e.g. \"problem-sets\".",
     `- kind must be one of: ${GENERATION_COMPONENT_KINDS.join(", ")}.`,
-    "- Output only JSON with this exact shape:",
+    "",
+    "Output only JSON with this exact shape, nothing else:",
     '{"workspaceName":"Biology Study HQ","summary":"A focused semester system for labs, exams, and readings.","components":[{"id":"dashboard","kind":"dashboard","label":"Dashboard","icon":"🏠","description":"The semester at a glance."}]}',
     languageDirective(locale),
   ].join("\n");
@@ -483,27 +635,6 @@ function mockWorkspacePlan(
 // Onboarding questions (asked between the prompt and generation)
 // ===========================================================================
 
-const genQuestionsSchema = z.object({
-  questions: z
-    .array(
-      z.object({
-        id: z.string(),
-        question: z.string(),
-        type: z.enum(["single", "multi"]),
-        options: z
-          .array(
-            z.object({
-              id: z.string(),
-              label: z.string(),
-              emoji: z.string().optional(),
-            }),
-          )
-          .min(2),
-      }),
-    )
-    .min(1),
-});
-
 /**
  * Ask the model for a few tailored multiple-choice questions about the student.
  * Always resolves (falls back to a static set) so onboarding never dead-ends.
@@ -544,22 +675,21 @@ export async function planQuestionsDetailed(
       ]
         .filter(Boolean)
         .join("\n\n"),
-      { timeoutMs: SMALL_CALL_TIMEOUT_MS },
+      { timeoutMs: SMALL_CALL_TIMEOUT_MS, effort: "low", smallStep: true, maxTokens: SMALL_CALL_MAX_TOKENS },
     );
-    const parsed = genQuestionsSchema.safeParse(extractJson(raw));
-    if (!parsed.success || parsed.data.questions.length === 0) {
+    // Trimmed and repaired rather than all-or-nothing: one long label must
+    // not throw away questions the student is about to answer.
+    const questions = normalizeGenQuestions(extractJson(raw));
+    if (questions.length === 0) {
+      reportError(new InvalidOutputError("questions reply has no usable question"), {
+        source: "planQuestions",
+        status: "unusable reply; using default questions",
+      });
       return fallback();
     }
-    // Keep it digestible: at most 4 questions, 6 options each.
-    return {
-      questions: parsed.data.questions.slice(0, 4).map((q) => ({
-        ...q,
-        options: q.options.slice(0, 6),
-      })),
-      fromModel: true,
-    };
+    return { questions, fromModel: true };
   } catch (err) {
-    console.error("[StudyOS] question planning failed; using defaults:", err);
+    reportError(err, { source: "planQuestions", status: "failed; using default questions" });
     return fallback();
   }
 }
@@ -573,7 +703,8 @@ function buildQuestionsSystemPrompt(locale: Locale): string {
     "",
     "RULES:",
     "- 3 to 4 questions. Each question has 2–5 options.",
-    "- Option labels are 1–4 words. Give every option a single relevant emoji.",
+    `- A question is one short sentence, at most ${QUESTION_LIMITS.questionChars - 40} characters.`,
+    `- Option labels are 1–4 words, at most ${QUESTION_LIMITS.labelChars - 15} characters. Give every option exactly one relevant emoji.`,
     '- Use type "multi" only when picking several answers makes sense; otherwise "single".',
     "- Invent short unique string ids for each question and option.",
     "- Output ONLY a JSON object, no prose and no markdown fences, of exactly this shape:",
@@ -594,6 +725,44 @@ const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
  * spends on the answer alone), so leave room for a full workspace after thinking.
  */
 const ANTHROPIC_GENERATION_MAX_TOKENS = 16000;
+/**
+ * Budget for the plan and questions calls (thinking included). Their JSON is
+ * well under 1k tokens; at low effort thinking is a few hundred more.
+ */
+const SMALL_CALL_MAX_TOKENS = 6000;
+
+/**
+ * Thinking effort per step. Choosing components and writing questions are
+ * small, well-specified jobs: "low". For the build see BUILD_THINKING.
+ */
+type StepEffort = "low" | "medium" | "high";
+
+/**
+ * How the full build thinks. Measured live on claude-haiku-5-5 (Nov 2026):
+ * at the default (medium) effort it thought ~2.9k tokens, ~13 s before the
+ * first character of the answer (whole build 27–33 s); at low effort with
+ * this prompt it thought more (~4.3k, ~20 s). Without thinking the first
+ * character arrives in under 1.5 s and the build takes 8–12 s, with the same
+ * structure and no validation failures; the facts it could get wrong
+ * (dates, weights, duplicates) are checked deterministically afterwards.
+ * The decisions are made by the plan step and spelled out in the prompt.
+ */
+const BUILD_THINKING: { effort?: StepEffort; noThinking?: boolean } = { noThinking: true };
+
+interface CallOptions {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  /** Claude thinking effort (`output_config.effort`). */
+  effort?: StepEffort;
+  /** A small step (plan, questions): low reasoning effort on OpenRouter too. */
+  smallStep?: boolean;
+  /** Claude: answer without thinking. */
+  noThinking?: boolean;
+  /** Output budget on Claude (thinking included). */
+  maxTokens?: number;
+  /** Streamed answer text, as it arrives (Claude only). */
+  onContent?: (delta: string) => void;
+}
 
 /**
  * Call the model for one generation step and return the assistant's raw text
@@ -604,7 +773,7 @@ async function callOpenRouter(
   model: string,
   systemPrompt: string,
   userContent: string,
-  options: { signal?: AbortSignal; timeoutMs?: number } = {},
+  options: CallOptions = {},
 ): Promise<string> {
   // Every call is cancellable and time-boxed: a hung upstream must end in an
   // honest error, not a request that outlives the route.
@@ -622,8 +791,8 @@ async function callOpenRouter(
         { role: "system", content: systemPrompt },
         { role: "user", content: userContent },
       ],
-      ANTHROPIC_GENERATION_MAX_TOKENS,
-      { signal },
+      options.maxTokens ?? ANTHROPIC_GENERATION_MAX_TOKENS,
+      { signal, effort: options.effort, noThinking: options.noThinking, onContent: options.onContent },
     );
   }
   const res = await fetch(OPENROUTER_URL, {
@@ -641,10 +810,9 @@ async function callOpenRouter(
       // Output budget. GLM returns its reasoning in a separate field, so this
       // is purely the visible answer (a full StudyOS workspace fits here).
       max_tokens: 10000,
-      // Think hard before answering. This is the single biggest lever on
-      // quality — it's what turns generic, templated output into genuinely
-      // tailored questions, component choices, and content for THIS student.
-      reasoning: { effort: "high" },
+      // The build thinks hard (the biggest quality lever on GLM); the small
+      // plan and questions steps ask for low effort.
+      reasoning: { effort: options.smallStep ? "low" : "high" },
       // Lower temperature = focused and deliberate rather than scattershot
       // (directly reduces "random"-feeling questions and filler content).
       temperature: 0.5,
@@ -661,7 +829,7 @@ async function callOpenRouter(
   }
 
   const data = await res.json();
-  recordUsage(data?.usage);
+  recordUsage(data?.usage, model);
   const choice = data?.choices?.[0];
   const content: unknown = choice?.message?.content;
   // A reply cut off at max_tokens is incomplete JSON: say so (and let the
@@ -684,11 +852,25 @@ async function openRouterGenerate(
   sourceText: string,
   clock: StudentClock,
   facts: SyllabusFacts,
+  evidence: InputEvidence,
   options: GenerateWorkspaceOptions,
+  attempt = 1,
 ): Promise<Workspace> {
   const prefBlock = preferences ? `${preferences}\n\n` : "";
   const sourceBlock = sourceTextBlock(sourceText);
   const factsBlock = syllabusFactsBlock(facts);
+  // Said plainly where it applies: models guess dates and weights otherwise.
+  const missingBlock = [
+    evidence.hasDates
+      ? ""
+      : "NO DATES GIVEN: the student's input names no specific date. Leave every due date and exam date null — even for something like \"exams in February\" (say \"February\" in a description instead).",
+    evidence.hasWeights
+      ? ""
+      : "NO WEIGHTS GIVEN: leave every weight % cell null; do not guess how the work is weighted.",
+  ]
+    .filter(Boolean)
+    .map((line) => `${line}\n`)
+    .join("");
   const planBlock = plan
     ? [
         "The workspace architect selected this exact component plan:",
@@ -701,21 +883,74 @@ async function openRouterGenerate(
     options.deadline !== undefined
       ? Math.min(GENERATION_CALL_TIMEOUT_MS, options.deadline - Date.now())
       : GENERATION_CALL_TIMEOUT_MS;
+  // Real progress for the build screen: what the reply contains so far.
+  const { onProgress } = options;
+  let reported = 0;
+  const scanner = onProgress
+    ? createWorkspaceStreamScanner((event) => onProgress({ ...event, chars: scanner!.chars, attempt }))
+    : undefined;
+  const onContent = scanner
+    ? (delta: string) => {
+        scanner.push(delta);
+        if (scanner.chars - reported >= 1_500) {
+          reported = scanner.chars;
+          onProgress!({ type: "text", chars: scanner.chars, attempt });
+        }
+      }
+    : undefined;
+
   // The clock goes last: it changes every minute, and keeping it after the
   // long stable system prompt keeps that prefix cacheable.
   const raw = await callOpenRouter(
     model,
     buildSystemPrompt(locale),
-    `Design a study workspace for this student:\n\n"""${prompt}"""\n\n${prefBlock}${sourceBlock}${factsBlock}${planBlock}${clockPromptBlock(clock, "generate")}\n\nHonor the preferences, the provided course material, and the component plan above. Return ONLY the JSON workspace object — no prose, no markdown fences.`,
-    { signal: options.signal, timeoutMs },
+    `Design a study workspace for this student:\n\n"""${prompt}"""\n\n${prefBlock}${sourceBlock}${factsBlock}${planBlock}${missingBlock}${clockPromptBlock(clock, "generate")}\n\nHonor the preferences, the provided course material, and the component plan above. Return ONLY the JSON workspace object — no prose, no markdown fences.`,
+    { signal: options.signal, timeoutMs, ...BUILD_THINKING, onContent },
   );
 
-  const parsed = safeParseWorkspace(extractJson(raw));
-  if (!parsed.success) {
-    throw new InvalidOutputError(`invalid workspace JSON: ${parsed.error.message}`);
-  }
-  return parsed.data;
+  return parseGeneratedWorkspace(raw);
 }
+
+/**
+ * The workspace in the model's reply. A reply that is valid apart from a
+ * few pieces (an unknown block type, an over-long card, a bad cell) is
+ * repaired piece by piece with the same tolerant loader stored workspaces
+ * use, instead of throwing the whole reply away and paying for a second
+ * call. Only a reply with no workspace in it (not JSON, no pages) is
+ * rejected.
+ */
+export function parseGeneratedWorkspace(raw: string): Workspace {
+  const value = extractJson(raw);
+  const strict = safeParseWorkspace(value);
+  if (strict.success) return strict.data;
+  const repaired = repairWorkspace(value);
+  if (!repaired || repaired.workspace.pages.length === 0) {
+    throw new InvalidOutputError(`invalid workspace JSON: ${strict.error.message.slice(0, 300)}`);
+  }
+  reportError(new Error(`generated workspace repaired: ${repaired.issues.slice(0, 8).join("; ")}`), {
+    source: "generateWorkspace",
+    status: "repaired",
+  });
+  return repaired.workspace;
+}
+
+/**
+ * The example workspace shown to the model: the sample, without what the
+ * model should not imitate — a title heading at the top of every page, and a
+ * flashcard deck written without any course material behind it.
+ */
+const PROMPT_EXAMPLE: Workspace = (() => {
+  const example = structuredClone(sampleWorkspace);
+  example.pages = example.pages
+    .filter((page) => !page.blocks.some((block) => block.type === "flashcards"))
+    .map((page) => {
+      const first = page.blocks[0];
+      const repeatsTitle =
+        first?.type === "heading" && first.text.trim().toLowerCase() === page.title.trim().toLowerCase();
+      return repeatsTitle ? { ...page, blocks: page.blocks.slice(1) } : page;
+    });
+  return example;
+})();
 
 function buildSystemPrompt(locale: Locale): string {
   return [
@@ -731,19 +966,38 @@ function buildSystemPrompt(locale: Locale): string {
     "MODELING RULES:",
     '- Every id is a unique short string you invent (e.g. "db-courses", "as-1", "c-name").',
     "- A row's `cells` is keyed by property id. For select/status cells the value is the chosen option's id (NOT its label); for multi_select/relation it is an array of ids; dates are ISO strings like \"2026-09-14\"; checkboxes are booleans; numbers are numbers.",
+    "- Every database's first property is a text property holding the row's name (e.g. \"Assignment\", \"Course\").",
     "- Pages display databases via `database_view` blocks referencing a database id + one of its view ids. Define each database once in `databases`; reference its views from pages. Never duplicate data.",
-    "- Always include a home page (set `homePageId` to it) that acts as a dashboard: a welcome callout, then `database_view` blocks for the key trackers.",
-    "- Tailor everything to the student's field, explicit courses, answers, and supplied component plan. Generate realistic starter data for every selected component: courses, schedules, assignments, exams, readings, grades, projects, habits, or notes as applicable.",
-    "- Do not claim invented facts are confirmed. Use TBD for unknown instructors, rooms, links, or exact dates; use sensible near-future starter dates only where a useful editable example is needed.",
-    "- Graded work lives in one assignments/assessments database with a number property for the grade weight (percent of the final grade, e.g. \"Weight %\") and a date property for the due date. Every graded item from the student's material (homework, quizzes, labs, projects, midterms, finals) gets a row with its real weight and date; never drop or change a stated weight.",
+    "- Always include a home page (set `homePageId` to it) that acts as a dashboard: a short welcome callout, then `database_view` blocks for the key trackers. The app adds a \"This week\" list (graded work due in the next 7 days, not done) right under the callout by itself, so do not build your own upcoming or due-soon view, and do not title any other section \"This week\".",
     "- The component plan is authoritative. Build every selected component and avoid unrelated trackers. A component may be represented by a page, database, dashboard section, or a combination.",
-    "- Give databases useful views: a table, plus a board grouped by a status property and/or a calendar on a date property where it makes sense.",
-    "- Use emoji icons for the workspace, pages, and databases.",
+    "- Tailor everything to the student's field, explicit courses, answers, and the component plan.",
+    "- Give databases useful views: a table, plus a board grouped by a status property and/or a calendar on a date property where it makes sense. Views may carry filters and sorts (see `filters` / `sorts` in the shape), e.g. an exams page showing the graded-work table filtered to Type = Exam.",
+    "",
+    "TRUTHFULNESS (the student will rely on this workspace):",
+    "- Courses, instructors, rooms, weights, topics and dates come only from what the student wrote or their material. Use \"TBD\" for an unknown instructor, room or link.",
+    "- Never invent a due date or an exam date. A row gets a date only when the student or their material gives it (resolve relative dates like \"next Friday\" from the current date given with the request); otherwise its date stays null and the student fills it in. Invented deadlines would show up in their calendar and daily plan as real ones.",
+    "- Starter rows: one row for every item the student or their material names. Where they named none, add at most two clearly generic example rows per course (e.g. \"Problem Set 1\"), without a date.",
+    "- Every row in a database with a status property has a status: work their material says is done, handed in or graded gets the done option; everything else the first (not started) option.",
+    "",
+    "GRADED WORK AND GRADES:",
+    "- All graded work — homework, problem sets, quizzes, labs, papers, projects, midterms AND exams — lives in ONE graded-work database, with a select property for the type (Homework, Quiz, Exam, …), a number property for the weight (percent of the final grade, e.g. \"Weight %\") and a date property for the due date. Never put exams, projects or grades in a separate database; a planned exams or projects component is a page that shows a view of this database.",
+    "- Every graded item from the student's material gets exactly one row with its real weight and date; never drop or change a stated weight, and never add a second row for the same item.",
+    "- That database also has a number property for the score the student received (e.g. \"Score\"; a percentage, or points when there is also an \"Out of\" number property). Leave it null for work not graded yet; never invent scores.",
+    "- Grades are shown with a `grades` block (a live calculator: current grade per course, what is needed on the rest for a target, what-if) on the dashboard or on a grades page — never a separate grade or \"Grade Tracker\" table. Point its `databaseId` at the graded-work database and its `columns` at that database's property ids. Pick `scale` from where the student studies: \"us_letter\" or \"us_gpa\" (USA), \"uk_degree\" (UK), \"de_grade\" (Germany), otherwise \"percent\".",
+    "",
+    "STUDY MATERIAL:",
+    "- Add a small starter `flashcards` deck (5–8 cards) or a short `quiz` (3–5 questions) only when the student's description or material contains real course content to base it on: listed topics, definitions, readings, lecture notes. Build every card and question from that content, put it on the page of its course, and title it after the topic. Never present invented facts as the student's course material; with no such content, add no deck and no quiz.",
+    "",
+    "WRITING:",
+    "- Dates in text (callouts, paragraphs, to-dos, cards, questions) are written the natural way in the student's language — \"December 3\", \"3. Dezember\", \"3 de diciembre\", \"12月3日\" — never as 2026-12-03. Date cells stay ISO.",
+    "- A page's title is already shown above its blocks: never start a page with a heading that repeats the title.",
+    "- Keep text short: a callout is one or two sentences; a paragraph at most three.",
+    "- Every page and database gets one fitting emoji icon (🧪 for a lab notebook, ⚖️ for case briefs, 📐 for a math course); two pages never share an icon.",
     "- Valid `color` values: zinc, red, rose, orange, amber, yellow, lime, green, emerald, teal, cyan, sky, blue, indigo, violet, purple, fuchsia, pink.",
     "",
-    "Here is a complete, high-quality example for a CS student. Match this structure and quality, but adapt all content to the new student. Its dates are placeholders from an old term — never copy them; derive every date from the current date given with the request:",
+    "Here is a complete, high-quality example for a CS student who pasted their syllabus. Match this structure and quality, but adapt all content to the new student. Its dates are placeholders from an old term — never copy them; derive every date from the student's own material and the current date given with the request:",
     "",
-    JSON.stringify(sampleWorkspace),
+    JSON.stringify(PROMPT_EXAMPLE),
     languageDirective(locale),
   ].join("\n");
 }
@@ -759,7 +1013,9 @@ Database = {
     options?: { id: string; label: string; color?: string }[]; relationDatabaseId?: string }[];
   rows: { id: string; cells: { [propertyId: string]: string|number|boolean|string[]|null } }[];
   views: { id: string; name: string; type: "table"|"board"|"calendar"|"list"|"gallery";
-    groupByPropertyId?: string; datePropertyId?: string; visiblePropertyIds?: string[] }[];
+    groupByPropertyId?: string; datePropertyId?: string; visiblePropertyIds?: string[];
+    sorts?: { propertyId: string; direction: "asc"|"desc" }[];
+    filters?: { propertyId: string; operator: string; value?: string|number|boolean|string[] }[]; filterMatch?: "all"|"any" }[];  // e.g. a select filter {"propertyId":"a-type","operator":"is","value":"ty-exam"}
 }
 Page = { id: string; title: string; icon?: string; blocks: Block[] }
 Block = one of:
@@ -772,7 +1028,9 @@ Block = one of:
   { id; type:"callout"; text; emoji? }
   { id; type:"divider" }
   { id; type:"database_view"; databaseId; viewId }
-  { id; type:"flashcards"; title?; cards: { id; front; back }[] }  // spaced-repetition deck; omit scheduling fields on new cards`;
+  { id; type:"flashcards"; title?; cards: { id; front; back }[] }  // spaced-repetition deck; omit scheduling fields on new cards
+  { id; type:"quiz"; title?; questions: { id; kind:"mcq"|"true_false"|"short"; prompt; choices?: string[]; answerIndex?: number; answerBool?: boolean; answerText?: string; explanation?; topic? }[] }  // practice quiz/exam; mcq: 2-6 choices + 0-based answerIndex; true_false: answerBool; short: model answerText; Markdown + $math$ allowed; never write stats or attempts (keep existing ones)
+  { id; type:"grades"; title?; databaseId; columns?: { course?; score?; maxScore?; weight?; due? }; scale?: "percent"|"us_letter"|"us_gpa"|"uk_degree"|"de_grade"; defaultTarget?: number; targets?: { [courseKey]: number } }  // live grade calculator over the graded-work database; columns are property ids of that database (course: select/relation/text, score/maxScore/weight: number, due: date), omitted ones are detected; targets are percentages keyed by course option id; the agent can add or reconfigure one with {"op":"set_grades_block","pageId","block","afterBlockId"?}`;
 
 /**
  * Pull the JSON object out of the model's reply, tolerating fences or stray
@@ -1093,6 +1351,7 @@ async function mockGenerate(
       { id: "a-status", name: "Status", type: "status", options: statusOptions },
       { id: "a-due", name: "Due", type: "date" },
       { id: "a-weight", name: "Weight %", type: "number" },
+      { id: "a-score", name: "Score", type: "number" },
     ],
     views: [
       { id: "v-assign-table", name: "All", type: "table" },
@@ -1181,31 +1440,6 @@ async function mockGenerate(
         },
       },
     ],
-  };
-
-  const gradesDb: Database = {
-    id: "db-grades",
-    name: "Grade Tracker",
-    icon: "💯",
-    description: "Editable scores and weights for each course.",
-    properties: [
-      { id: "g-item", name: "Assessment", type: "text" },
-      { id: "g-course", name: "Course", type: "select", options: courseOptions },
-      { id: "g-score", name: "Score", type: "number" },
-      { id: "g-out-of", name: "Out of", type: "number" },
-      { id: "g-weight", name: "Weight %", type: "number" },
-    ],
-    views: [{ id: "v-grades-table", name: "All grades", type: "table" }],
-    rows: courses.slice(0, 4).map((course, index) => ({
-      id: uid("grade"),
-      cells: {
-        "g-item": `Assessment ${index + 1}`,
-        "g-course": course.optId,
-        "g-score": null,
-        "g-out-of": 100,
-        "g-weight": 10 + index * 5,
-      },
-    })),
   };
 
   // ----- Pages -----
@@ -1398,25 +1632,26 @@ async function mockGenerate(
           id: "pg-callout",
           type: "callout",
           emoji: "✎",
-          text: "Replace the starter assessments with your syllabus weights and actual results.",
+          text: "Check the weights against your syllabus, then type each score as it comes back.",
         },
         {
-          id: "pg-table",
-          type: "database_view",
-          databaseId: "db-grades",
-          viewId: "v-grades-table",
+          id: "pg-grades",
+          type: "grades",
+          title: "Grades",
+          databaseId: "db-assignments",
+          columns: { course: "a-course", score: "a-score", weight: "a-weight", due: "a-due" },
         },
       ],
     });
   }
 
   const databases = [coursesDb];
-  if (has("assignments") || has("planner") || has("exams") || has("projects")) {
+  // Grades are scores on the assignments themselves: one list, never a copy.
+  if (has("assignments") || has("planner") || has("exams") || has("projects") || has("grades")) {
     databases.push(assignmentsDb);
   }
   if (has("readings")) databases.push(readingsDb);
   if (has("habits")) databases.push(habitsDb);
-  if (has("grades")) databases.push(gradesDb);
 
   return {
     id: "ws-generated",

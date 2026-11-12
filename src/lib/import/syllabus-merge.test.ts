@@ -134,3 +134,246 @@ describe("applySyllabusFacts", () => {
     expect(applySyllabusFacts(ws, { assessments: [] }, labels)).toBe(ws);
   });
 });
+
+/** One course, a status with a green "Done", and whatever rows a case needs. */
+function econWorkspace(rows: Array<{ title: string; due?: string | null; weight?: number | null; status?: string }>): Workspace {
+  return {
+    id: "ws",
+    name: "Study HQ",
+    homePageId: "home",
+    pages: [{ id: "home", title: "Home", blocks: [] }],
+    databases: [
+      {
+        id: "db-assignments",
+        name: "Assignments",
+        properties: [
+          { id: "a-name", name: "Assignment", type: "text" },
+          { id: "a-course", name: "Course", type: "select", options: [{ id: "co-econ", label: "ECON 201" }] },
+          {
+            id: "a-status",
+            name: "Status",
+            type: "status",
+            options: [
+              { id: "st-todo", label: "Not started", color: "zinc" },
+              { id: "st-doing", label: "In progress", color: "amber" },
+              { id: "st-done", label: "Done", color: "green" },
+            ],
+          },
+          { id: "a-due", name: "Due", type: "date" },
+          { id: "a-weight", name: "Weight %", type: "number" },
+        ],
+        rows: rows.map((row, index) => ({
+          id: `r${index + 1}`,
+          cells: {
+            "a-name": row.title,
+            "a-course": "co-econ",
+            "a-status": row.status ?? "st-todo",
+            "a-due": row.due ?? null,
+            "a-weight": row.weight ?? null,
+          },
+        })),
+        views: [{ id: "v1", name: "All", type: "table" }],
+      },
+    ],
+  };
+}
+
+describe("applySyllabusFacts never duplicates what the model already has", () => {
+  const COURSE = "ECON 201 Intermediate Microeconomics";
+  type Case = {
+    name: string;
+    rows: Parameters<typeof econWorkspace>[0];
+    fact: { name: string; weight?: number; date?: string; done?: boolean };
+    /** "enrich": rows unchanged in number, `row` gets the values; "add": one new row; "skip": nothing changes. */
+    outcome: "enrich" | "add" | "skip";
+    row?: number;
+  };
+  const cases: Case[] = [
+    {
+      name: "the QA case: the model's own title with a note",
+      rows: [{ title: "Problem Set 4 (graded)", due: "2026-11-03", status: "st-done" }],
+      fact: { name: "Problem Set 4", date: "2026-11-03", done: true },
+      outcome: "enrich",
+      row: 0,
+    },
+    {
+      name: "the QA case with the old broken extracted title",
+      rows: [{ title: "Problem Set 4 (graded)", due: "2026-11-03", status: "st-done" }],
+      fact: { name: "Problem Set 4: due Tuesday, (already graded)", date: "2026-11-03" },
+      outcome: "enrich",
+      row: 0,
+    },
+    {
+      name: "an abbreviation with a topic",
+      rows: [{ title: "PS 4 – Elasticity" }, { title: "PS 5 – Welfare" }],
+      fact: { name: "Problem Set 4", weight: 5, date: "2026-11-03" },
+      outcome: "enrich",
+      row: 0,
+    },
+    {
+      name: "renamed into the student's language, same day",
+      rows: [{ title: "Examen parcial", due: "2026-10-15" }],
+      fact: { name: "Midterm exam", weight: 25, date: "2026-10-15" },
+      outcome: "enrich",
+      row: 0,
+    },
+    {
+      name: "a category weight is not put on one numbered item",
+      rows: [{ title: "Problem Set 4" }, { title: "Problem Set 5" }],
+      fact: { name: "Problem sets", weight: 20 },
+      outcome: "skip",
+    },
+    {
+      name: "a plural category next to one numbered quiz",
+      rows: [{ title: "Quiz 7", due: "2026-11-20" }],
+      fact: { name: "Weekly quizzes", weight: 15 },
+      outcome: "skip",
+    },
+    {
+      name: "two rows that both fit equally well",
+      rows: [{ title: "Midterm" }, { title: "Midterm exam" }],
+      fact: { name: "Midterm", weight: 25 },
+      outcome: "skip",
+    },
+    {
+      name: "the same name far apart in time",
+      rows: [{ title: "Quiz", due: "2026-12-20" }],
+      fact: { name: "Quiz", date: "2026-11-01" },
+      outcome: "skip",
+    },
+    {
+      name: "a different number is a different item",
+      rows: [{ title: "Midterm 1", due: "2026-10-08" }],
+      fact: { name: "Midterm 2", weight: 15, date: "2026-11-19" },
+      outcome: "add",
+    },
+    {
+      name: "an exam is not the final project",
+      rows: [{ title: "Final project" }],
+      fact: { name: "Final exam", weight: 35, date: "2026-12-16" },
+      outcome: "add",
+    },
+    {
+      name: "nothing like it at all",
+      rows: [{ title: "Problem Set 4" }],
+      fact: { name: "Participation", weight: 10 },
+      outcome: "add",
+    },
+  ];
+
+  it.each(cases)("$name", ({ rows, fact, outcome, row }) => {
+    const before = econWorkspace(rows);
+    const merged = applySyllabusFacts(before, { assessments: [{ course: COURSE, ...fact }] }, labels);
+    const db = merged.databases[0];
+    if (outcome === "skip") {
+      expect(merged.databases[0]).toEqual(before.databases[0]);
+      return;
+    }
+    if (outcome === "enrich") {
+      expect(db.rows).toHaveLength(rows.length);
+      const cells = db.rows[row!].cells;
+      if (fact.weight !== undefined && rows[row!].weight == null) expect(cells["a-weight"]).toBe(fact.weight);
+      if (fact.date && rows[row!].due == null) expect(cells["a-due"]).toBe(fact.date);
+      // The model's title and status stay.
+      expect(cells["a-name"]).toBe(rows[row!].title);
+      expect(cells["a-status"]).toBe(rows[row!].status ?? "st-todo");
+      return;
+    }
+    expect(db.rows).toHaveLength(rows.length + 1);
+    expect(db.rows.at(-1)!.cells).toMatchObject({
+      "a-name": fact.name,
+      "a-course": "co-econ",
+      "a-status": "st-todo",
+      ...(fact.weight !== undefined ? { "a-weight": fact.weight } : {}),
+      ...(fact.date ? { "a-due": fact.date } : {}),
+    });
+  });
+
+  it("an item the syllabus says is already graded is added as done", () => {
+    const merged = applySyllabusFacts(
+      econWorkspace([{ title: "Problem Set 5" }]),
+      { assessments: [{ course: COURSE, name: "Problem Set 4", date: "2026-11-03", done: true }] },
+      labels,
+    );
+    expect(merged.databases[0].rows.at(-1)!.cells).toMatchObject({
+      "a-name": "Problem Set 4",
+      "a-status": "st-done",
+    });
+  });
+
+  it("a live model's titles (brackets, renames, category rows) get no duplicates", () => {
+    // Row titles exactly as claude-haiku-5-5 wrote them for the ECON 201 syllabus.
+    const model = econWorkspace([
+      { title: "Problem Set 4", due: "2026-11-03", status: "st-done" },
+      { title: "Problem Set 5", due: "2026-11-17" },
+      { title: "Problem Set 6", due: "2026-12-01" },
+      { title: "Problem sets (overall)", weight: 20, status: "st-doing" },
+      { title: "Midterm exam", due: "2026-10-15", weight: 25 },
+      { title: "Final exam", due: "2026-12-16", weight: 35 },
+      { title: "Participation", weight: 10, status: "st-doing" },
+      { title: "Group project proposal", due: "2026-11-24" },
+      { title: "Group project (final report)", due: "2026-12-08", weight: 10 },
+    ]);
+    const merged = applySyllabusFacts(
+      model,
+      {
+        assessments: [
+          { course: COURSE, name: "Problem sets", weight: 20 },
+          { course: COURSE, name: "Midterm exam", weight: 25, date: "2026-10-15" },
+          { course: COURSE, name: "Final exam", weight: 35, date: "2026-12-16" },
+          { course: COURSE, name: "Participation", weight: 10 },
+          { course: COURSE, name: "Group project", weight: 10 },
+          { course: COURSE, name: "Problem Set 4", date: "2026-11-03", note: "already graded", done: true },
+          { course: COURSE, name: "Problem Set 5", date: "2026-11-17" },
+          { course: COURSE, name: "Group project proposal", date: "2026-11-24" },
+          { course: COURSE, name: "final report", date: "2026-12-08" },
+          { course: COURSE, name: "Problem Set 6", date: "2026-12-01" },
+        ],
+      },
+      labels,
+    );
+    expect(merged.databases[0].rows).toHaveLength(9);
+  });
+
+  it("merges a whole extracted syllabus into a model workspace without a single duplicate", () => {
+    const model = econWorkspace([
+      { title: "Problem sets (category, 20%)", weight: 20, status: "st-doing" },
+      { title: "Problem Set 4 (graded)", due: "2026-11-03", status: "st-done" },
+      { title: "Problem Set 5", due: "2026-11-17" },
+      { title: "Midterm", due: "2026-10-15", status: "st-done" },
+      { title: "Final Exam — ECON 201", due: "2026-12-16" },
+    ]);
+    const merged = applySyllabusFacts(
+      model,
+      {
+        assessments: [
+          { course: COURSE, name: "Problem sets", weight: 20 },
+          { course: COURSE, name: "Midterm exam", weight: 25, date: "2026-10-15" },
+          { course: COURSE, name: "Final exam", weight: 35, date: "2026-12-16" },
+          { course: COURSE, name: "Problem Set 4", date: "2026-11-03", done: true },
+          { course: COURSE, name: "Problem Set 5", date: "2026-11-17" },
+          { course: COURSE, name: "Participation", weight: 10 },
+        ],
+      },
+      labels,
+    );
+    const titles = merged.databases[0].rows.map((r) => r.cells["a-name"]);
+    expect(titles).toEqual([
+      "Problem sets (category, 20%)",
+      "Problem Set 4 (graded)",
+      "Problem Set 5",
+      "Midterm",
+      "Final Exam — ECON 201",
+      "Participation",
+    ]);
+    const weights = merged.databases[0].rows.map((r) => r.cells["a-weight"]);
+    expect(weights).toEqual([20, null, null, 25, 35, 10]);
+  });
+});
+
+describe("applySyllabusFacts (unchanged workspace)", () => {
+  it("returns the workspace untouched when there are no facts", () => {
+    const ws = workspaceWithAssignments();
+    expect(applySyllabusFacts(ws, { assessments: [] }, labels)).toBe(ws);
+  });
+});

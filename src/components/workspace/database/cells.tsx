@@ -8,6 +8,7 @@ import { titleProperty } from "@/lib/workspace/helpers";
 import { dueInfo, relativeUnit, safeHttpUrl } from "@/lib/workspace/view-logic";
 import { useI18n } from "@/lib/i18n/client";
 import { useWorkspace } from "../WorkspaceContext";
+import { DraftInput } from "../editor/DraftInput";
 import { formatDay, formatNumber, rowTitle, useToday } from "./shared";
 
 /**
@@ -45,7 +46,7 @@ export function ChipMultiSelect({
             key={id}
             className={`inline-flex max-w-full items-center gap-0.5 rounded-full py-0.5 ps-2 text-xs font-medium ring-1 ring-inset ${pillClasses(item.color)}`}
           >
-            <span className="truncate">{item.label}</span>
+            <span dir="auto" className="truncate">{item.label}</span>
             <button
               type="button"
               onClick={() => toggle(id)}
@@ -78,7 +79,7 @@ export function ChipMultiSelect({
               className={`inline-flex min-h-7 max-w-full items-center gap-1 rounded-full px-2 py-0.5 text-xs ring-1 ring-inset transition hover:brightness-110 ${pillClasses(item.color)}`}
             >
               <span aria-hidden>+</span>
-              <span className="truncate">{item.label}</span>
+              <span dir="auto" className="truncate">{item.label}</span>
             </button>
           ))}
         </div>
@@ -120,6 +121,7 @@ export function SingleSelectCell({
       >
         {current ? (
           <span
+            dir="auto"
             className={`inline-block max-w-full truncate rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${pillClasses(current.color)}`}
           >
             {current.label}
@@ -138,7 +140,7 @@ export function SingleSelectCell({
               aria-pressed={o.id === value}
               className={`inline-flex min-h-7 max-w-full items-center rounded-full px-2 py-0.5 text-xs ring-1 ring-inset transition hover:brightness-110 ${pillClasses(o.color)} ${o.id === value ? "outline outline-1 outline-ink/40" : ""}`}
             >
-              <span className="truncate">{o.label}</span>
+              <span dir="auto" className="truncate">{o.label}</span>
             </button>
           ))}
           {value !== null && (
@@ -195,12 +197,10 @@ export function UrlCell({
   label,
   value,
   onCommit,
-  inputKey,
 }: {
   label: string;
   value: string;
   onCommit: (value: string | null) => void;
-  inputKey: string;
 }) {
   const { dict } = useI18n();
   const [editing, setEditing] = useState(false);
@@ -208,25 +208,22 @@ export function UrlCell({
 
   if (editing || !value) {
     return (
-      <input
-        key={inputKey}
+      <DraftInput
         type="url"
         inputMode="url"
         aria-label={label}
         autoFocus={editing}
         placeholder={dict.dbViews.linkPlaceholder}
-        defaultValue={value}
-        onBlur={(e) => {
-          const next = e.target.value.trim();
+        value={value}
+        commitOnPause={false}
+        revertOnEscape
+        onCommit={(text) => {
+          const next = text.trim();
           if (next !== value) onCommit(next || null);
-          setEditing(false);
         }}
+        onBlur={() => setEditing(false)}
         onKeyDown={(e) => {
           if (e.key === "Enter") e.currentTarget.blur();
-          if (e.key === "Escape") {
-            e.currentTarget.value = value;
-            e.currentTarget.blur();
-          }
         }}
         className="w-full min-w-0 rounded bg-transparent px-1 py-0.5 text-ink outline-none placeholder:text-ink-faint focus:bg-card focus:ring-1 focus:ring-ink/20"
       />
@@ -243,12 +240,12 @@ export function UrlCell({
           title={href}
           className="inline-flex min-w-0 items-center gap-1 truncate px-1 py-0.5 text-lime underline-offset-2 hover:underline"
         >
-          <span className="truncate">{displayUrl(value)}</span>
+          <span dir="ltr" className="truncate">{displayUrl(value)}</span>
           <ExternalLink className="h-3 w-3 shrink-0" aria-hidden />
           <span className="sr-only">({dict.dbViews.openLink})</span>
         </a>
       ) : (
-        <span title={dict.dbViews.unsafeLink} className="min-w-0 truncate px-1 py-0.5 text-ink-soft">
+        <span dir="auto" title={dict.dbViews.unsafeLink} className="min-w-0 truncate px-1 py-0.5 text-ink-soft">
           {value}
         </span>
       )}
@@ -314,7 +311,7 @@ export function EditableCell({
   /** Accessible name; defaults to the property name. */
   label?: string;
 }) {
-  const { workspace, update, rev } = useWorkspace();
+  const { workspace, update } = useWorkspace();
   const { dict } = useI18n();
   const name = label ?? prop.name;
 
@@ -324,9 +321,11 @@ export function EditableCell({
       if (row) row.cells[prop.id] = v;
     });
 
-  // Remount uncontrolled cells onto AI-supplied values after an AI edit; manual
-  // typing leaves `rev` unchanged, so the caret stays put. (See WorkspaceCtx.rev.)
-  const k = `${rowId}:${prop.id}:${rev}`;
+  // Typed cells keep what is being typed in a draft registered with the sync
+  // engine (written before the tab hides, before undo and before a merge) and
+  // follow outside changes when nothing is being typed, so they never remount
+  // and never lose a half-typed value.
+  const k = `${rowId}:${prop.id}`;
 
   switch (prop.type) {
     case "checkbox":
@@ -343,14 +342,15 @@ export function EditableCell({
       );
     case "number":
       return (
-        <input
+        <DraftInput
           key={k}
           type="number"
           inputMode="decimal"
           aria-label={name}
-          defaultValue={value === null || value === undefined ? "" : String(value)}
-          onBlur={(e) => {
-            const next = e.target.value === "" ? null : Number(e.target.value);
+          value={value === null || value === undefined ? "" : String(value)}
+          commitOnPause={false}
+          onCommit={(text) => {
+            const next = text === "" ? null : Number(text);
             if (next !== value && !(next !== null && Number.isNaN(next))) setCell(next);
           }}
           className={`${BASE_INPUT} tabular-nums text-ink`}
@@ -359,13 +359,14 @@ export function EditableCell({
     case "date":
       return (
         <div className="flex min-w-0 flex-wrap items-center gap-1">
-          <input
+          <DraftInput
             key={k}
             type="date"
             aria-label={name}
-            defaultValue={typeof value === "string" ? value : ""}
-            onBlur={(e) => {
-              const next = e.target.value || null;
+            value={typeof value === "string" ? value : ""}
+            commitOnPause={false}
+            onCommit={(text) => {
+              const next = text || null;
               if (next !== value) setCell(next);
             }}
             className={`${BASE_INPUT} w-auto text-ink-soft [color-scheme:dark] [.light_&]:[color-scheme:light]`}
@@ -376,10 +377,10 @@ export function EditableCell({
     case "url":
       return (
         <UrlCell
+          key={k}
           label={name}
           value={typeof value === "string" ? value : ""}
           onCommit={setCell}
-          inputKey={k}
         />
       );
     case "select":
@@ -423,12 +424,13 @@ export function EditableCell({
     case "text":
     default:
       return (
-        <input
+        <DraftInput
           key={k}
           aria-label={name}
-          defaultValue={typeof value === "string" ? value : value == null ? "" : String(value)}
-          onBlur={(e) => {
-            if (e.target.value !== (value ?? "")) setCell(e.target.value);
+          dir="auto"
+          value={typeof value === "string" ? value : value == null ? "" : String(value)}
+          onCommit={(text) => {
+            if (text !== (value ?? "")) setCell(text);
           }}
           className={`${BASE_INPUT} text-ink`}
         />
@@ -460,6 +462,7 @@ export function CellDisplay({
   const pill = (key: string, text: string, color?: string) => (
     <span
       key={key}
+      dir="auto"
       className={`inline-block max-w-full truncate rounded-full px-2 py-px text-[11px] font-medium ring-1 ring-inset ${pillClasses(color)}`}
     >
       {text}
@@ -519,14 +522,14 @@ export function CellDisplay({
           rel="noopener noreferrer nofollow"
           className="inline-flex min-w-0 max-w-full items-center gap-1 text-xs text-lime underline-offset-2 hover:underline"
         >
-          <span className="truncate">{text}</span>
+          <span dir="ltr" className="truncate">{text}</span>
           <ExternalLink className="h-3 w-3 shrink-0" aria-hidden />
         </a>
       ) : (
-        <span className="truncate text-xs text-ink-soft">{text}</span>
+        <span dir="ltr" className="truncate text-xs text-ink-soft">{text}</span>
       );
     }
     default:
-      return <span className="line-clamp-2 text-xs text-ink-soft">{String(value)}</span>;
+      return <span dir="auto" className="line-clamp-2 text-xs text-ink-soft">{String(value)}</span>;
   }
 }

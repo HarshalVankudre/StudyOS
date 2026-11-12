@@ -2,9 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const m = vi.hoisted(() => ({
   calls: [] as string[],
-  cancelAll: vi.fn(),
+  stopBilling: vi.fn(),
   erase: vi.fn(),
   tombstone: vi.fn(),
+  untombstone: vi.fn(),
   deleteUser: vi.fn(),
 }));
 
@@ -18,8 +19,9 @@ vi.mock("@clerk/nextjs/server", () => ({
   clerkClient: async () => ({ users: { deleteUser: m.deleteUser } }),
 }));
 vi.mock("@/lib/billing", () => ({
-  cancelAllBillingForUser: m.cancelAll,
   markAccountDeleted: m.tombstone,
+  stopBillingForDeletedAccount: m.stopBilling,
+  unmarkAccountDeleted: m.untombstone,
   isPro: vi.fn(),
 }));
 vi.mock("@/lib/credits", () => ({ getCreditBalance: vi.fn() }));
@@ -37,19 +39,29 @@ beforeEach(() => {
       });
     }
   }
+  m.stopBilling.mockImplementation(async () => {
+    m.calls.push("stopBilling");
+    return true;
+  });
 });
 
 describe("deleteAccountAction billing", () => {
-  it("stops all billing, erases, then tombstones", async () => {
+  it("tombstones first, then stops all billing, then erases", async () => {
     await expect(deleteAccountAction()).rejects.toMatchObject({ url: "/" });
-    expect(m.cancelAll).toHaveBeenCalledWith("user_1");
-    expect(m.calls).toEqual(["cancelAll", "erase", "tombstone", "deleteUser"]);
+    expect(m.stopBilling).toHaveBeenCalledWith("user_1");
+    // Nothing can be granted or recreated once the tombstone exists, so it
+    // must come before the erase (finding 7).
+    expect(m.calls).toEqual(["tombstone", "stopBilling", "erase", "deleteUser"]);
   });
 
-  it("aborts without erasing anything when billing cannot be stopped", async () => {
-    m.cancelAll.mockRejectedValue(new Error("stripe down"));
+  it("when billing cannot be stopped: nothing is erased, the tombstone is withdrawn, the user is told to retry", async () => {
+    m.stopBilling.mockImplementation(async () => {
+      m.calls.push("stopBilling");
+      return false;
+    });
     expect(await deleteAccountAction()).toEqual({ error: "billing_cancel_failed" });
     expect(m.erase).not.toHaveBeenCalled();
-    expect(m.tombstone).not.toHaveBeenCalled();
+    expect(m.deleteUser).not.toHaveBeenCalled();
+    expect(m.calls).toEqual(["tombstone", "stopBilling", "untombstone"]);
   });
 });

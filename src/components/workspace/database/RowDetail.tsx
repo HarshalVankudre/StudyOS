@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Trash2, X } from "lucide-react";
 import {
   Dialog,
@@ -11,7 +12,7 @@ import type { Database, DatabaseView as DBView } from "@/lib/workspace/types";
 import { titleProperty } from "@/lib/workspace/helpers";
 import { completionField, isRowComplete } from "@/lib/workspace/view-logic";
 import { useI18n } from "@/lib/i18n/client";
-import { useWorkspace } from "../WorkspaceContext";
+import { DraftInput } from "../editor/DraftInput";
 import type { DbActions } from "./actions";
 import { EditableCell } from "./cells";
 import { orderedProps, rowTitle } from "./shared";
@@ -33,8 +34,14 @@ export function RowDetail({
   actions: DbActions;
   onClose: () => void;
 }) {
-  const { rev } = useWorkspace();
   const { dict, t } = useI18n();
+  // The database the sheet was opened from: when its row is deleted here, the
+  // row's open button is gone, so focus returns to the view's tab instead.
+  const [section] = useState(() =>
+    typeof document === "undefined" ? null : (document.activeElement?.closest("section") ?? null),
+  );
+  const returnFocus = () =>
+    section?.isConnected ? section.querySelector<HTMLElement>('[aria-pressed="true"], input[type="search"]') : null;
   const row = db.rows.find((r) => r.id === rowId);
   // A just-added row appears on the next render; a removed one closes the sheet.
   if (!row) return null;
@@ -50,6 +57,7 @@ export function RowDetail({
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent
         showCloseButton={false}
+        returnFocus={returnFocus}
         className="top-auto bottom-0 left-0 max-h-[90dvh] w-full max-w-none translate-x-0 translate-y-0 gap-0 overflow-y-auto rounded-none rounded-t-xl border-line bg-card p-0 sm:top-[50%] sm:bottom-auto sm:left-[50%] sm:max-h-[85vh] sm:max-w-lg sm:translate-x-[-50%] sm:translate-y-[-50%] sm:rounded-lg"
       >
         <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-line bg-card px-4 py-2">
@@ -68,11 +76,11 @@ export function RowDetail({
         <DialogDescription className="sr-only">{name || dict.db.untitled}</DialogDescription>
 
         <div className="px-4 pt-3 pb-4">
-          <input
-            key={`${row.id}:${rev}`}
-            defaultValue={name}
-            onBlur={(e) => {
-              if (e.target.value !== name) actions.setCell(row.id, title.id, e.target.value);
+          <DraftInput
+            value={name}
+            dir="auto"
+            onCommit={(text) => {
+              if (text !== name) actions.setCell(row.id, title.id, text);
             }}
             onKeyDown={(e) => {
               if (e.key === "Enter") e.currentTarget.blur();
@@ -86,7 +94,7 @@ export function RowDetail({
           <dl className="mt-3 space-y-2.5">
             {fields.map((p) => (
               <div key={p.id} className="grid gap-1 sm:grid-cols-[8rem_minmax(0,1fr)] sm:items-start sm:gap-3">
-                <dt className="truncate pt-1 text-xs font-medium text-ink-faint">{p.name}</dt>
+                <dt className="truncate pt-1 text-xs font-medium text-ink-faint"><bdi>{p.name}</bdi></dt>
                 <dd className="min-w-0 text-sm">
                   <EditableCell databaseId={db.id} rowId={row.id} prop={p} value={row.cells[p.id] ?? null} complete={done} />
                 </dd>

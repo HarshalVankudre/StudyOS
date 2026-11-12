@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ runRetention: vi.fn() }));
+const mocks = vi.hoisted(() => ({ runRetention: vi.fn(), retryAssets: vi.fn() }));
 vi.mock("@/lib/ops/retention", () => ({ runRetention: mocks.runRetention }));
+vi.mock("@/lib/account/erase-user-data", () => ({ retryOrphanedAssetDeletes: mocks.retryAssets }));
 
 import { POST } from "./route";
 import { secretsMatch } from "@/lib/ops/secret";
@@ -14,6 +15,7 @@ const req = (auth?: string) =>
 
 beforeEach(() => {
   mocks.runRetention.mockResolvedValue({ agentTasks: 0 });
+  mocks.retryAssets.mockResolvedValue({ retried: 2, deleted: 1 });
   vi.spyOn(console, "log").mockImplementation(() => {});
 });
 afterEach(() => {
@@ -39,7 +41,11 @@ describe("POST /api/ops/maintenance", () => {
     process.env.MAINTENANCE_SECRET = "s3cret-value";
     const res = await POST(req("Bearer s3cret-value"));
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, result: { agentTasks: 0 } });
+    expect(await res.json()).toEqual({
+      ok: true,
+      result: { agentTasks: 0 },
+      orphanedAssets: { retried: 2, deleted: 1 },
+    });
   });
 
   it("reports a failure without leaking it", async () => {

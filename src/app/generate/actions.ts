@@ -6,11 +6,26 @@ import { modelForPlan } from "@/lib/ai/plans";
 import type { GenQuestion } from "@/lib/ai/onboarding";
 import { withUsageMeter } from "@/lib/ai/usage-meter";
 import { getUserPlan } from "@/lib/billing";
-import { chargeCredits, hasCredits, usageToCredits } from "@/lib/credits";
+import {
+  hasCredits,
+  releaseCreditHold,
+  reserveCredits,
+  settleCreditHold,
+  usageToCredits,
+} from "@/lib/credits";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { getLocale } from "@/lib/i18n/server";
-import { normalizeSourceText } from "@/lib/import/syllabus";
+import { MAX_SOURCE_INPUT, normalizeSourceText } from "@/lib/import/syllabus";
 import { checkUsageLimit } from "@/lib/usage-limits";
+
+/**
+ * Credits held while the questions are written: one small model call costs a
+ * few credits; the hold is settled to the metered cost.
+ */
+const QUESTIONS_HOLD_CREDITS = 5;
+
+/** Same cap as a generation request's prompt (POST /api/generate). */
+const MAX_PROMPT_CHARS = 2000;
 
 export type PlanQuestionsResult =
   | { ok: true; questions: GenQuestion[] }
@@ -40,7 +55,17 @@ export async function planQuestionsAction(
     return { ok: false, code: "not_authenticated", message: T.ai.errors.notAuthenticated };
   }
 
-  const clean = (typeof prompt === "string" ? prompt : "").slice(0, 2000).trim();
+  // Server actions take whatever a direct POST sends: check types and lengths
+  // before anything else runs (the 3 MB body limit is the only other bound).
+  if (
+    typeof prompt !== "string" ||
+    prompt.length > MAX_PROMPT_CHARS ||
+    typeof sourceText !== "string" ||
+    sourceText.length > MAX_SOURCE_INPUT
+  ) {
+    return { ok: false, code: "invalid", message: T.ai.errors.describeBeforeGenerating };
+  }
+  const clean = prompt.trim();
   if (!clean) {
     return { ok: false, code: "invalid", message: T.ai.errors.describeBeforeGenerating };
   }
@@ -52,13 +77,26 @@ export async function planQuestionsAction(
     return { ok: false, code: "rate_limited", message: T.limits.rateLimited };
   }
 
-  const model = modelForPlan(await getUserPlan());
-  const source = normalizeSourceText(typeof sourceText === "string" ? sourceText : "");
-  const { result, usage } = await withUsageMeter(() =>
-    planQuestionsDetailed(clean, model, locale, source),
-  );
-  if (result.fromModel) {
-    await chargeCredits(userId, usageToCredits(usage), "generate_questions");
+  // Reserve before the model runs, so parallel calls cannot all spend the
+  // same last credits; settled to the metered cost, or given back.
+  const hold = await reserveCredits(userId, {
+    estimate: QUESTIONS_HOLD_CREDITS,
+    reason: "generate_questions",
+  });
+  if (!hold) {
+    return { ok: false, code: "out_of_credits", message: T.credits.outGenerate };
   }
-  return { ok: true, questions: result.questions };
+
+  try {
+    const model = modelForPlan(await getUserPlan());
+    const source = normalizeSourceText(sourceText);
+    const { result, usage } = await withUsageMeter(() =>
+      planQuestionsDetailed(clean, model, locale, source),
+    );
+    // The static fallback is free (the hold is given back in `finally`).
+    if (result.fromModel) await settleCreditHold(hold, usageToCredits(usage));
+    return { ok: true, questions: result.questions };
+  } finally {
+    await releaseCreditHold(hold).catch(() => false);
+  }
 }

@@ -7,7 +7,6 @@ vi.mock("./openrouter", () => ({
 }));
 
 import { runAgentLoop } from "./agent-loop";
-import { executeAgentEdit, planAgentTurn } from "./agent";
 import { studentClock } from "./student-clock";
 import type { ChatMessage } from "./openrouter";
 
@@ -20,11 +19,6 @@ const WS = {
 
 // Thursday evening in New York; already Friday in UTC.
 const CLOCK = studentClock("America/New_York", new Date("2026-11-13T01:30:00Z"));
-
-function lastUserMessage(callIndex: number): string {
-  const messages = mocks.chat.mock.calls[callIndex][1] as ChatMessage[];
-  return messages.filter((message) => message.role === "user").at(-1)!.content;
-}
 
 function systemMessage(callIndex: number): string {
   const messages = mocks.chat.mock.calls[callIndex][1] as ChatMessage[];
@@ -57,36 +51,16 @@ describe("the agent knows the student's date", () => {
       clock: CLOCK,
     });
     for (const call of [0, 1]) {
-      const user = lastUserMessage(call);
+      // The clock rides in the turn's context message, which every step
+      // carries unchanged (so the prompt prefix stays cacheable).
+      const user = (mocks.chat.mock.calls[call][1] as ChatMessage[])
+        .filter((message) => message.role === "user")
+        .map((message) => message.content)
+        .join(" | ");
       expect(user).toContain("Thursday, 2026-11-12, 20:30 in America/New_York (UTC-05:00)");
       expect(user).toContain("Fri 2026-11-20");
       // Kept out of the cacheable system prompt.
       expect(systemMessage(call)).not.toContain("2026-11-12");
     }
-  });
-
-  it("legacy planner and editor prompts carry it too", async () => {
-    mocks.chat.mockResolvedValueOnce(
-      '{"action":"edit","plan":"Add a midterm","affectedAreaIds":["p1"]}',
-    );
-    const decision = await planAgentTurn(WS, [], "add a midterm next Friday", "m", "en", {
-      clock: CLOCK,
-    });
-    expect(lastUserMessage(0)).toContain("Thursday, 2026-11-12");
-    expect(decision.action).toBe("edit");
-
-    mocks.chat.mockResolvedValueOnce(
-      '{"reply":"Done.","ops":[{"op":"update_page","pageId":"p1","title":"Home"}]}',
-    );
-    await executeAgentEdit(
-      WS,
-      [],
-      "add a midterm next Friday",
-      decision as Extract<typeof decision, { action: "edit" }>,
-      "m",
-      "en",
-      { clock: CLOCK },
-    );
-    expect(lastUserMessage(1)).toContain("in America/New_York");
   });
 });

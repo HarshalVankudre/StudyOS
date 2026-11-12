@@ -8,9 +8,11 @@ import {
 } from "@/app/app/actions";
 import type { Removal } from "@/lib/workspace/history";
 import type { Workspace } from "@/lib/workspace/types";
-import { WorkspaceSync, type Notice } from "./workspace-sync";
+import { TAB_ALIVE_MS, WorkspaceSync, tabKey, type Notice } from "./workspace-sync";
 
 const POLL_MS = 30_000;
+/** How often an open tab says it is alive (its draft is not to be adopted). */
+const HEARTBEAT_MS = 10_000;
 const CHANNEL = "studyos-workspace";
 
 /** Text fields keep their own native undo; the workspace history skips them. */
@@ -58,6 +60,28 @@ function safeLocalStorage(): Storage | null {
   }
 }
 
+const TAB_ID_KEY = "studyos:tab-id";
+
+/**
+ * This tab's id, kept for the tab's lifetime (sessionStorage survives a
+ * reload, so a reloaded tab finds its own draft). A duplicated tab copies
+ * sessionStorage; it gets a fresh id when the original is still alive.
+ */
+function tabIdFor(storage: Storage | null): string {
+  const fresh = () =>
+    globalThis.crypto?.randomUUID?.() ?? `t-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  try {
+    const session = typeof window !== "undefined" ? window.sessionStorage : null;
+    const saved = session?.getItem(TAB_ID_KEY);
+    const aliveAt = saved ? Number(storage?.getItem(tabKey(saved))) : NaN;
+    const id = saved && !(Date.now() - aliveAt < TAB_ALIVE_MS) ? saved : fresh();
+    session?.setItem(TAB_ID_KEY, id);
+    return id;
+  } catch {
+    return fresh();
+  }
+}
+
 export interface SyncCallbacks {
   onRemoval: (removal: Removal, entryId: number) => void;
   onNotice: (notice: Notice) => void;
@@ -85,6 +109,7 @@ export function useWorkspaceSync(
         save: saveWorkspaceAction,
         fetchState: getWorkspaceStateAction,
         fetchVersion: getWorkspaceVersionAction,
+        tabId: tabIdFor(safeLocalStorage()),
       }),
   );
   const snapshot = useSyncExternalStore(
@@ -115,7 +140,7 @@ export function useWorkspaceSync(
         callbacksRef.current.onRemoval(removal, entryId),
       onNotice: (notice) => callbacksRef.current.onNotice(notice),
     });
-    sync.recoverDraft();
+    sync.start();
 
     const onChannel = (event: MessageEvent) => {
       const data = event.data as { id?: string; version?: number } | null;
@@ -123,43 +148,57 @@ export function useWorkspaceSync(
     };
     channel?.addEventListener("message", onChannel);
 
-    // Leaving the tab (switching apps on a phone, closing it): keep a local
-    // copy of unsaved edits and save right away instead of waiting.
-    const onHide = () => {
-      if (!sync.hasUnsavedChanges) return;
-      sync.writeDraft();
-      void sync.flush();
-    };
+    // Leaving the tab (switching apps on a phone, closing it): write what is
+    // still typed in a field and the local copy synchronously (the page may
+    // be frozen right after), then save right away instead of waiting.
     const onVisibility = () => {
-      if (document.visibilityState === "hidden") onHide();
-      else void sync.checkRemote();
+      if (document.visibilityState === "hidden") sync.prepareToLeave();
+      else {
+        sync.heartbeat();
+        void sync.checkRemote();
+      }
     };
+    const onPageHide = () => {
+      sync.prepareToLeave();
+      // Closing (or into the back/forward cache): its draft may be recovered
+      // by the next visit; `pageshow` marks it alive again if it comes back.
+      sync.releaseTab();
+    };
+    const onPageShow = () => sync.heartbeat();
     const onFocus = () => void sync.checkRemote();
     const onOnline = () => sync.retry();
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      sync.prepareToLeave();
       if (!sync.hasUnsavedChanges) return;
-      sync.writeDraft();
-      void sync.flush();
       event.preventDefault();
       // Legacy browsers need returnValue set to show the "leave site?" prompt.
       event.returnValue = "";
     };
     document.addEventListener("visibilitychange", onVisibility);
-    window.addEventListener("pagehide", onHide);
+    window.addEventListener("pagehide", onPageHide);
+    window.addEventListener("pageshow", onPageShow);
     window.addEventListener("focus", onFocus);
     window.addEventListener("online", onOnline);
     window.addEventListener("beforeunload", onBeforeUnload);
     const poll = window.setInterval(() => {
+      // Also while "gone": the workspace may be restored from the trash.
       if (document.visibilityState === "visible") void sync.checkRemote();
     }, POLL_MS);
+    const alive = window.setInterval(() => {
+      sync.heartbeat();
+      // Edits left by a tab that crashed after this one opened.
+      if (document.visibilityState === "visible") sync.adoptOrphans();
+    }, HEARTBEAT_MS);
 
     return () => {
       document.removeEventListener("visibilitychange", onVisibility);
-      window.removeEventListener("pagehide", onHide);
+      window.removeEventListener("pagehide", onPageHide);
+      window.removeEventListener("pageshow", onPageShow);
       window.removeEventListener("focus", onFocus);
       window.removeEventListener("online", onOnline);
       window.removeEventListener("beforeunload", onBeforeUnload);
       window.clearInterval(poll);
+      window.clearInterval(alive);
       channel?.removeEventListener("message", onChannel);
       channel?.close();
       sync.dispose();

@@ -14,6 +14,7 @@ import type { Locale } from "./config";
 import { dirFor } from "./config";
 import type { Dictionary } from "./dictionaries/en";
 import { fmt } from "./interpolate";
+import { pluralizer, type PluralForms } from "./plural";
 
 export interface I18n {
   locale: Locale;
@@ -22,6 +23,8 @@ export interface I18n {
   dict: Dictionary;
   /** Interpolate `{placeholders}` in a dictionary string. */
   t: (template: string, vars?: Record<string, string | number>) => string;
+  /** A count string in the right plural form (see ./plural): `plural(dict.counts.cards, n)`. */
+  plural: (forms: PluralForms, count: number, vars?: Record<string, string | number>) => string;
 }
 
 const I18nContext = createContext<I18n | null>(null);
@@ -36,7 +39,13 @@ export function I18nProvider({
   children: React.ReactNode;
 }) {
   const value = useMemo<I18n>(
-    () => ({ locale, dir: dirFor(locale), dict: dictionary, t: fmt }),
+    () => ({
+      locale,
+      dir: dirFor(locale),
+      dict: dictionary,
+      t: fmt,
+      plural: pluralizer(locale),
+    }),
     [locale, dictionary],
   );
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;

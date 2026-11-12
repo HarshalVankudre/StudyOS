@@ -650,8 +650,9 @@ export function newRowCells(
   today: string,
 ): Record<string, CellValue> {
   const cells: Record<string, CellValue> = {};
-  if (view.filterMatch === "any") return cells;
-  for (const filter of view.filters ?? []) {
+  // With "match any", satisfying one condition is enough and none is implied.
+  const filters = view.filterMatch === "any" ? [] : (view.filters ?? []);
+  for (const filter of filters) {
     if (!isFilterActive(db, filter)) continue;
     const prop = db.properties.find((p) => p.id === filter.propertyId)!;
     const op = canonicalOperator(prop.type, filter.operator);
@@ -683,7 +684,29 @@ export function newRowCells(
         break;
     }
   }
+  // A new row starts in the first open status ("Not started"), not in a
+  // "No Status" limbo, unless a filter already chose one.
+  for (const prop of db.properties) {
+    if (prop.type !== "status" || prop.id in cells) continue;
+    const open = (prop.options ?? []).find((o) => !isCompleteOption(prop, o));
+    if (open) cells[prop.id] = open.id;
+  }
   return cells;
+}
+
+/** Words in a number column's name that make a column total meaningless. */
+const AVERAGE_ONLY = /%|percent|prozent|pourcent|porcentaje|percentuale|procent|target|goal|ziel|objectif|objetivo|obiettivo|doel|score|grade|note|rating|gpa|average|avg|mark|rate|progress|level|目标|目標|得点|分数|成绩|成績|نسبة|درجة|هدف/i;
+/** Weights do add up (to 100 %), so they keep their sum. */
+const SUMMABLE = /weight|gewicht|poids|peso|gewogen|weging|权重|重み|配点|وزن/i;
+
+/**
+ * Whether a column total means something. Credits, minutes or points add
+ * up; targets, scores, grades and percentages only have an average.
+ */
+export function numberColumnSums(prop: Pick<DatabaseProperty, "name">): boolean {
+  const name = prop.name.toLowerCase();
+  if (SUMMABLE.test(name)) return true;
+  return !AVERAGE_ONLY.test(name);
 }
 
 // ---------------------------------------------------------------------------

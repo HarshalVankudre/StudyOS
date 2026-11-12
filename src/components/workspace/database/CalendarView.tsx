@@ -87,6 +87,7 @@ export function CalendarView(props: ViewBodyProps) {
         }}
         onClick={() => onOpen(r.id)}
         aria-label={t(dict.dbViews.openRow, { name: name || dict.db.untitled })}
+        dir="auto"
         className={`block w-full truncate rounded text-start font-medium ring-1 ring-inset ${pillClasses(rowAccent(db, r))} ${
           compact ? "px-1.5 py-0.5 text-[11px]" : "min-h-10 px-3 py-2 text-sm"
         } ${done ? "line-through opacity-60" : ""}`}

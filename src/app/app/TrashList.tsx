@@ -62,10 +62,10 @@ export function TrashList({ items }: { items: TrashItem[] }) {
                   {item.icon ?? dict.app.fallbackIcon}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-ink">{item.name}</p>
+                  <p dir="auto" className="truncate text-sm font-semibold text-ink">{item.name}</p>
                   <p className="font-mono text-[11px] text-ink-faint">
                     {t(S.purgeOn, {
-                      date: new Date(item.purgeAt).toLocaleDateString(locale),
+                      date: new Date(item.purgeAt).toLocaleDateString(locale, { dateStyle: "medium" }),
                     })}
                   </p>
                 </div>

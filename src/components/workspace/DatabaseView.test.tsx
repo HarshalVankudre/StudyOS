@@ -7,6 +7,7 @@ import { I18nProvider } from "@/lib/i18n/client";
 import { en } from "@/lib/i18n/dictionaries/en";
 import { WorkspaceProvider } from "./WorkspaceContext";
 import { DatabaseView } from "./DatabaseView";
+import { PendingFieldsContext, type PendingField } from "./editor/pendingFields";
 
 // The latest workspace after every update(), for assertions.
 let latest: Workspace;
@@ -213,7 +214,31 @@ describe("table", () => {
   it("shows a summary row with sum and average for number columns", () => {
     renderDb(assignments());
     expect(screen.getByTestId("summary-weight")).toHaveTextContent("Sum 45 · Avg 15");
-    expect(screen.getByText("Count: 5")).toBeInTheDocument();
+    expect(screen.getByText(/^Count:? 5|^5 rows$/)).toBeInTheDocument();
+  });
+
+  it("offers only an average where a total means nothing (targets, scores, percentages)", () => {
+    const db = assignments();
+    db.properties.push({ id: "target", name: "Target %", type: "number" });
+    db.rows[0].cells.target = 80;
+    db.rows[1].cells.target = 90;
+    renderDb(db);
+    expect(screen.getByTestId("summary-target")).toHaveTextContent(/^Avg 85$/);
+  });
+
+  it("keeps the title column in view while the table scrolls sideways", () => {
+    renderDb(assignments());
+    const header = screen.getByRole("columnheader", { name: "Assignment" });
+    expect(header.className).toMatch(/\bsticky\b/);
+    expect(header.className).toMatch(/min-w-52/);
+    expect(screen.getByTestId("table-scroll").className).toMatch(/overflow-x-auto/);
+  });
+
+  it("starts a new row in the first open status", async () => {
+    const user = userEvent.setup();
+    renderDb(assignments());
+    await user.click(screen.getByRole("button", { name: "+ New row" }));
+    expect(db0().rows[db0().rows.length - 1].cells.status).toBe("todo");
   });
 
   it("shows relative deadlines, with overdue only for unfinished work", () => {
@@ -245,28 +270,37 @@ describe("table", () => {
     await user.click(screen.getByRole("button", { name: "Show 400 more" }));
     expect(tableBodyTitles()).toHaveLength(200);
     expect(screen.getByTestId("summary-weight")).toHaveTextContent("Sum 540");
-  });
+    // Renders 300 rows of editable cells: slow in jsdom, not in a browser.
+  }, 20_000);
 });
 
 describe("filters", () => {
-  it("applies the 'due in the next 7 days, not done' preset and saves it with the view", async () => {
+  it("puts the 'due in the next 7 days, not done' preset into a new view and leaves the current one as it was", async () => {
     const user = userEvent.setup();
     renderDb(assignments());
     await user.click(screen.getByRole("button", { name: "Filter" }));
-    await user.click(screen.getByRole("button", { name: "Due in the next 7 days, not done" }));
-    expect(db0().views[0].filters).toEqual([
+    await user.click(screen.getByRole("button", { name: /Save as a “This week” view/ }));
+    expect(db0().views[0]).toEqual({ id: "v", name: "All", type: "table" });
+    expect(db0().views[1].filters).toEqual([
       { propertyId: "due", operator: "next_days", value: 7 },
       { propertyId: "status", operator: "is_not", value: ["done"] },
     ]);
-    expect(tableBodyTitles()).toEqual(["Lab report", "Quiz prep"]);
     expect(screen.getByRole("button", { name: "Filter (2)" })).toBeInTheDocument();
+    // Back on "All": every row, no filters, no sort.
+    await user.click(screen.getByRole("button", { name: "All" }));
+    expect(tableBodyTitles()).toHaveLength(5);
+    expect(screen.getByRole("button", { name: "Filter" })).toBeInTheDocument();
+    // Asking again opens the existing "This week" view instead of a copy.
+    await user.click(screen.getByRole("button", { name: /Save as a “This week” view/ }));
+    expect(db0().views).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "This week", pressed: true })).toBeInTheDocument();
   });
 
   it("creates a 'This week' list view", async () => {
     const user = userEvent.setup();
     renderDb(assignments());
     await user.click(screen.getByRole("button", { name: "Filter" }));
-    await user.click(screen.getByRole("button", { name: "Save as a “This week” view" }));
+    await user.click(screen.getByRole("button", { name: /Save as a “This week” view/ }));
     const created = db0().views[1];
     expect(created).toMatchObject({ name: "This week", type: "list", datePropertyId: "due" });
     expect(created.sorts).toEqual([{ propertyId: "due", direction: "asc" }]);
@@ -294,6 +328,31 @@ describe("filters", () => {
     expect(tableBodyTitles()).toEqual(["Essay draft", "Quiz prep"]);
     await user.click(screen.getByRole("button", { name: "Clear filters" }));
     expect(db0().views[0].filters).toBeUndefined();
+  });
+
+  it("registers a filter value being typed with the sync engine, so it is not lost", async () => {
+    const user = userEvent.setup();
+    const fields = new Set<PendingField>();
+    const register = (field: PendingField) => {
+      fields.add(field);
+      return () => fields.delete(field);
+    };
+    latest = { id: "w", name: "W", pages: [], databases: [assignments()] };
+    render(
+      <PendingFieldsContext.Provider value={{ register, rev: 0 }}>
+        <Harness initial={latest} viewId="v" />
+      </PendingFieldsContext.Provider>,
+    );
+    await user.click(screen.getByRole("button", { name: "Filter" }));
+    await user.click(screen.getByRole("button", { name: "+ Add filter" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "Filter field" }), "name");
+    await user.type(screen.getByRole("textbox", { name: "Value" }), "lab");
+    const pending = [...fields].filter((f) => f.hasPending());
+    expect(pending).toHaveLength(1);
+    // What the engine does before the tab is hidden or closed.
+    act(() => pending[0].commit());
+    expect(db0().views[0].filters?.[0]).toMatchObject({ propertyId: "name", value: "lab" });
+    expect(pending[0].hasPending()).toBe(false);
   });
 
   it("offers a way out when nothing matches", async () => {
@@ -347,6 +406,58 @@ describe("URL cells", () => {
     await user.clear(input);
     await user.type(input, "https://example.org{Enter}");
     expect(db0().rows.find((r) => r.id === "u1")?.cells.link).toBe("https://example.org");
+  });
+});
+
+describe("phone layout", () => {
+  let matches = true;
+  beforeEach(() => {
+    matches = true;
+    const store = new Map<string, string>();
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: (k: string) => store.get(k) ?? null,
+        setItem: (k: string, v: string) => void store.set(k, v),
+        removeItem: (k: string) => void store.delete(k),
+      },
+    });
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query.includes("max-width") ? matches : false,
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }));
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("shows a wide table as a list on a phone, and the table when the student asks", async () => {
+    const user = userEvent.setup();
+    renderDb(assignments());
+    expect(screen.queryByRole("table")).toBeNull();
+    expect(screen.getAllByRole("listitem")).toHaveLength(5);
+    expect(screen.getByText("Shown as a list on this screen.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Show as table" }));
+    expect(screen.getByRole("table")).toBeInTheDocument();
+    // The saved view itself is untouched.
+    expect(db0().views[0].type).toBe("table");
+    await user.click(screen.getByRole("button", { name: "Show as list" }));
+    expect(screen.queryByRole("table")).toBeNull();
+  });
+
+  it("remembers the student's choice of the table on this device", () => {
+    window.localStorage.setItem("studyos:table-on-phone:v", "1");
+    renderDb(assignments());
+    expect(screen.getByRole("table")).toBeInTheDocument();
+  });
+
+  it("keeps the table on wide screens", () => {
+    matches = false;
+    renderDb(assignments());
+    expect(screen.getByRole("table")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Show as table" })).toBeNull();
   });
 });
 
@@ -507,7 +618,7 @@ describe("changing a column type", () => {
     renderDb(assignments());
     openSettings();
     await user.selectOptions(screen.getAllByRole("combobox", { name: "Field type" })[0], "number");
-    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("will clear 5 value(s)"));
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("will clear 5 values"));
     expect(db0().properties[0].type).toBe("text");
     expect(db0().rows[0].cells.name).toBe("Essay draft");
     expect(screen.getAllByRole("combobox", { name: "Field type" })[0]).toHaveValue("text");
@@ -519,7 +630,7 @@ describe("changing a column type", () => {
     renderDb(assignments());
     openSettings();
     await user.click(screen.getByRole("button", { name: "Delete field: Weight" }));
-    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("3 row(s)"));
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("3 rows have a value"));
     expect(db0().properties.some((p) => p.id === "weight")).toBe(false);
   });
 });

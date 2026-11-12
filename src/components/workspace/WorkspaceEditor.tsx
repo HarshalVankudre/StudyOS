@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { Redo2, RotateCw, Undo2 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Download, Layers, ListChecks, MoreHorizontal, Redo2, RotateCw, Search, Trash2, Undo2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -12,12 +12,35 @@ import type { Removal } from "@/lib/workspace/history";
 import type { Workspace } from "@/lib/workspace/types";
 import { AccountMenu } from "@/components/account/AccountMenu";
 import { CreditMeter } from "@/components/account/CreditMeter";
+import { ExportMenu } from "@/components/command/ExportMenu";
+import {
+  emit,
+  OPEN_EXPORT_EVENT,
+  OPEN_PALETTE_EVENT,
+  OPEN_STUDY_HUB_EVENT,
+  SHOW_GETTING_STARTED_EVENT,
+} from "@/components/command/events";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { SearchButton } from "@/components/command/SearchButton";
+import { GettingStarted } from "@/components/onboarding/GettingStarted";
 import { AgentChat } from "./AgentChat";
+import { DeepLinkProvider } from "./DeepLinkContext";
+import { FeedAutoSync } from "./feeds/FeedAutoSync";
 import { PageView } from "./PageView";
 import { StudyLauncher } from "./StudyLauncher";
+import { StudyKitHost } from "./materials/StudyKitHost";
+import { hasQuizzes } from "./quiz/QuizHub";
 import { WorkspaceProvider, type SaveStatus } from "./WorkspaceContext";
+import { useEditorLocation } from "./useEditorLocation";
 import { focusedFieldKey, isTextEntry, useWorkspaceSync } from "./useWorkspaceSync";
-import type { Conflict, Notice } from "./workspace-sync";
+import type { MergeNotice, Notice, PendingField, UpdateOptions } from "./workspace-sync";
+import { PendingFieldsContext } from "./editor/pendingFields";
 
 const TOAST_MS = 8000;
 
@@ -35,9 +58,6 @@ export function WorkspaceEditor({
 }) {
   const { dict, t, dir } = useI18n();
   const S = dict.safety;
-  const [activePageId, setActivePageId] = useState(
-    initialWorkspace.homePageId ?? initialWorkspace.pages[0]?.id,
-  );
 
   // AI agent chat panel. Once opened it stays mounted (hidden when closed) so
   // a running task keeps streaming and its result still lands in the editor.
@@ -77,6 +97,7 @@ export function WorkspaceEditor({
   // Declared before use by the toast callbacks via a ref (the engine is
   // created on first render).
   const undoToRef = useRef<(entryId: number) => void>(() => {});
+  const undoRef = useRef<() => void>(() => {});
 
   const { sync, snapshot } = useWorkspaceSync(id, initialWorkspace, initialVersion, {
     onRemoval: (removal, entryId) => {
@@ -86,26 +107,48 @@ export function WorkspaceEditor({
       });
     },
     onNotice: (notice: Notice) => {
-      toast(notice === "draftRestored" ? S.draftRestored : S.updatedElsewhere, {
-        duration: TOAST_MS,
-      });
+      if (notice === "draftRestored") {
+        // Merged in as one undoable step.
+        toast(S.draftRestored, {
+          duration: TOAST_MS,
+          action: { label: S.undo, onClick: () => undoRef.current() },
+        });
+      } else if (notice === "localCopyFailed") {
+        toast(S.localCopyFailed, { duration: 15_000 });
+      } else {
+        toast(notice === "undoPartial" ? S.undoPartial : S.updatedElsewhere, {
+          duration: TOAST_MS,
+        });
+      }
     },
   });
-  const { workspace, rev, status, canUndo, canRedo, conflict } = snapshot;
+  const { workspace, rev, status, canUndo, canRedo, conflict, merge } = snapshot;
+
+  // The open page lives in the URL (?page=), and deep links (?block=,
+  // ?db=&row=) are handed to the page and database views to show.
+  const { pageId: activePageId, goToPage, deepLink } = useEditorLocation(workspace);
+  /** Open a page (kept in the URL). */
+  const setActivePageId = useCallback((pageId: string) => goToPage(pageId), [goToPage]);
 
   const update = useCallback(
-    (mutator: (draft: Workspace) => void) => sync.update(mutator, focusedFieldKey()),
+    (mutator: (draft: Workspace) => void, options?: UpdateOptions) =>
+      sync.update(mutator, { coalesceKey: focusedFieldKey(), ...options }),
     [sync],
   );
+  const registerField = useCallback((field: PendingField) => sync.registerField(field), [sync]);
+  const fieldSync = useMemo(() => ({ register: registerField, rev }), [registerField, rev]);
+  const settle = useCallback(() => sync.settle(), [sync]);
+  const getVersion = useCallback(() => sync.version, [sync]);
+  const retrySave = useCallback(() => sync.retry(), [sync]);
 
   // After undo/redo, follow a page that came back (e.g. undoing a delete).
   const followRestoredPage = useCallback(
     (before: Workspace) => {
       const known = new Set(before.pages.map((p) => p.id));
       const restored = sync.workspace.pages.find((p) => !known.has(p.id));
-      if (restored) setActivePageId(restored.id);
+      if (restored) goToPage(restored.id, "replace");
     },
-    [sync],
+    [goToPage, sync],
   );
 
   const undo = useCallback(() => {
@@ -123,7 +166,8 @@ export function WorkspaceEditor({
       const before = sync.workspace;
       if (sync.undoTo(entryId)) followRestoredPage(before);
     };
-  }, [followRestoredPage, sync]);
+    undoRef.current = undo;
+  }, [followRestoredPage, sync, undo]);
 
   // Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z (and Ctrl+Y). Inside a text field the
   // browser's own text undo runs instead; dialogs (study sessions) are left
@@ -168,7 +212,7 @@ export function WorkspaceEditor({
 
   const openAi = useCallback(() => {
     // Save pending edits first so the agent reads the latest workspace.
-    void sync.flush();
+    void sync.settle();
     aiOpenRef.current = true;
     setAiMounted(true);
     setAiOpen(true);
@@ -204,6 +248,9 @@ export function WorkspaceEditor({
     void sync.resync();
   }, [sync]);
 
+  // A new page starts with its title selected (type to name it) and one
+  // empty line to write on, not a heading that repeats "Untitled".
+  const [freshPageId, setFreshPageId] = useState<string | null>(null);
   const addPage = () => {
     const pageId = crypto.randomUUID();
     update((d) => {
@@ -211,13 +258,14 @@ export function WorkspaceEditor({
         id: pageId,
         title: dict.editor.untitled,
         icon: "📄",
-        blocks: [
-          { id: crypto.randomUUID(), type: "heading", level: 1, text: dict.editor.untitled },
-        ],
+        blocks: [{ id: crypto.randomUUID(), type: "paragraph", text: "" }],
       });
     });
-    setActivePageId(pageId);
-    closeSidebar();
+    setFreshPageId(pageId);
+    goToPage(pageId);
+    // Close the phone drawer without sending focus back to its button: focus
+    // goes to the new page's title.
+    setSidebarOpen(false);
   };
 
   // No confirm: the page can be brought back from the Undo toast or Ctrl+Z.
@@ -229,11 +277,14 @@ export function WorkspaceEditor({
       d.pages = d.pages.filter((p) => p.id !== pageId);
       if (d.homePageId === pageId) d.homePageId = d.pages[0]?.id;
     });
-    if (activePageId === pageId) setActivePageId(remaining[0]?.id);
+    if (activePageId === pageId) goToPage(remaining[0]?.id, "replace");
   };
 
   const activePage =
     workspace.pages.find((p) => p.id === activePageId) ?? workspace.pages[0];
+  // The study hub exists once there is something to study (see StudyLauncher).
+  const hasStudyHub =
+    workspace.pages.some((p) => p.blocks.some((b) => b.type === "flashcards")) || hasQuizzes(workspace);
 
   return (
     <WorkspaceProvider
@@ -248,14 +299,20 @@ export function WorkspaceEditor({
         redo,
         canUndo,
         canRedo,
+        settle,
+        getVersion,
+        retrySave,
       }}
     >
+     <PendingFieldsContext.Provider value={fieldSync}>
       <Toaster dir={dir} position="bottom-center" />
+      <FeedAutoSync />
+      <StudyKitHost activePageId={activePage?.id} onOpenPage={setActivePageId} />
       <div className="flex h-[100dvh] w-full overflow-hidden bg-paper text-ink">
         {sidebarOpen && (
           <button
             type="button"
-            aria-label={dict.common.cancel}
+            aria-label={dict.shell.closeMenu}
             tabIndex={-1}
             className="fixed inset-0 z-40 bg-black/55 backdrop-blur-[1px] md:hidden"
             onClick={closeSidebar}
@@ -281,7 +338,7 @@ export function WorkspaceEditor({
               ref={sidebarCloseRef}
               type="button"
               onClick={closeSidebar}
-              aria-label={dict.common.cancel}
+              aria-label={dict.shell.closeMenu}
               className="grid h-11 w-11 place-items-center rounded-md text-ink-soft transition hover:bg-hover hover:text-ink md:hidden"
             >
               <span aria-hidden>✕</span>
@@ -301,6 +358,7 @@ export function WorkspaceEditor({
             />
             <input
               value={workspace.name}
+              dir="auto"
               aria-label={workspace.name}
               onChange={(e) =>
                 update((d) => {
@@ -318,27 +376,25 @@ export function WorkspaceEditor({
                 <div key={page.id} className="group flex items-center">
                   <button
                     onClick={() => {
-                      setActivePageId(page.id);
+                      goToPage(page.id);
                       closeSidebar();
                     }}
-                    className={`flex min-h-11 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-start text-sm transition ${
+                    aria-current={active ? "page" : undefined}
+                    className={`flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-start text-sm transition ${
                       active
                         ? "bg-hover font-medium text-ink"
                         : "text-ink-soft hover:bg-hover"
                     }`}
                   >
-                    <span className="w-5 text-center">{page.icon}</span>
-                    <span className="truncate">{page.title}</span>
+                    <span className="w-5 shrink-0 text-center">{page.icon}</span>
+                    <span dir="auto" className="truncate">{page.title || dict.editor.untitled}</span>
                   </button>
                   {workspace.pages.length > 1 && (
-                    <button
-                      onClick={() => deletePage(page.id)}
-                      title={dict.editor.deletePage}
-                      aria-label={`${dict.editor.deletePage}: ${page.title}`}
-                      className="grid h-11 w-11 shrink-0 place-items-center rounded-md text-ink-soft/70 transition hover:bg-hover hover:text-rose-500 md:opacity-0 md:focus-visible:opacity-100 md:group-hover:opacity-100 md:group-focus-within:opacity-100"
-                    >
-                      <span aria-hidden>✕</span>
-                    </button>
+                    <PageActions
+                      name={page.title || dict.editor.untitled}
+                      active={active}
+                      onDelete={() => deletePage(page.id)}
+                    />
                   )}
                 </div>
               );
@@ -372,28 +428,33 @@ export function WorkspaceEditor({
 
         {/* Main */}
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <div className="flex min-h-14 items-center gap-1 border-b border-line px-2 sm:gap-2 sm:px-4 lg:px-6">
+          <div
+            data-print="hide"
+            className="relative flex min-h-14 items-center gap-1 border-b border-line px-2 sm:gap-2 sm:px-4 lg:px-6"
+          >
             <button
               ref={sidebarTriggerRef}
               type="button"
               onClick={() => setSidebarOpen(true)}
-              aria-label={workspace.name}
+              aria-label={dict.shell.openMenu}
               aria-expanded={sidebarOpen}
               className="grid h-11 w-11 shrink-0 place-items-center rounded-md text-lg text-ink-soft transition hover:bg-hover hover:text-ink md:hidden"
             >
               <span aria-hidden>☰</span>
             </button>
             <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden font-mono text-[11px] text-ink-faint">
-              <span className="hidden truncate sm:inline">
+              <span dir="auto" className="hidden truncate sm:inline">
                 {workspace.icon} {workspace.name}
               </span>
               <span className="hidden sm:inline">/</span>
-              <span className="truncate text-ink-soft">
+              <span dir="auto" className="truncate text-ink-soft">
                 {activePage?.icon} {activePage?.title}
               </span>
             </div>
             <div className="flex shrink-0 items-center gap-1 sm:gap-2">
-              <div role="group" aria-label={S.history} className="flex items-center">
+              {/* Phones get the floating search button (AppShell) instead. */}
+              <SearchButton className="hidden sm:flex" />
+              <div role="group" aria-label={S.history} className="hidden items-center sm:flex">
                 <HistoryButton
                   label={S.undo}
                   shortcut="Ctrl+Z"
@@ -409,7 +470,9 @@ export function WorkspaceEditor({
                   icon={<Redo2 className="h-4 w-4 rtl:-scale-x-100" aria-hidden />}
                 />
               </div>
+              <GettingStarted onAskAi={openAi} />
               <StudyLauncher />
+              <ExportMenu workspace={workspace} page={activePage} />
               <button
                 onClick={() => (aiOpen ? closeAi() : openAi())}
                 aria-pressed={aiOpen}
@@ -430,19 +493,32 @@ export function WorkspaceEditor({
                   className={`h-1.5 w-1.5 rounded-full bg-lime ${agentBusy ? "animate-pulse" : ""}`}
                   aria-hidden
                 />
-                <span className="hidden sm:inline">
+                <span className="whitespace-nowrap">
                   {aiOpen ? dict.editor.closeAgent : dict.editor.askAi}
                 </span>
               </button>
+              <MoreActions
+                canUndo={canUndo}
+                canRedo={canRedo}
+                onUndo={undo}
+                onRedo={redo}
+                study={hasStudyHub}
+              />
               <SaveIndicator status={status} onRetry={() => sync.retry()} />
             </div>
           </div>
 
           {conflict && (
             <ConflictBanner
-              conflict={conflict}
               onKeepMine={() => sync.resolveConflict("mine")}
               onUseLatest={() => sync.resolveConflict("theirs")}
+            />
+          )}
+          {merge && (
+            <MergeBanner
+              merge={merge}
+              onUseTheirs={() => sync.restoreTheirs()}
+              onDismiss={() => sync.dismissMerge()}
             />
           )}
           {(status === "tooLarge" || status === "gone") && (
@@ -465,7 +541,15 @@ export function WorkspaceEditor({
           )}
 
           <div className="relative flex-1 overflow-y-auto">
-            {activePage && <PageView page={activePage} />}
+            <DeepLinkProvider value={deepLink}>
+              {activePage && (
+                <PageView
+                  page={activePage}
+                  focusTitle={activePage.id === freshPageId}
+                  onTitleFocused={() => setFreshPageId(null)}
+                />
+              )}
+            </DeepLinkProvider>
           </div>
         </main>
 
@@ -476,11 +560,114 @@ export function WorkspaceEditor({
               onApplied={applyAgentWorkspace}
               onClose={closeAi}
               onBusyChange={handleAgentBusyChange}
+              syncKey={`${rev}:${status}`}
             />
           </div>
         )}
       </div>
+     </PendingFieldsContext.Provider>
     </WorkspaceProvider>
+  );
+}
+
+/**
+ * Phones: the header keeps the menu, the page name, "Study N due" and
+ * "Ask AI"; everything else (search, undo and redo, the study hub, the
+ * getting-started guide, export and print) lives in this one menu. Larger
+ * screens have those as header buttons and do not show it.
+ */
+function MoreActions({
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo,
+  study,
+}: {
+  canUndo: boolean;
+  canRedo: boolean;
+  onUndo: () => void;
+  onRedo: () => void;
+  study: boolean;
+}) {
+  const { dict } = useI18n();
+  const S = dict.safety;
+  const A = dict.command.actions;
+  const ITEM = "min-h-11 gap-2.5 px-2.5 text-ink";
+  // Let the menu close (and hand focus back) before another overlay opens.
+  const later = (name: string) => () => setTimeout(() => emit(name), 0);
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        aria-label={dict.editor.moreActions}
+        title={dict.editor.moreActions}
+        className="grid h-11 w-11 shrink-0 place-items-center rounded-md text-ink-soft transition hover:bg-hover hover:text-ink data-[state=open]:bg-hover sm:hidden"
+      >
+        <MoreHorizontal className="h-5 w-5" aria-hidden />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-64 border-line-strong bg-card text-ink">
+        <DropdownMenuItem className={ITEM} onSelect={later(OPEN_PALETTE_EVENT)}>
+          <Search className="h-4 w-4" aria-hidden />
+          {dict.command.search}
+        </DropdownMenuItem>
+        <DropdownMenuItem className={ITEM} disabled={!canUndo} onSelect={onUndo}>
+          <Undo2 className="h-4 w-4 rtl:-scale-x-100" aria-hidden />
+          {S.undo}
+        </DropdownMenuItem>
+        <DropdownMenuItem className={ITEM} disabled={!canRedo} onSelect={onRedo}>
+          <Redo2 className="h-4 w-4 rtl:-scale-x-100" aria-hidden />
+          {S.redo}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        {study && (
+          <DropdownMenuItem className={ITEM} onSelect={later(OPEN_STUDY_HUB_EVENT)}>
+            <Layers className="h-4 w-4" aria-hidden />
+            {A.studyHub}
+          </DropdownMenuItem>
+        )}
+        <DropdownMenuItem className={ITEM} onSelect={later(SHOW_GETTING_STARTED_EVENT)}>
+          <ListChecks className="h-4 w-4" aria-hidden />
+          {A.gettingStarted}
+        </DropdownMenuItem>
+        <DropdownMenuItem className={ITEM} onSelect={later(OPEN_EXPORT_EVENT)}>
+          <Download className="h-4 w-4" aria-hidden />
+          {A.export}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/**
+ * A page's actions menu in the sidebar, so a destructive action is never the
+ * next Tab stop after every page. Only the open page's menu is in the Tab
+ * order (and always visible, for touch); a mouse can reach any page's menu
+ * on hover. Deleting is undoable from the toast or with Ctrl+Z.
+ */
+function PageActions({ name, active, onDelete }: { name: string; active: boolean; onDelete: () => void }) {
+  const { dict, t } = useI18n();
+  const label = t(dict.editor.pageActions, { name });
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        aria-label={label}
+        title={label}
+        tabIndex={active ? 0 : -1}
+        className={`grid h-11 w-9 shrink-0 place-items-center rounded-md text-ink-faint transition hover:bg-hover hover:text-ink data-[state=open]:bg-hover data-[state=open]:opacity-100 ${
+          active ? "" : "opacity-0 focus-visible:opacity-100 group-hover:opacity-100 pointer-coarse:hidden"
+        }`}
+      >
+        <MoreHorizontal className="h-4 w-4" aria-hidden />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-52 border-line-strong bg-card text-ink">
+        <DropdownMenuItem
+          className="min-h-11 gap-2.5 px-2.5 text-rose-600 focus:text-rose-600 dark:text-rose-400"
+          onSelect={onDelete}
+        >
+          <Trash2 className="h-4 w-4" aria-hidden />
+          {dict.editor.deletePage}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -512,41 +699,97 @@ function HistoryButton({
   );
 }
 
+/** Last resort: only shown if merging with a newer version failed unexpectedly. */
 function ConflictBanner({
-  conflict,
   onKeepMine,
   onUseLatest,
 }: {
-  conflict: Conflict;
   onKeepMine: () => void;
   onUseLatest: () => void;
 }) {
   const { dict } = useI18n();
   const S = dict.safety;
-  const isDraft = conflict.kind === "draft";
   return (
     <div
       role="alert"
       className="border-b border-line bg-lime-faint px-4 py-3 text-sm text-ink sm:px-6"
     >
-      <p className="font-semibold">{isDraft ? S.draftTitle : S.conflictTitle}</p>
-      <p className="mt-0.5 text-ink-soft">{isDraft ? S.draftBody : S.conflictBody}</p>
+      <p className="font-semibold">{S.conflictTitle}</p>
+      <p className="mt-0.5 text-ink-soft">{S.conflictBody}</p>
       <div className="mt-2.5 flex flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={onKeepMine}
           className="min-h-11 rounded-md bg-ink px-3.5 text-xs font-semibold text-paper transition hover:opacity-90 sm:min-h-0 sm:py-2"
         >
-          {isDraft ? S.restoreDraft : S.keepMine}
+          {S.keepMine}
         </button>
         <button
           type="button"
           onClick={onUseLatest}
           className="min-h-11 rounded-md border border-line-strong bg-card px-3.5 text-xs font-semibold text-ink transition hover:bg-hover sm:min-h-0 sm:py-2"
         >
-          {isDraft ? S.discardDraft : S.useLatest}
+          {S.useLatest}
         </button>
-        {!isDraft && <span className="text-xs text-ink-soft">{S.useLatestHint}</span>}
+        <span className="text-xs text-ink-soft">{S.useLatestHint}</span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * After this tab's unsaved edits were merged with a newer version (or a
+ * recovered draft), say plainly what had to be reconciled. Nothing was lost;
+ * values the student's edits replaced can be put back.
+ */
+function MergeBanner({
+  merge,
+  onUseTheirs,
+  onDismiss,
+}: {
+  merge: MergeNotice;
+  onUseTheirs: () => void;
+  onDismiss: () => void;
+}) {
+  const { dict, t } = useI18n();
+  const S = dict.safety;
+  const { keptBoth, restored, keptDeleted, overwritten } = merge.report;
+  const lines = [
+    keptBoth > 0 && t(S.mergeKeptBoth, { count: keptBoth }),
+    restored > 0 && t(S.mergeRestored, { count: restored }),
+    keptDeleted > 0 && t(S.mergeKeptDeleted, { count: keptDeleted }),
+    overwritten.length > 0 && t(S.mergeOverwrote, { count: overwritten.length }),
+  ].filter((line): line is string => Boolean(line));
+  return (
+    <div
+      role="status"
+      className="border-b border-line bg-lime-faint px-4 py-3 text-sm text-ink sm:px-6"
+    >
+      <p className="font-semibold">
+        {merge.source === "draft" ? S.mergeTitleDraft : S.mergeTitle}
+      </p>
+      <ul className="mt-0.5 list-disc space-y-0.5 ps-5 text-ink-soft">
+        {lines.map((line) => (
+          <li key={line}>{line}</li>
+        ))}
+      </ul>
+      <div className="mt-2.5 flex flex-wrap items-center gap-2">
+        {overwritten.length > 0 && (
+          <button
+            type="button"
+            onClick={onUseTheirs}
+            className="min-h-11 rounded-md border border-line-strong bg-card px-3.5 text-xs font-semibold text-ink transition hover:bg-hover sm:min-h-0 sm:py-2"
+          >
+            {S.mergeUseTheirs}
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={onDismiss}
+          className="min-h-11 rounded-md bg-ink px-3.5 text-xs font-semibold text-paper transition hover:opacity-90 sm:min-h-0 sm:py-2"
+        >
+          {S.mergeDismiss}
+        </button>
       </div>
     </div>
   );

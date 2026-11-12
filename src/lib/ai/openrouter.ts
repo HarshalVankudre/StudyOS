@@ -6,6 +6,7 @@
  * A bare Claude model id (`claude-…`) is served by the Anthropic Messages API
  * (./anthropic); every other id goes to OpenRouter. See ./provider.
  */
+import { AiTruncatedError } from "./ai-errors";
 import { anthropicCompletion } from "./anthropic";
 import { providerForModel } from "./provider";
 import { recordUsage } from "./usage-meter";
@@ -47,7 +48,7 @@ export async function chatCompletion(
   }
 
   const data = await res.json();
-  recordUsage(data?.usage);
+  recordUsage(data?.usage, model);
   const choice = data?.choices?.[0];
   const content: unknown = choice?.message?.content;
   // GLM is a reasoning model and its reasoning tokens count against
@@ -57,15 +58,18 @@ export async function chatCompletion(
   // from a transport failure or a genuinely empty reply.
   if (typeof content !== "string" || content.length === 0) {
     if (choice?.finish_reason === "length") {
-      throw new Error(
+      throw new AiTruncatedError(
         `OpenRouter response was truncated before any text (max_tokens=${maxTokens} too low)`,
+        maxTokens,
       );
     }
     throw new Error("OpenRouter returned no text content");
   }
   if (choice.finish_reason === "length") {
-    throw new Error(
+    throw new AiTruncatedError(
       `OpenRouter response was truncated mid-output (max_tokens=${maxTokens} too low); the JSON is incomplete`,
+      maxTokens,
+      content,
     );
   }
   return content;
@@ -86,6 +90,20 @@ export interface StreamChatOptions {
   onReasoning?: (text: string) => void;
   /** Called with visible answer text as it streams. */
   onContent?: (text: string) => void;
+  /**
+   * Mark the stable prompt prefix for provider prompt caching (Anthropic:
+   * the system prompt plus the growing conversation). Callers that send the
+   * same prefix across several calls should set it; OpenRouter models that
+   * cache do so automatically.
+   */
+  cache?: boolean;
+  /**
+   * Thinking effort for Claude models (`output_config.effort`); ignored on
+   * OpenRouter, where `reasoning` carries the equivalent setting.
+   */
+  effort?: "low" | "medium" | "high";
+  /** Claude models: answer without thinking (see AnthropicCallOptions.noThinking). */
+  noThinking?: boolean;
 }
 
 /** Flush reasoning to `onReasoning` once this many buffered chars accumulate. */
@@ -111,6 +129,9 @@ export async function streamChatCompletion(
       signal: options?.signal,
       onReasoning: options?.reasoning === false ? undefined : options?.onReasoning,
       onContent: options?.onContent,
+      cache: options?.cache,
+      effort: options?.effort,
+      noThinking: options?.noThinking,
     });
   }
   const body: Record<string, unknown> = {
@@ -224,20 +245,23 @@ export async function streamChatCompletion(
     // arrived, so the live "Thinking…" tail isn't lost and a cut-off turn still
     // bills for the tokens it reported.
     flushReasoning(true);
-    if (usagePayload) recordUsage(usagePayload);
+    if (usagePayload) recordUsage(usagePayload, model);
   }
 
   if (content.length === 0) {
     if (finishReason === "length") {
-      throw new Error(
+      throw new AiTruncatedError(
         `OpenRouter response was truncated before any text (max_tokens=${maxTokens} too low)`,
+        maxTokens,
       );
     }
     throw new Error("OpenRouter returned no text content");
   }
   if (finishReason === "length") {
-    throw new Error(
+    throw new AiTruncatedError(
       `OpenRouter response was truncated mid-output (max_tokens=${maxTokens} too low); the JSON is incomplete`,
+      maxTokens,
+      content,
     );
   }
   return content;

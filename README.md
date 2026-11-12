@@ -4,224 +4,86 @@
 
 # StudyOS&nbsp;&nbsp;✦
 
-### Your whole semester, organized — built by AI in seconds.
+### Your semester, set up in about a minute. Then it keeps itself current.
 
-Describe your classes in a single sentence and StudyOS designs the dashboards,
-planners, databases and trackers you actually need — **already set up and filled in.**
-
-_No templates. No blank pages. No setup._
+Describe your courses or upload a syllabus. StudyOS sets up your deadlines, a plan
+for today and a place to study. Connect your school calendar and new deadlines come
+in on their own. Miss a day and the plan rebuilds around what's left.
 
 <br/>
 
-![Made for students & researchers](https://img.shields.io/badge/✦-students_&_researchers-c9f24c?style=flat-square&labelColor=1a1712)
-![Workspaces built by AI](https://img.shields.io/badge/workspaces-built_by_AI-c9f24c?style=flat-square&labelColor=1a1712)
-![Speaks 10 languages](https://img.shields.io/badge/speaks-10_languages-c9f24c?style=flat-square&labelColor=1a1712)
-![Free to start](https://img.shields.io/badge/start-free-c9f24c?style=flat-square&labelColor=1a1712)
+![Ten languages](https://img.shields.io/badge/languages-10-2dd4bf?style=flat-square&labelColor=0b0b0a)
+![Studying is free](https://img.shields.io/badge/studying-free_on_every_plan-2dd4bf?style=flat-square&labelColor=0b0b0a)
 
 </div>
 
 ---
 
-> ### _“I'm a pre-med sophomore taking Anatomy, Biochemistry and Physiology.”_
->
-> …about ten seconds later: a complete study workspace — courses, an assignment
-> board, a planner and a reading list — **populated, structured, and ready to use.**
+## How it works
 
-<br/>
+1. **Describe your courses.** One sentence is enough, or paste or upload your
+   syllabus. StudyOS asks a couple of short questions, then builds your workspace.
+   A build takes about a minute.
+2. **Connect your school calendar.** Paste the calendar link from Canvas, Moodle,
+   Blackboard, Brightspace or Google Calendar (or upload an `.ics` file). Deadlines
+   come in with their dates and courses.
+3. **Open Today.** Each day you get a short list that fits the time you have.
+   Whatever you don't finish moves forward without piling up.
 
-## ✨ The idea
-
-Every semester starts the same way: a dozen browser tabs, a blank Notion page, and a
-planner you'll abandon by week three. **StudyOS does the setup for you.**
-
-Tell it what you're studying. Answer a couple of quick, tailored questions. Then watch
-it build an entire workspace tuned to your *exact* courses — real structured data you
-can edit, check off, and reshape. It's the study workspace you'd have built yourself,
-if you had the time.
-
-<br/>
-
-## ⚡ From a sentence to a full workspace
-
-<table>
-<tr>
-<td width="33%" valign="top">
-
-### `01` Describe your classes
-
-One sentence is enough —
-> *“I'm pre-med taking Anatomy, Biochem and Physiology.”*
-
-</td>
-<td width="33%" valign="top">
-
-### `02` Get a full workspace
-
-Courses, an assignment board, a planner and a reading list — **already set up and filled in.**
-
-</td>
-<td width="33%" valign="top">
-
-### `03` Study and adjust
-
-Edit anything, check off tasks, ask for changes in plain English. **Everything autosaves.**
-
-</td>
-</tr>
-</table>
-
-<br/>
-
-## 🎯 Highlights
-
-<table>
-<tr>
-<td width="50%" valign="top">
-
-### 🪄 Workspaces, made for you
-One prompt becomes a complete workspace tailored to your exact courses — not a template you have to fill in yourself.
-
-</td>
-<td width="50%" valign="top">
-
-### 🗃️ Real, structured data
-Assignments, grades and readings live in proper databases with typed fields — dates, statuses, weights, links — not loose notes.
-
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-
-### 🗓️ Planner &amp; calendar
-Every deadline in one place. Flip the same data between **table**, **board** and **calendar** in a single click.
-
-</td>
-<td width="50%" valign="top">
-
-### 🏠 A clear home base
-A dashboard that pulls your whole week together, so you always open to *what's next* — never a blank screen.
-
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-
-### 💾 Edit, saved instantly
-Rename, check off, add a row — every change saves itself the moment you make it. No save button, ever.
-
-</td>
-<td width="50%" valign="top">
-
-### 💬 Ask in plain English
-> *“Add a midterm to CS next Friday.”*
-
-Your built-in assistant updates the workspace itself, right in front of you.
-
-</td>
-</tr>
-</table>
-
-<br/>
-
-## 🧩 What gets built for you
-
-One prompt generates a whole interconnected workspace — here's the shape of it:
-
-- **📚 Courses** — every class, with instructor, credits and schedule
-- **📝 Assignments** — homework, quizzes, projects and exams, each with a course, type, status, due date and weight
-- **📖 Reading List** — chapters and resources to get through, with links and read-checkboxes
-- **🏠 Dashboard · 🗓️ Planner · and a page per view** — your week, pulled together and laid out on a calendar
-
-And because it's a live board, your week reads at a glance:
-
-| 📋 To do | 🔄 In progress | ✅ Done |
-| :--- | :--- | :--- |
-| Proofs Quiz · `MATH 201` | Problem Set 3 · `CS 101` | Lab Report 2 · `PHYS 150` |
-| Midterm Exam · `CS 101` | Linked List Lab · `CS 210` | Reading Response · `ENG 102` |
-| Essay First Draft · `ENG 102` | | |
-
-<br/>
-
-## 👁️ Three ways to see everything
-
-The same assignments, three lenses — switch instantly, no re-entry:
+## What it does
 
 | | |
 | :--- | :--- |
-| **▦ Table** | Every field in one tidy grid — sort, scan, and edit in place. |
-| **▤ Board** | A kanban of your work by status. Drag _Not started → In progress → Done._ |
-| **▥ Calendar** | Every deadline dropped onto the month, so nothing sneaks up on you. |
+| **Deadlines that fill themselves in** | Calendar feeds from Canvas, Moodle, Blackboard, Brightspace and Google Calendar. When you open a workspace, StudyOS checks for new and changed deadlines (at most every six hours, or when you tap *Sync now*). Your own edits are kept; a deadline removed from the calendar is flagged, never deleted. Links are stored encrypted (set `FEED_URL_KEY`). Going the other way, subscribe to your deadlines from Google, Apple or Outlook Calendar. |
+| **A daily plan that forgives missed days** | *Today* picks a short list from deadlines, exams, flashcards and to-dos, sized to your daily time. Unfinished items roll forward, exams get short reviews in the three weeks before, and it warns when the coming days hold more work than your time allows. Deterministic: no AI credits, no invented coursework. |
+| **Study kits from your own material** | Upload slides, notes or readings (PDF, Word, text). StudyOS writes summary notes, flashcards and a practice quiz; every card and question keeps a quote from your material, and the quote is verified against the document before it is kept. Unverifiable suggestions are dropped. You see the cost first and pay only if it works. |
+| **Practice quizzes** | Multiple choice, true/false and short answers, an exam mode (optional timer, no feedback until you submit) and a round of the questions you keep missing. |
+| **Flashcards on FSRS** | Spaced repetition with FSRS scheduling, a gentle catch-up after days off, streak freezes, practice mode, statistics, and import/export for Anki and Quizlet text formats. |
+| **Grade tracker** | Where you stand and what you need on the rest to reach a target, in percentages, US letter grades or GPA, UK degree classes or German grades, with a what-if mode. |
+| **An assistant that edits your workspace** | Ask in plain words; each change comes with an Undo button, the conversation persists, and one message never spends more than a fixed credit ceiling. |
+| **A real editor** | Block pages (type `/` to insert), tables, boards and calendars with saved filters and sorts, workspace-wide undo and redo, version-checked autosave and a 30-day trash. |
+| **Everything else** | Search across workspaces, export to Markdown, CSV or `.zip`, print to PDF, install to the home screen, "Download my data" and self-serve account deletion. Ten languages, Arabic right to left. |
 
-<br/>
+## Pricing
 
-## 💬 Just ask — your workspace edits itself
+Studying is free on every plan: flashcard reviews, quizzes, Today, the grade tracker,
+deadline sync, export and undo never use credits. Credits pay for AI work (building
+a workspace, study kits, assistant messages).
 
-No menus to hunt through. Talk to StudyOS the way you'd talk to a study buddy:
+- **Free:** 300 credits at sign-up; once a month, if the balance is under 150,
+  150 credits are added.
+- **Pro:** $5 a month by default, with 1,000 credits for every paid month, higher
+  hourly limits and a higher per-message ceiling. Both plans use the same AI model
+  unless `STUDYOS_FREE_MODEL` / `STUDYOS_PRO_MODEL` say otherwise.
+- **Credit packs:** 1,000 credits for $10, one-time, on either plan.
+- Credits never expire and unused credits carry over.
 
-> *“Add a midterm to CS.”* &nbsp;·&nbsp; *“Mark the Physics lab as done.”* &nbsp;·&nbsp; *“Make a tracker for my thesis chapters.”*
+The numbers above are the defaults in code. The source of truth is:
 
-It understands your courses, makes the change live on the page, and — of course — saves it instantly.
+- displayed Pro prices: `src/lib/plan-pricing.ts`, configured with
+  `STUDYOS_PRO_MONTHLY_PRICE` (default `5`) and `STUDYOS_PRO_ANNUAL_PRICE`
+  (no default; the yearly option appears only when it and `STRIPE_PRICE_PRO_ANNUAL`
+  are set). They must match the Stripe prices `STRIPE_PRICE_PRO` and
+  `STRIPE_PRICE_PRO_ANNUAL`.
+- credits and packs: `src/lib/credits.ts` and `src/lib/credits-info.ts`;
+  hourly limits: `src/lib/usage-limits.ts`; per-message ceilings: `src/lib/ai/budgets.ts`.
 
-<br/>
+## Development
 
-## 🌍 Speaks your language
+Next.js 16, React 19, TypeScript, Tailwind 4, Prisma on Postgres, Clerk, Stripe,
+Vitest. Read `AGENTS.md` first: this Next.js version differs from older ones.
 
-StudyOS is fully translated into **10 languages**, with the AI generating your entire
-workspace in whichever one you pick — right down to right-to-left layout for Arabic.
+```bash
+npx pnpm@10 install
+cp .env.example .env.local   # fill in the values; src/lib/ops/env.ts documents each one
+npx pnpm@10 dev
+npx pnpm@10 exec tsc --noEmit
+npx pnpm@10 lint
+npx pnpm@10 test
+```
 
-🇬🇧 English &nbsp; 🇪🇸 Español &nbsp; 🇩🇪 Deutsch &nbsp; 🇫🇷 Français &nbsp; 🇮🇹 Italiano &nbsp; 🇧🇷 Português &nbsp; 🇳🇱 Nederlands &nbsp; 🇨🇳 中文 &nbsp; 🇯🇵 日本語 &nbsp; 🇸🇦 العربية
+Public settings worth knowing: `STUDYOS_SUPPORT_EMAIL` (the support address shown on
+public pages), `STUDYOS_PRO_MONTHLY_PRICE` / `STUDYOS_PRO_ANNUAL_PRICE` (displayed
+prices), `FEED_URL_KEY` (encrypts connected calendar links; set it in production).
 
-<br/>
-
-## 💸 Simple, student-friendly pricing
-
-<table>
-<tr>
-<td width="50%" valign="top">
-
-### Free &nbsp;·&nbsp; **$0**
-
-- Generate AI workspaces
-- Edit &amp; autosave everything
-- Dashboards, databases, calendar
-- Ask to edit in plain English
-
-</td>
-<td width="50%" valign="top">
-
-### Pro &nbsp;·&nbsp; **$5**/mo &nbsp;<sub>★ most popular</sub>
-
-- Everything in Free
-- **Unlimited** generations
-- The smartest, most detailed model
-- Priority support
-
-</td>
-</tr>
-</table>
-
-_Start free. No credit card. Upgrade only when you want more._
-
-<br/>
-
-## 🎓 Made for every kind of student
-
-`Computer Science` &nbsp;·&nbsp; `Pre-med` &nbsp;·&nbsp; `Law` &nbsp;·&nbsp; `MBA` &nbsp;·&nbsp; `High school` &nbsp;·&nbsp; `Grad school`
-
-If your semester has deadlines, StudyOS has a workspace for it.
-
-<br/>
-
----
-
-<div align="center">
-
-### Stop setting up. Start studying.
-
-**Your first workspace is one sentence away.**
-
-<br/>
-
-<sub>StudyOS&nbsp;✦ — the study workspace for students · © 2026</sub>
-
-</div>
+<sub>StudyOS ✦ The study planner that keeps itself up to date.</sub>

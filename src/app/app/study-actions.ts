@@ -29,7 +29,9 @@ const LEGACY_STUDY_KIND = "evt:study_reviewed";
 const HISTORY_DAYS = 400;
 const MAX_PER_BATCH = 5_000;
 
-const count = z.number().int().min(0).max(MAX_PER_BATCH);
+// A missing counter is 0, so a tab still running an older build (which does
+// not send the newer counters, e.g. quiz answers) keeps recording its reviews.
+const count = z.number().int().min(0).max(MAX_PER_BATCH).default(0);
 const batchSchema = z.object({
   workspaceId: z.string().min(1).max(200),
   localDate: z.string().regex(DAY_RE),
@@ -59,7 +61,12 @@ export async function recordReviewsAction(batches: ReviewBatch[]): Promise<{ ok:
   const owned = new Set(
     (
       await prisma.workspace.findMany({
-        where: { ownerId: userId, id: { in: [...new Set(valid.map((b) => b.workspaceId))] } },
+        // Trashed workspaces are excluded everywhere, here too.
+        where: {
+          ownerId: userId,
+          deletedAt: null,
+          id: { in: [...new Set(valid.map((b) => b.workspaceId))] },
+        },
         select: { id: true },
       })
     ).map((w) => w.id),
@@ -112,7 +119,8 @@ async function studyDays(userId: string, offset: number, today: string): Promise
     }),
   ]);
   return [
-    ...rows.filter((r) => r.reviews > 0 || r.practice > 0).map((r) => r.localDate),
+    // Reviews, flashcard practice and quiz answers all count as a study day.
+    ...rows.filter((r) => r.reviews > 0 || r.practice > 0 || r.quizAnswers > 0).map((r) => r.localDate),
     ...legacy.map((e) => dayAtOffset(e.createdAt, offset)),
   ];
 }

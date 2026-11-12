@@ -13,7 +13,12 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
-import { checkUsageLimit, USAGE_LIMITS } from "./usage-limits";
+import {
+  checkUsageLimit,
+  isUsageLimitReached,
+  recordUsageEvent,
+  USAGE_LIMITS,
+} from "./usage-limits";
 
 beforeEach(() => {
   mocks.usageCount.mockReset();
@@ -72,5 +77,27 @@ describe("checkUsageLimit", () => {
     mocks.usageCreate.mockRejectedValue(new Error("db down"));
     const res = await checkUsageLimit("user_1", "generate");
     expect(res.allowed).toBe(true);
+  });
+});
+
+describe("failed-generation quota", () => {
+  it("checks without recording, and records only when a failure happens", async () => {
+    mocks.usageCount.mockResolvedValue(USAGE_LIMITS.generate_failed.free - 1);
+    expect(await isUsageLimitReached("user_1", "generate_failed")).toBe(false);
+    expect(mocks.usageCreate).not.toHaveBeenCalled();
+    await recordUsageEvent("user_1", "generate_failed");
+    expect(mocks.usageCreate).toHaveBeenCalledWith({ data: { userId: "user_1", kind: "generate_failed" } });
+    mocks.usageCount.mockResolvedValue(USAGE_LIMITS.generate_failed.free);
+    expect(await isUsageLimitReached("user_1", "generate_failed")).toBe(true);
+  });
+
+  it("is small and per day", () => {
+    expect(USAGE_LIMITS.generate_failed.free).toBeLessThanOrEqual(5);
+    expect(USAGE_LIMITS.generate_failed.windowMs).toBe(24 * 60 * 60 * 1000);
+  });
+
+  it("recording never throws", async () => {
+    mocks.usageCreate.mockRejectedValue(new Error("db down"));
+    await expect(recordUsageEvent("user_1", "generate_failed")).resolves.toBeUndefined();
   });
 });

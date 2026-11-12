@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   PHASE_CEILINGS,
-  THINKING_BUFFER_MAX,
   advanceAnimatedProgress,
   createInitialAgentActivity,
   reduceAgentActivity,
@@ -69,21 +68,15 @@ describe("Living Story progress", () => {
     expect(completed.progress).toBe(100);
   });
 
-  it("accumulates streamed thinking, caps the buffer, and leaves progress alone", () => {
-    let s = createInitialAgentActivity("start");
-    const before = s.progress;
-    s = reduceAgentActivity(s, { type: "thinking", phase: "planning", delta: "abc" });
-    s = reduceAgentActivity(s, { type: "thinking", phase: "planning", delta: "def" });
-    expect(s.thinking).toBe("abcdef");
-    expect(s.progress).toBe(before); // thinking is live narration, not progress
-
-    const capped = reduceAgentActivity(s, {
+  it("drops streamed reasoning: it is neither kept nor counted as progress", () => {
+    const start = createInitialAgentActivity("start");
+    const after = reduceAgentActivity(start, {
       type: "thinking",
       phase: "updating",
-      delta: "x".repeat(THINKING_BUFFER_MAX + 500),
+      delta: "Next I need an add_page operation with unique ids",
     });
-    expect(capped.thinking?.length).toBe(THINKING_BUFFER_MAX);
-    expect(capped.thinking?.endsWith("x")).toBe(true);
+    expect(after).toBe(start);
+    expect(JSON.stringify(after)).not.toContain("add_page");
   });
 
   it("records a plan and updates area status", () => {

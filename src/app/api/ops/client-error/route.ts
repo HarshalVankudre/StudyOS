@@ -1,3 +1,4 @@
+import { clientAddress } from "@/lib/ops/client-ip";
 import { reportError } from "@/lib/ops/report-error";
 import { createMemoryRateLimiter } from "@/lib/ops/memory-rate-limit";
 
@@ -30,9 +31,9 @@ export async function POST(req: Request) {
     }
   }
 
-  // Cloud Run appends the real client address last; earlier entries are client-supplied.
-  const client =
-    req.headers.get("x-forwarded-for")?.split(",").at(-1)?.trim() || "unknown";
+  // The entry our own proxies appended (see lib/ops/client-ip); earlier
+  // entries are client-supplied and could be forged to dodge the limit.
+  const client = clientAddress(req.headers);
   if (!perClient(client) || !instanceLimit("all")) {
     return new Response(null, { status: 429 });
   }

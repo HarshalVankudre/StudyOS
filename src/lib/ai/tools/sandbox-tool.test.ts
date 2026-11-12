@@ -73,4 +73,124 @@ describe("run_in_sandbox tool", () => {
     expect(out.artifacts).toHaveLength(0);
     expect(created).toHaveLength(0);
   });
+
+  describe("charging", () => {
+    function quota() {
+      const settled: string[] = [];
+      const released: string[] = [];
+      const reserved: string[] = [];
+      return {
+        settled,
+        released,
+        reserved,
+        quota: {
+          reserve: async (ownerId: string) => {
+            reserved.push(ownerId);
+            let done = false;
+            return {
+              ok: true as const,
+              charge: {
+                settle: async () => {
+                  done = true;
+                  settled.push(ownerId);
+                },
+                release: async () => {
+                  // Like releaseCreditHold: a no-op after a settle.
+                  if (!done) released.push(ownerId);
+                },
+              },
+            };
+          },
+        },
+      };
+    }
+
+    it("reserves the credits before the run starts, and refuses without them", async () => {
+      const { createAsset } = deps();
+      const order: string[] = [];
+      const runner = {
+        run: async () => {
+          order.push("run");
+          return { exitCode: 0, logTail: "", artifacts: [{ path: "out/a.png", bytes: new Uint8Array([1]) }] };
+        },
+      };
+      const q = quota();
+      const reserve = q.quota.reserve;
+      const tool = createSandboxTool({
+        runner,
+        createAsset,
+        enabled: true,
+        quota: { reserve: async (u: string) => (order.push("reserve"), reserve(u)) },
+      });
+      await tool.handler(baseInput, { taskId: "t", ownerId: "u" });
+      expect(order).toEqual(["reserve", "run"]);
+
+      const broke = createSandboxTool({
+        runner,
+        createAsset,
+        enabled: true,
+        quota: { reserve: async () => ({ ok: false as const, reason: "credits" as const }) },
+      });
+      await expect(Promise.resolve(broke.handler(baseInput, { taskId: "t", ownerId: "u" }))).rejects.toThrow(
+        /Not enough credits/,
+      );
+      const capped = createSandboxTool({
+        runner,
+        createAsset,
+        enabled: true,
+        quota: { reserve: async () => ({ ok: false as const, reason: "quota" as const }) },
+      });
+      await expect(Promise.resolve(capped.handler(baseInput, { taskId: "t", ownerId: "u" }))).rejects.toThrow(
+        /Daily rendering limit/,
+      );
+      expect(order).toEqual(["reserve", "run"]); // neither refused run started
+    });
+
+    it("charges a run that delivered an image", async () => {
+      const { runner, createAsset } = deps();
+      const q = quota();
+      const tool = createSandboxTool({ runner, createAsset, enabled: true, quota: q.quota });
+      await tool.handler(baseInput, { taskId: "t", ownerId: "u" });
+      expect(q.settled).toEqual(["u"]);
+      expect(q.released).toEqual([]);
+    });
+
+    it("does not charge a run that failed and produced nothing", async () => {
+      const { runner, createAsset } = deps({ exitCode: 1, logTail: "error", artifacts: [] });
+      const q = quota();
+      const tool = createSandboxTool({ runner, createAsset, enabled: true, quota: q.quota });
+      const out = (await tool.handler(baseInput, { taskId: "t", ownerId: "u" })) as { exitCode: number };
+      expect(out.exitCode).toBe(1);
+      expect(q.settled).toEqual([]);
+      // The reserved credits go back.
+      expect(q.released).toEqual(["u"]);
+    });
+
+    it("does not charge a run whose only output is not an allowed image", async () => {
+      const { runner, createAsset } = deps({
+        exitCode: 0,
+        logTail: "ok",
+        artifacts: [{ path: "out/report.pdf", bytes: new Uint8Array([1]) }],
+      });
+      const q = quota();
+      const tool = createSandboxTool({ runner, createAsset, enabled: true, quota: q.quota });
+      await tool.handler({ ...baseInput, outputs: ["out/report.pdf"] }, { taskId: "t", ownerId: "u" });
+      expect(q.settled).toEqual([]);
+      // The reserved credits go back.
+      expect(q.released).toEqual(["u"]);
+    });
+
+    it("does not charge a run that threw", async () => {
+      const { createAsset } = deps();
+      const q = quota();
+      const runner = { run: async () => { throw new Error("timeout"); } };
+      const tool = createSandboxTool({ runner, createAsset, enabled: true, quota: q.quota });
+      await expect(
+        Promise.resolve(tool.handler(baseInput, { taskId: "t", ownerId: "u" })),
+      ).rejects.toThrow("timeout");
+      expect(q.settled).toEqual([]);
+      // The reserved credits go back.
+      expect(q.released).toEqual(["u"]);
+    });
+  });
 });

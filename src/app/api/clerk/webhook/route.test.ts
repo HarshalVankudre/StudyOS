@@ -1,12 +1,18 @@
 import { createHmac, randomBytes } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ erase: vi.fn(), cancelAll: vi.fn(), tombstone: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  erase: vi.fn(),
+  stopBilling: vi.fn(),
+  tombstone: vi.fn(),
+  report: vi.fn(),
+}));
 vi.mock("@/lib/account/erase-user-data", () => ({ eraseUserData: mocks.erase }));
 vi.mock("@/lib/billing", () => ({
-  cancelAllBillingForUser: mocks.cancelAll,
   markAccountDeleted: mocks.tombstone,
+  stopBillingForDeletedAccount: mocks.stopBilling,
 }));
+vi.mock("@/lib/ops/report-error", () => ({ reportError: mocks.report }));
 
 import { POST } from "./route";
 
@@ -30,22 +36,26 @@ const deleted = (id: string) => ({ type: "user.deleted", object: "event", data: 
 
 beforeEach(() => {
   process.env.CLERK_WEBHOOK_SIGNING_SECRET = SECRET;
+  for (const fn of Object.values(mocks)) fn.mockReset();
   mocks.erase.mockResolvedValue(undefined);
-  mocks.cancelAll.mockResolvedValue(undefined);
+  mocks.stopBilling.mockResolvedValue(true);
   mocks.tombstone.mockResolvedValue(undefined);
 });
 afterEach(() => {
   delete process.env.CLERK_WEBHOOK_SIGNING_SECRET;
+  vi.unstubAllEnvs();
 });
 
 describe("POST /api/clerk/webhook", () => {
-  it("erases the user's data on a correctly signed user.deleted", async () => {
+  it("tombstones, stops billing, then erases on a correctly signed user.deleted", async () => {
     const res = await POST(signed(deleted("user_123")));
     expect(res.status).toBe(200);
-    expect(mocks.cancelAll).toHaveBeenCalledWith("user_123");
-    expect(mocks.erase).toHaveBeenCalledWith("user_123");
     expect(mocks.tombstone).toHaveBeenCalledWith("user_123");
-    expect(mocks.cancelAll.mock.invocationCallOrder[0]).toBeLessThan(mocks.erase.mock.invocationCallOrder[0]);
+    expect(mocks.stopBilling).toHaveBeenCalledWith("user_123");
+    expect(mocks.erase).toHaveBeenCalledWith("user_123");
+    const order = (fn: { mock: { invocationCallOrder: number[] } }) => fn.mock.invocationCallOrder[0];
+    expect(order(mocks.tombstone)).toBeLessThan(order(mocks.stopBilling));
+    expect(order(mocks.stopBilling)).toBeLessThan(order(mocks.erase));
   });
 
   it("rejects a bad signature, a stale timestamp and missing headers", async () => {
@@ -58,9 +68,21 @@ describe("POST /api/clerk/webhook", () => {
     expect(mocks.erase).not.toHaveBeenCalled();
   });
 
-  it("is 404 when the signing secret is not configured", async () => {
+  it("is 404 when the signing secret is not configured and billing is off", async () => {
     delete process.env.CLERK_WEBHOOK_SIGNING_SECRET;
+    vi.stubEnv("STRIPE_SECRET_KEY", "");
     expect((await POST(signed(deleted("user_1")))).status).toBe(404);
+    expect(mocks.report).not.toHaveBeenCalled();
+  });
+
+  it("fails loudly (503, reported) when billing is on but the signing secret is missing", async () => {
+    delete process.env.CLERK_WEBHOOK_SIGNING_SECRET;
+    vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_x");
+    vi.stubEnv("STRIPE_PRICE_PRO", "price_x");
+    const res = await POST(signed(deleted("user_1")));
+    expect(res.status).toBe(503);
+    expect(mocks.report).toHaveBeenCalled();
+    expect(mocks.erase).not.toHaveBeenCalled();
   });
 
   it("ignores other events", async () => {
@@ -69,18 +91,26 @@ describe("POST /api/clerk/webhook", () => {
     expect(mocks.erase).not.toHaveBeenCalled();
   });
 
-  it("keeps the data and asks Clerk to retry when billing could not be stopped", async () => {
-    mocks.cancelAll.mockRejectedValue(new Error("stripe down"));
+  it("still erases when Stripe is down (the cancel stays queued for the maintenance job) and asks Clerk to retry", async () => {
+    mocks.stopBilling.mockResolvedValue(false);
     const res = await POST(signed(deleted("user_123")));
     expect(res.status).toBe(503);
+    expect(mocks.tombstone).toHaveBeenCalledWith("user_123");
+    expect(mocks.erase).toHaveBeenCalledWith("user_123");
+  });
+
+  it("writes nothing else when the tombstone cannot be written", async () => {
+    mocks.tombstone.mockRejectedValue(new Error("db down"));
+    const res = await POST(signed(deleted("user_123")));
+    expect(res.status).toBe(500);
+    expect(mocks.stopBilling).not.toHaveBeenCalled();
     expect(mocks.erase).not.toHaveBeenCalled();
   });
 
   it("reports and returns 500 when erasure fails", async () => {
-    const err = vi.spyOn(console, "error").mockImplementation(() => {});
     mocks.erase.mockRejectedValue(new Error("db down"));
     const res = await POST(signed(deleted("user_123")));
     expect(res.status).toBe(500);
-    expect(err).toHaveBeenCalled();
+    expect(mocks.report).toHaveBeenCalled();
   });
 });

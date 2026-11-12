@@ -64,7 +64,7 @@ describe("streamChatCompletion", () => {
 
     expect(result).toBe("Hello world");
     expect(reasoning.join("")).toBe("Think more.");
-    expect(usage).toEqual({ promptTokens: 5, completionTokens: 7 });
+    expect(usage).toMatchObject({ promptTokens: 5, completionTokens: 7 });
 
     const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
     expect(body.stream).toBe(true);

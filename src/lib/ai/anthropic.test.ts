@@ -174,7 +174,7 @@ describe("chatCompletion (Anthropic)", () => {
     const { usage } = await withUsageMeter(() =>
       chatCompletion(MODEL, [{ role: "user", content: "x" }], 100),
     );
-    expect(usage).toEqual({ promptTokens: 35, completionTokens: 7 });
+    expect(usage).toMatchObject({ promptTokens: 35, completionTokens: 7 });
   });
 });
 
@@ -204,7 +204,7 @@ describe("streamChatCompletion (Anthropic)", () => {
     expect(result).toBe("Hello world");
     expect(reasoning.join("")).toBe("Plan first.");
     expect(content).toEqual(["Hello", " world"]);
-    expect(usage).toEqual({ promptTokens: 4, completionTokens: 9 });
+    expect(usage).toMatchObject({ promptTokens: 4, completionTokens: 9 });
     expect(fake.calls[0].params.thinking).toEqual({ type: "adaptive", display: "summarized" });
     expect("temperature" in fake.calls[0].params).toBe(false);
   });
@@ -254,7 +254,7 @@ describe("streamChatCompletion (Anthropic)", () => {
     expect(error).toBe(reason);
     expect(content).toEqual(["Hel"]);
     expect(fake.calls[0].signal).toBe(controller.signal);
-    expect(usage).toEqual({ promptTokens: 12, completionTokens: 3 });
+    expect(usage).toMatchObject({ promptTokens: 12, completionTokens: 3 });
   });
 });
 

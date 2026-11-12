@@ -60,9 +60,10 @@ export function DeleteWorkspaceButton({
 
   const duplicate = () => {
     startTransition(async () => {
-      const newId = await duplicateWorkspaceAction(id).catch(() => null);
-      if (!newId) {
-        toast.error(S.actionFailed);
+      const result = await duplicateWorkspaceAction(id).catch(() => null);
+      if (!result?.ok) {
+        // The cap and rate-limit messages say what to do next.
+        toast.error(result?.message ?? S.actionFailed);
         return;
       }
       router.refresh();

@@ -15,6 +15,13 @@ export const MAX_COMPONENT_SOURCE = 100_000;
 export const MAX_FLASHCARDS = 200;
 export const MAX_FLASHCARD_TEXT = 2_000;
 
+/** Bounds for a quiz block (agent- and user-authored). */
+export const MAX_QUIZ_QUESTIONS = 200;
+export const MAX_QUIZ_TEXT = 2_000;
+export const MAX_QUIZ_CHOICES = 6;
+/** Attempt history kept per quiz block (newest last). */
+export const MAX_QUIZ_ATTEMPTS = 20;
+
 const selectOption = z.object({
   id: z.string(),
   label: z.string(),
@@ -47,9 +54,26 @@ const cellValue = z.union([
   z.null(),
 ]);
 
+/** Link from an imported row to its calendar event (types.ts RowSource). */
+const rowSource = z.object({
+  kind: z.literal("ical"),
+  feed: z.string().min(1).max(100),
+  key: z.string().min(1).max(500),
+  synced: z
+    .object({
+      title: z.string().max(1_000).optional(),
+      due: z.string().max(40).optional(),
+      link: z.string().max(2_000).optional(),
+      course: z.string().max(2_000).optional(),
+    })
+    .optional(),
+  missingSince: z.string().max(40).optional(),
+});
+
 const databaseRow = z.object({
   id: z.string(),
   cells: z.record(z.string(), cellValue),
+  source: rowSource.optional(),
 });
 
 const viewSort = z.object({
@@ -105,6 +129,14 @@ const database = z.object({
   views: z.array(databaseView),
 });
 
+/** Where a card or question came from in the student's own material. */
+const sourceRef = z.object({
+  materialId: z.string().max(200).optional(),
+  page: z.number().int().positive().optional(),
+  quote: z.string().max(MAX_FLASHCARD_TEXT).optional(),
+  label: z.string().max(300).optional(),
+});
+
 // Blank sides are allowed: a student adds a card and then types into it, and
 // autosave runs in between. Study sessions skip cards with an empty side.
 const flashcard = z.object({
@@ -124,6 +156,70 @@ const flashcard = z.object({
   lapses: z.number().int().nonnegative().optional(),
   learningStep: z.number().int().nonnegative().optional(),
   dueTime: z.string().optional(),
+  source: sourceRef.optional(),
+});
+
+// Incomplete questions are allowed (a student adds one and then fills it in,
+// with autosave in between); taking a quiz skips questions that are not
+// playable (lib/study/quiz.ts `isPlayableQuestion`).
+const quizQuestion = z.object({
+  id: z.string(),
+  kind: z.enum(["mcq", "true_false", "short"]),
+  prompt: z.string().max(MAX_QUIZ_TEXT),
+  choices: z.array(z.string().max(MAX_QUIZ_TEXT)).max(MAX_QUIZ_CHOICES).optional(),
+  answerIndex: z.number().int().nonnegative().optional(),
+  answerBool: z.boolean().optional(),
+  answerText: z.string().max(MAX_QUIZ_TEXT).optional(),
+  explanation: z.string().max(MAX_QUIZ_TEXT).optional(),
+  topic: z.string().max(200).optional(),
+  source: sourceRef.optional(),
+  stats: z
+    .object({
+      attempts: z.number().int().nonnegative(),
+      correct: z.number().int().nonnegative(),
+      lastAnsweredAt: z.string().optional(),
+    })
+    .optional(),
+});
+
+const quizAttempt = z.object({
+  at: z.string(),
+  mode: z.enum(["practice", "exam"]),
+  score: z.number().nonnegative(),
+  total: z.number().int().nonnegative(),
+});
+
+/** Bounds for a grades block (settings only; the grades live in a database). */
+export const MAX_GRADE_BANDS = 20;
+export const MAX_GRADE_TARGETS = 100;
+
+const gradesColumns = z.object({
+  course: z.string().nullable().optional(),
+  score: z.string().nullable().optional(),
+  maxScore: z.string().nullable().optional(),
+  weight: z.string().nullable().optional(),
+  due: z.string().nullable().optional(),
+});
+
+const gradeBand = z.object({
+  min: z.number().min(-1000).max(1000),
+  label: z.string().max(40),
+  points: z.number().min(-100).max(100).optional(),
+});
+
+const gradesBlock = z.object({
+  id: z.string(),
+  type: z.literal("grades"),
+  title: z.string().max(200).optional(),
+  databaseId: z.string().optional(),
+  columns: gradesColumns.optional(),
+  scale: z.enum(["percent", "us_letter", "us_gpa", "uk_degree", "de_grade"]).optional(),
+  bands: z.array(gradeBand).max(MAX_GRADE_BANDS).optional(),
+  targets: z
+    .record(z.string(), z.number().min(-1000).max(1000))
+    .refine((t) => Object.keys(t).length <= MAX_GRADE_TARGETS, "too many targets")
+    .optional(),
+  defaultTarget: z.number().min(-1000).max(1000).optional(),
 });
 
 const block = z.discriminatedUnion("type", [
@@ -187,6 +283,14 @@ const block = z.discriminatedUnion("type", [
     title: z.string().optional(),
     cards: z.array(flashcard).max(MAX_FLASHCARDS),
   }),
+  z.object({
+    id: z.string(),
+    type: z.literal("quiz"),
+    title: z.string().optional(),
+    questions: z.array(quizQuestion).max(MAX_QUIZ_QUESTIONS),
+    attempts: z.array(quizAttempt).max(MAX_QUIZ_ATTEMPTS).optional(),
+  }),
+  gradesBlock,
 ]);
 
 const page = z.object({
@@ -218,6 +322,7 @@ export {
   cellValue as cellValueSchema,
   databaseProperty as databasePropertySchema,
   databaseRow as databaseRowSchema,
+  rowSource as rowSourceSchema,
   databaseView as databaseViewSchema,
   viewSort as viewSortSchema,
   viewFilter as viewFilterSchema,
@@ -226,4 +331,10 @@ export {
   page as pageSchema,
   selectOption as selectOptionSchema,
   flashcard as flashcardSchema,
+  sourceRef as sourceRefSchema,
+  quizQuestion as quizQuestionSchema,
+  quizAttempt as quizAttemptSchema,
+  gradesBlock as gradesBlockSchema,
+  gradesColumns as gradesColumnsSchema,
+  gradeBand as gradeBandSchema,
 };

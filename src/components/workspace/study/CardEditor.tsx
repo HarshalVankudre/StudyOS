@@ -188,6 +188,7 @@ function SideInput({
   return (
     <textarea
       ref={ref}
+      dir="auto"
       value={value}
       aria-label={label}
       placeholder={placeholder}

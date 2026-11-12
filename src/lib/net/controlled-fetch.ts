@@ -58,8 +58,12 @@ const DENIED_V4_CIDRS = [
   "169.254.0.0/16",
   "172.16.0.0/12",
   "192.0.0.0/24",
+  "192.0.2.0/24", // TEST-NET-1
+  "192.88.99.0/24", // 6to4 relay anycast
   "192.168.0.0/16",
   "198.18.0.0/15",
+  "198.51.100.0/24", // TEST-NET-2
+  "203.0.113.0/24", // TEST-NET-3
   "224.0.0.0/4",
   "240.0.0.0/4",
 ];
@@ -92,19 +96,84 @@ function isDeniedIpv4(ip: string): boolean {
   return DENIED_V4_CIDRS.some((cidr) => inCidr(long, cidr));
 }
 
+/** The 16 bytes of an IPv6 literal (zone id ignored), or null if unparseable. */
+function ipv6Bytes(ip: string): number[] | null {
+  let text = ip.split("%")[0].toLowerCase();
+  // A trailing dotted IPv4 (::ffff:1.2.3.4, 64:ff9b::1.2.3.4) becomes two groups.
+  const v4 = text.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
+  if (v4) {
+    const long = ipv4ToLong(v4[1]);
+    if (long === null) return null;
+    text = `${text.slice(0, -v4[1].length)}${(long >>> 16).toString(16)}:${(long & 0xffff).toString(16)}`;
+  }
+  const halves = text.split("::");
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(":") : [];
+  const tail = halves.length === 2 && halves[1] ? halves[1].split(":") : [];
+  const missing = 8 - head.length - tail.length;
+  if (halves.length === 1 ? missing !== 0 : missing < 1) return null;
+  const groups = [...head, ...Array<string>(halves.length === 2 ? missing : 0).fill("0"), ...tail];
+  const bytes: number[] = [];
+  for (const group of groups) {
+    if (!/^[0-9a-f]{1,4}$/.test(group)) return null;
+    const value = parseInt(group, 16);
+    bytes.push(value >> 8, value & 0xff);
+  }
+  return bytes;
+}
+
+function embeddedV4Denied(bytes: number[], offset: number): boolean {
+  return isDeniedIpv4(bytes.slice(offset, offset + 4).join("."));
+}
+
+/**
+ * IPv6 policy: only global unicast (2000::/3) is reachable, minus the ranges
+ * inside it that are documentation or that tunnel an IPv4 address (6to4,
+ * Teredo, NAT64), whose embedded IPv4 must itself be public. Every form that
+ * maps or embeds an IPv4 address (::ffff:a.b.c.d in dotted or hex form,
+ * IPv4-compatible ::a.b.c.d) is judged by that IPv4 address.
+ */
 function isDeniedIpv6(ip: string): boolean {
-  const lc = ip.toLowerCase();
-  const mapped = lc.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
-  if (mapped) return isDeniedIpv4(mapped[1]);
-  if (lc === "::1" || lc === "::") return true; // loopback / unspecified
-  if (/^fe[89ab]/.test(lc)) return true; // fe80::/10 link-local
-  if (/^f[cd]/.test(lc)) return true; // fc00::/7 unique-local
+  const b = ipv6Bytes(ip);
+  if (!b) return true; // unparseable → deny
+  const zeros = (from: number, to: number) => b.slice(from, to).every((x) => x === 0);
+  // ::ffff:0:0/96 IPv4-mapped
+  if (zeros(0, 10) && b[10] === 0xff && b[11] === 0xff) return embeddedV4Denied(b, 12);
+  // ::/96 (unspecified, loopback, deprecated IPv4-compatible)
+  if (zeros(0, 12)) {
+    if (zeros(12, 15) && b[15] <= 1) return true;
+    return embeddedV4Denied(b, 12);
+  }
+  // 64:ff9b::/96 NAT64 well-known prefix; 64:ff9b:1::/48 local-use NAT64
+  if (b[0] === 0x00 && b[1] === 0x64 && b[2] === 0xff && b[3] === 0x9b) {
+    return zeros(4, 12) ? embeddedV4Denied(b, 12) : true;
+  }
+  // Anything outside global unicast 2000::/3: link-local, unique-local,
+  // site-local, multicast, discard-only, reserved.
+  if ((b[0] & 0xe0) !== 0x20) return true;
+  // 2002::/16 6to4 embeds an IPv4 address in bytes 2..5
+  if (b[0] === 0x20 && b[1] === 0x02) return embeddedV4Denied(b, 2);
+  // 2001::/32 Teredo (embeds an obfuscated IPv4); 2001:db8::/32 documentation;
+  // 2001:10::/28, 2001:20::/28 ORCHID
+  if (b[0] === 0x20 && b[1] === 0x01) {
+    if (b[2] === 0x00 && b[3] === 0x00) return true;
+    if (b[2] === 0x0d && b[3] === 0xb8) return true;
+    if (b[2] === 0x00 && (b[3] & 0xf0) === 0x10) return true;
+    if (b[2] === 0x00 && (b[3] & 0xf0) === 0x20) return true;
+  }
+  // 3fff::/20 documentation (RFC 9637)
+  if (b[0] === 0x3f && b[1] === 0xff && (b[2] & 0xf0) === 0x00) return true;
   return false;
 }
 
-/** True if `ip` (a literal) is in a denied range. Non-IP strings return false. */
-export function isDeniedIp(ip: string): boolean {
-  const family = net.isIP(ip);
+/**
+ * True if `ip` (a literal) is in a denied range. Non-IP strings return false.
+ * A bracketed IPv6 URL host ("[::1]", as `URL.hostname` returns it) and an
+ * IPv6 zone id ("fe80::1%eth0") are understood.
+ */
+export function isDeniedIp(raw: string): boolean {
+  const ip = raw.startsWith("[") && raw.endsWith("]") ? raw.slice(1, -1) : raw;
+  const family = net.isIP(ip.split("%")[0]);
   if (family === 4) return isDeniedIpv4(ip);
   if (family === 6) return isDeniedIpv6(ip);
   return false;

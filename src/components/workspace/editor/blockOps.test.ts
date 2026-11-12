@@ -133,6 +133,8 @@ describe("insert menu catalogue", () => {
       "divider",
       "database",
       "flashcards",
+      "quiz",
+      "grades",
       "linked:db1",
     ]);
     expect(items.at(-1)?.label).toBe("Linked view: Assignments");

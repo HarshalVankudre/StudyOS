@@ -27,6 +27,7 @@ export function GenerationActivity({
   phaseMessage,
   overallProgress,
   onCancel,
+  cancelling = false,
 }: {
   plan: WorkspaceGenerationPlan | null;
   componentProgress: Record<string, ComponentProgress>;
@@ -34,6 +35,8 @@ export function GenerationActivity({
   phaseMessage: string;
   overallProgress: number;
   onCancel: () => void;
+  /** Cancel was pressed; waiting for the server to confirm the stop. */
+  cancelling?: boolean;
 }) {
   const { dict, t } = useI18n();
   const components = plan?.components ?? [];
@@ -84,9 +87,10 @@ export function GenerationActivity({
           </div>
           <button
             onClick={onCancel}
-            className="shrink-0 rounded-lg border border-ink/15 bg-card px-3.5 py-2 text-sm text-ink-soft transition hover:border-ink/40 hover:text-ink"
+            disabled={cancelling}
+            className="min-h-11 shrink-0 rounded-lg border border-ink/15 bg-card px-3.5 py-2 text-sm text-ink-soft transition hover:border-ink/40 hover:text-ink disabled:opacity-60"
           >
-            {dict.common.cancel}
+            {cancelling ? dict.generate.cancelled.stopping : dict.common.cancel}
           </button>
         </div>
 

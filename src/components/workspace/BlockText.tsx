@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  useEffect,
   useId,
   useImperativeHandle,
   useLayoutEffect,
@@ -80,7 +79,7 @@ const MATH_HINT = /\$|\\\(|\\\[/;
 /** Read-only render of block text: Markdown + KaTeX, same as the rest of the app. */
 function RenderedText({ text }: { text: string }) {
   if (!MARKDOWN_HINT.test(text)) {
-    return <div className="whitespace-pre-line break-words">{text}</div>;
+    return <div dir="auto" className="whitespace-pre-line break-words">{text}</div>;
   }
   return <RichText text={text} className="break-words [&_li]:whitespace-pre-line [&_p]:whitespace-pre-line" />;
 }
@@ -128,6 +127,9 @@ export function BlockText({
   const [slash, setSlash] = useState<SlashState | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const pendingCaret = useRef<number | null>(null);
+  // The selection just before the latest input, so a "/" typed over selected
+  // text (which replaces it) is recognised as one typed character.
+  const selectionBefore = useRef<{ start: number; end: number } | null>(null);
   const listId = useId();
 
   useImperativeHandle(
@@ -170,15 +172,9 @@ export function BlockText({
     if (document.activeElement === el) el.setSelectionRange(pos, pos);
   });
 
-  // Switching apps on a phone: save what was typed.
-  useEffect(() => {
-    if (!focused) return;
-    const onHide = () => {
-      if (document.visibilityState === "hidden") commitNow();
-    };
-    document.addEventListener("visibilitychange", onHide);
-    return () => document.removeEventListener("visibilitychange", onHide);
-  }, [focused, commitNow]);
+  // Switching apps on a phone, closing the tab, undo, a merge from
+  // elsewhere: the sync engine writes the buffered typing first (the field is
+  // registered with it through useCommittedDraft).
 
   const slashItems = slash ? filterInsertItems(slash.items, slash.query) : [];
 
@@ -199,6 +195,14 @@ export function BlockText({
     const el = e.currentTarget;
     const next = el.value;
     const caret = el.selectionStart ?? next.length;
+    const sel = selectionBefore.current;
+    selectionBefore.current = null;
+    // One character typed in place of a selection (start..end).
+    const typedOverSelection =
+      sel !== null &&
+      sel.end > sel.start &&
+      caret === sel.start + 1 &&
+      next.length === draft.length - (sel.end - sel.start) + 1;
 
     // Markdown shortcut ("# ", "- ", "1. ", "[] ", "> " ...) at the start.
     if (onShortcut && next.length === draft.length + 1) {
@@ -220,9 +224,9 @@ export function BlockText({
       nextSlash = valid ? { ...nextSlash, query, active: 0 } : null;
     } else if (
       getSlashItems &&
-      next.length === draft.length + 1 &&
       next[caret - 1] === "/" &&
-      (caret === 1 || /\s/.test(next[caret - 2]))
+      (typedOverSelection ||
+        (next.length === draft.length + 1 && (caret === 1 || /\s/.test(next[caret - 2]))))
     ) {
       const rect = el.getBoundingClientRect();
       nextSlash = {
@@ -241,6 +245,7 @@ export function BlockText({
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.nativeEvent.isComposing || e.keyCode === 229) return;
     const el = e.currentTarget;
+    selectionBefore.current = { start: el.selectionStart, end: el.selectionEnd };
 
     if (slash) {
       const count = slashItems.length;
@@ -351,6 +356,7 @@ export function BlockText({
       )}
       <textarea
         ref={taRef}
+        dir="auto"
         value={draft}
         rows={1}
         aria-label={label}

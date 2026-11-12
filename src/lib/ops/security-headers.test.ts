@@ -35,7 +35,23 @@ describe("app Content-Security-Policy", () => {
 
   it("does not restrict scripts or styles (Clerk, KaTeX, Mermaid, Next inline scripts)", async () => {
     const csp = (await headersFor("/app"))["content-security-policy"];
-    expect(csp).not.toMatch(/script-src|style-src|default-src|connect-src|img-src/);
+    expect(csp).not.toMatch(/script-src|style-src|default-src|connect-src/);
+  });
+
+  it("limits images to our origin, inline images, Clerk and the assets bucket", async () => {
+    const csp = (await headersFor("/app"))["content-security-policy"];
+    const imgSrc = csp.split(";").map((d) => d.trim()).find((d) => d.startsWith("img-src"));
+    expect(imgSrc).toBeDefined();
+    const sources = imgSrc!.split(/\s+/).slice(1);
+    expect(sources).toEqual(
+      expect.arrayContaining(["'self'", "data:", "blob:", "https://img.clerk.com"]),
+    );
+    // No wildcard that would let Markdown images reach an arbitrary host.
+    expect(sources).not.toEqual(expect.arrayContaining(["*"]));
+    expect(sources).not.toContain("https:");
+    expect(sources).not.toContain("http:");
+    // Signed asset URLs (/api/asset/:id redirects there) stay loadable.
+    expect(sources.some((s) => s.startsWith("https://storage.googleapis.com"))).toBe(true);
   });
 
   it.each(["/embed/react", "/embed"])(

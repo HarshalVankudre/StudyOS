@@ -61,6 +61,7 @@ export function ListView({ db, view, rows, actions, onOpen, onAdd, empty }: View
                   className="flex min-h-12 min-w-0 flex-1 flex-col justify-center py-1.5 text-start"
                 >
                   <span
+                    dir="auto"
                     className={`truncate text-sm font-medium ${done ? "text-ink-faint line-through decoration-ink-faint/50" : "text-ink"}`}
                   >
                     {name || dict.db.untitled}

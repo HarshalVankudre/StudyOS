@@ -14,6 +14,8 @@ import { DeleteAccountButton } from "@/components/account/DeleteAccountButton";
 import { DownloadDataButton } from "@/components/account/DownloadDataButton";
 import { CalendarSubscribe } from "@/components/account/CalendarSubscribe";
 import { ManageAccountButton } from "@/components/account/ManageAccountButton";
+import { NotificationSettings } from "@/components/notifications/NotificationSettings";
+import { getNotificationSettings } from "@/lib/notifications/service";
 import { getCalendarFeedUrlAction } from "../calendar-actions";
 import {
   buyCreditsAction,
@@ -30,13 +32,15 @@ export default async function SettingsPage() {
   const { userId } = await auth();
   if (!userId) redirect("/sign-in");
 
-  const [user, pro, credits, calendarUrl, { dict, t, locale }] =
+  const [user, pro, credits, calendarUrl, { dict, t, locale, plural }, notifications] =
     await Promise.all([
       currentUser(),
       isPro(),
       getCreditBalance(userId),
       getCalendarFeedUrlAction(),
       getI18n(),
+      // Hidden entirely when push is not configured; never blocks the page.
+      getNotificationSettings(userId).catch(() => null),
     ]);
   const S = dict.settings;
 
@@ -153,7 +157,7 @@ export default async function SettingsPage() {
               <span className="text-lime-deep" aria-hidden>
                 ●
               </span>
-              {t(dict.credits.amount, { count: credits.toLocaleString(locale) })}
+              {plural(dict.counts.credits, credits)}
             </span>
           </div>
           <p className="mt-3 text-sm text-ink-soft">{S.creditsDesc}</p>
@@ -177,6 +181,20 @@ export default async function SettingsPage() {
             </Link>
           </div>
         </section>
+
+        {/* Notifications (Web Push) */}
+        {notifications?.configured && (
+          <section
+            id="notifications"
+            className="mt-6 scroll-mt-20 rounded-2xl border border-ink/10 bg-card/60 p-6"
+          >
+            <h2 className="font-display text-lg font-bold">{dict.notifications.title}</h2>
+            <p className="mt-3 text-sm text-ink-soft">{dict.notifications.description}</p>
+            <div className="mt-5">
+              <NotificationSettings initial={notifications} />
+            </div>
+          </section>
+        )}
 
         {/* Calendar sync */}
         <section className="mt-6 rounded-2xl border border-ink/10 bg-card/60 p-6">

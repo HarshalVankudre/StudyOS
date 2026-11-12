@@ -8,7 +8,7 @@
  * before it is ever persisted — so a malformed op can never corrupt data.
  */
 import { z } from "zod";
-import type { Workspace } from "@/lib/workspace/types";
+import type { DatabaseView, Workspace } from "@/lib/workspace/types";
 import {
   blockSchema,
   cellValueSchema,
@@ -16,9 +16,18 @@ import {
   databaseRowSchema,
   databaseSchema,
   databaseViewSchema,
+  gradesBlockSchema,
   pageSchema,
 } from "@/lib/workspace/schema";
+import { reconcileAgentQuiz } from "@/lib/study/quiz";
+import type { Block, QuizBlock } from "@/lib/workspace/types";
 import { AGENT_LIMITS } from "./limits";
+import {
+  mergeView,
+  viewPatchSchema,
+  viewPresetSchema,
+  viewWithPreset,
+} from "./agent-view-ops";
 
 // Untrusted op fields are length-bounded so a malicious/runaway result cannot
 // smuggle a huge string or array through to the trusted apply path. Ids stay
@@ -56,8 +65,20 @@ export const agentOpSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("delete_property"), databaseId: limitedString, propertyId: limitedString }),
 
   // ---- views ----
-  z.object({ op: z.literal("add_view"), databaseId: limitedString, view: databaseViewSchema }),
-  z.object({ op: z.literal("update_view"), databaseId: limitedString, view: databaseViewSchema }),
+  z.object({
+    op: z.literal("add_view"),
+    databaseId: limitedString,
+    view: databaseViewSchema,
+    preset: viewPresetSchema.optional(),
+  }),
+  // A patch, not a replacement: omitted fields keep their saved value (see
+  // ./agent-view-ops), so saved filters and sorts are never wiped by accident.
+  z.object({
+    op: z.literal("update_view"),
+    databaseId: limitedString,
+    view: viewPatchSchema,
+    preset: viewPresetSchema.optional(),
+  }),
   z.object({ op: z.literal("delete_view"), databaseId: limitedString, viewId: limitedString }),
 
   // ---- pages ----
@@ -75,6 +96,14 @@ export const agentOpSchema = z.discriminatedUnion("op", [
     blocks: z.array(blockSchema).max(AGENT_LIMITS.maxArray),
   }),
   z.object({ op: z.literal("replace_page"), page: pageSchema }),
+  // Add a grades block (after `afterBlockId`, else at the end) or reconfigure
+  // the one with the same id in place, without resending the page.
+  z.object({
+    op: z.literal("set_grades_block"),
+    pageId: limitedString,
+    block: gradesBlockSchema,
+    afterBlockId: limitedString.optional(),
+  }),
 
   // ---- workspace root ----
   z.object({
@@ -111,6 +140,19 @@ export function applyAgentOps(workspace: Workspace, ops: AgentOp[]): Workspace {
     const page = next.pages.find((p) => p.id === id);
     if (!page) throw new Error(`operation referenced unknown page "${id}"`);
     return page;
+  };
+  // Quiz blocks the agent writes keep the student's stats/attempts when it
+  // leaves them out, and any question it adds or changes must be complete.
+  const quizzesBefore = new Map<string, QuizBlock>();
+  for (const p of workspace.pages) {
+    for (const b of p.blocks) if (b.type === "quiz") quizzesBefore.set(b.id, b);
+  }
+  const checkQuizzes = (blocks: Block[]) => {
+    for (const b of blocks) {
+      if (b.type !== "quiz") continue;
+      const problem = reconcileAgentQuiz(b, quizzesBefore.get(b.id));
+      if (problem) throw new Error(problem);
+    }
   };
 
   for (const op of ops) {
@@ -165,14 +207,18 @@ export function applyAgentOps(workspace: Workspace, ops: AgentOp[]): Workspace {
         db.properties = db.properties.filter((p) => p.id !== op.propertyId);
         break;
       }
-      case "add_view":
-        findDb(op.databaseId).views.push(op.view);
+      case "add_view": {
+        const db = findDb(op.databaseId);
+        db.views.push(viewWithPreset(db, op.view, op.preset));
         break;
+      }
       case "update_view": {
         const db = findDb(op.databaseId);
         const index = db.views.findIndex((v) => v.id === op.view.id);
-        if (index === -1) db.views.push(op.view);
-        else db.views[index] = op.view;
+        // An unknown id adds the view (the whole-workspace validation then
+        // rejects it unless the patch was a complete view).
+        if (index === -1) db.views.push(viewWithPreset(db, op.view as DatabaseView, op.preset));
+        else db.views[index] = mergeView(db, db.views[index], op.view, op.preset);
         break;
       }
       case "delete_view": {
@@ -181,6 +227,7 @@ export function applyAgentOps(workspace: Workspace, ops: AgentOp[]): Workspace {
         break;
       }
       case "add_page":
+        checkQuizzes(op.page.blocks);
         next.pages.push(op.page);
         break;
       case "update_page": {
@@ -193,12 +240,29 @@ export function applyAgentOps(workspace: Workspace, ops: AgentOp[]): Workspace {
         next.pages = next.pages.filter((p) => p.id !== op.pageId);
         break;
       case "set_page_blocks":
+        checkQuizzes(op.blocks);
         findPage(op.pageId).blocks = op.blocks;
         break;
       case "replace_page": {
+        checkQuizzes(op.page.blocks);
         const index = next.pages.findIndex((p) => p.id === op.page.id);
         if (index === -1) next.pages.push(op.page);
         else next.pages[index] = op.page;
+        break;
+      }
+      case "set_grades_block": {
+        const page = findPage(op.pageId);
+        if (op.block.databaseId) findDb(op.block.databaseId);
+        const at = page.blocks.findIndex((b) => b.id === op.block.id);
+        if (at >= 0) {
+          if (page.blocks[at].type !== "grades") {
+            throw new Error(`set_grades_block: block "${op.block.id}" is not a grades block`);
+          }
+          page.blocks[at] = op.block;
+        } else {
+          const after = op.afterBlockId ? page.blocks.findIndex((b) => b.id === op.afterBlockId) : -1;
+          page.blocks.splice(after >= 0 ? after + 1 : page.blocks.length, 0, op.block);
+        }
         break;
       }
       case "update_workspace":

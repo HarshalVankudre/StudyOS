@@ -41,18 +41,52 @@ const SECRET_PATTERNS: [RegExp, string][] = [
   [/\b(sk|rk|pk)_(live|test)_[A-Za-z0-9]+/g, "[redacted-stripe-key]"],
   [/\bwhsec_[A-Za-z0-9+/=]+/g, "[redacted-webhook-secret]"],
   [/\bsk-[A-Za-z0-9_-]{16,}/g, "[redacted-api-key]"],
+  // Daytona (sandbox) API keys.
+  [/\bdtn_[A-Za-z0-9_-]{8,}/g, "[redacted-daytona-key]"],
+  // Google API keys.
+  [/\bAIza[0-9A-Za-z_-]{30,}/g, "[redacted-google-key]"],
   [/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]"],
   [/\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@]+:[^\s/@]+@/gi, "[redacted-credentials]@"],
   [/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*/g, "[redacted-jwt]"],
   [/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, "[redacted-email]"],
 ];
 
-/** Remove credential shapes and anything that looks like an embedded JSON document. */
+/**
+ * A quoted value that may stay in a log line: a short code or identifier
+ * ("invalid_type", 'P2002', "out/page-1.png"). Anything else inside quotes
+ * (words with spaces, punctuation, long runs) may be the student's content.
+ */
+const SAFE_QUOTED = /^[A-Za-z0-9_.:/#@-]{0,48}$/;
+
+const QUOTED_PATTERNS: [RegExp, string, string][] = [
+  [/"([^"\n]{0,2000})"/g, '"', '"'],
+  [/“([^”\n]{0,2000})”/g, "“", "”"],
+  [/`([^`\n]{0,2000})`/g, "`", "`"],
+  // Single quotes only when not an apostrophe ("can't", "students'").
+  [/(?<![A-Za-z0-9])'([^'\n]{0,2000})'(?![A-Za-z0-9])/g, "'", "'"],
+];
+
+/**
+ * Remove credential shapes and anything that may be user content.
+ *
+ * Error messages quote the values they choke on: JSON.parse quotes the start
+ * of the text, Zod quotes received values, Prisma echoes arguments, and the
+ * model's own output can carry workspace text. Any length of such content can
+ * be private (an exam date, a name), so every quoted value is replaced unless
+ * it looks like a code or identifier, and any inline JSON object is dropped.
+ */
 export function scrub(text: string, max = MAX_MESSAGE): string {
-  let out = text;
+  // Work on a bounded prefix: the result is capped anyway, and this keeps the
+  // regex work linear in a small input.
+  let out = text.length > max * 4 ? text.slice(0, max * 4) : text;
   for (const [re, replacement] of SECRET_PATTERNS) out = out.replace(re, replacement);
-  // Large inline JSON / quoted blobs are almost always user content.
-  out = out.replace(/\{[^{}]{120,}\}/g, "{…}").replace(/"[^"\n]{160,}"/g, '"…"');
+  for (const [re, open, close] of QUOTED_PATTERNS) {
+    out = out.replace(re, (whole, inner: string) =>
+      SAFE_QUOTED.test(inner) ? whole : `${open}…${close}`,
+    );
+  }
+  // Inline JSON objects are almost always user content.
+  out = out.replace(/\{[^{}]{24,}\}/g, "{…}");
   return out.length > max ? `${out.slice(0, max)}…` : out;
 }
 

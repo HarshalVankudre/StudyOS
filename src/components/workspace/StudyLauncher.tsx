@@ -1,18 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { BarChart3, Dumbbell, Flame, Layers, Play } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { BarChart3, Dumbbell, Flame, Layers, Play, FileStack } from "lucide-react";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { OPEN_STUDY_HUB_EVENT } from "@/components/command/events";
 import { useI18n } from "@/lib/i18n/client";
 import type { Flashcard } from "@/lib/workspace/types";
 import { getStudyStatsAction } from "@/app/app/study-actions";
 import {
-  assignSchedule,
   dueQueue,
   isStudyable,
   practiceQueue,
@@ -23,8 +23,12 @@ import type { StreakStatus } from "@/lib/study/streak";
 import { StudySession, type ReviewItem, type StudyMode } from "./StudySession";
 import { useWorkspace } from "./WorkspaceContext";
 import { CatchUpBanner } from "./study/CatchUpBanner";
+import { applyGrade } from "./study/gradeEdit";
 import { StudyStats } from "./study/StudyStats";
 import { STUDIED_EVENT, useReviewRecorder } from "./study/useReviewRecorder";
+import { openStudyKit } from "./materials/events";
+import { QuizHubSection, hasQuizzes, type QuizRunRequest } from "./quiz/QuizHub";
+import { QuizSession } from "./quiz/QuizSession";
 
 const itemKey = (pageId: string, blockId: string, cardId: string) => `${pageId}:${blockId}:${cardId}`;
 
@@ -35,7 +39,7 @@ const itemKey = (pageId: string, blockId: string, cardId: string) => `${pageId}:
  */
 export function StudyLauncher() {
   const { workspace, update } = useWorkspace();
-  const { dict, t } = useI18n();
+  const { dict, t, plural } = useI18n();
   const S = dict.study;
   const T = dict.studyTools;
   const record = useReviewRecorder(workspace.id);
@@ -43,6 +47,10 @@ export function StudyLauncher() {
   const [hubOpen, setHubOpen] = useState(false);
   const [streak, setStreak] = useState<StreakStatus | null>(null);
   const [notice, setNotice] = useState("");
+  const [quizRun, setQuizRun] = useState<QuizRunRequest | null>(null);
+  // Always rendered, so closing a session can return focus here when the
+  // button that opened it is gone ("Study 3 due" after the last card).
+  const hubButton = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     let active = true;
@@ -57,6 +65,13 @@ export function StudyLauncher() {
       active = false;
       window.removeEventListener(STUDIED_EVENT, load);
     };
+  }, []);
+
+  // The command palette and the getting-started guide can open the hub.
+  useEffect(() => {
+    const openHub = () => setHubOpen(true);
+    window.addEventListener(OPEN_STUDY_HUB_EVENT, openHub);
+    return () => window.removeEventListener(OPEN_STUDY_HUB_EVENT, openHub);
   }, []);
 
   const now = new Date();
@@ -85,13 +100,13 @@ export function StudyLauncher() {
   const items =
     session === "practice" ? practiceQueue(allCards, now).map((c) => itemOf.get(c)!) : dueItems;
 
-  const onGrade = (item: ReviewItem, _grade: Grade, next: Flashcard) =>
-    update((d) => {
-      const b = d.pages.find((p) => p.id === item.pageId)?.blocks.find((x) => x.id === item.blockId);
-      if (b?.type !== "flashcards") return;
-      const card = b.cards.find((c) => c.id === item.card.id);
-      if (card) assignSchedule(card, next);
-    });
+  // Computed from the card as it is when the edit runs, and re-run (not
+  // replayed) if the workspace changed elsewhere first (study/gradeEdit.ts).
+  const onGrade = (item: ReviewItem, grade: Grade, _next: Flashcard, at: Date) =>
+    update(
+      (d) => applyGrade(d, { pageId: item.pageId, blockId: item.blockId, cardId: item.card.id }, grade, at),
+      { rebase: "rerun" },
+    );
 
   const spreadOut = () => {
     if (!catchUp) return;
@@ -116,17 +131,18 @@ export function StudyLauncher() {
   };
 
   const current = streak?.current ?? 0;
-  if (!hasDecks && current === 0) return null;
+  if (!hasDecks && !hasQuizzes(workspace) && current === 0) return null;
 
-  const streakLabel = current > 0 ? `${t(T.streakDays, { count: current })} · ${T.openHub}` : T.openHub;
+  const streakLabel = current > 0 ? `${plural(dict.counts.streak, current)} · ${T.openHub}` : T.openHub;
 
   return (
     <>
       <button
+        ref={hubButton}
         onClick={() => setHubOpen(true)}
         aria-label={streakLabel}
         title={streakLabel}
-        className={`flex min-h-11 min-w-11 items-center justify-center gap-1 rounded-md px-2 font-mono text-[11px] font-semibold ring-1 ring-inset transition sm:min-h-0 sm:py-1 ${
+        className={`flex min-h-11 min-w-11 items-center justify-center gap-1 rounded-md px-2 font-mono text-[11px] font-semibold ring-1 ring-inset transition max-sm:hidden sm:min-h-0 sm:py-1 ${
           streak?.atRisk
             ? "bg-amber-400/15 text-amber-700 ring-amber-500/60 dark:text-amber-300"
             : current > 0
@@ -195,6 +211,29 @@ export function StudyLauncher() {
               <p className="-mt-2 text-xs text-ink-soft">{studyable > 0 ? T.caughtUpHint : T.noDecks}</p>
             )}
 
+            <QuizHubSection
+              workspace={workspace}
+              onStart={(request) => {
+                setHubOpen(false);
+                setQuizRun(request);
+              }}
+            />
+
+            <button
+              type="button"
+              onClick={() => {
+                setHubOpen(false);
+                openStudyKit({ mode: "material" });
+              }}
+              className="flex min-h-12 items-center gap-3 rounded-lg border border-dashed border-line-strong bg-card px-4 py-2 text-start text-sm text-ink transition hover:bg-hover"
+            >
+              <FileStack className="size-4 shrink-0 text-ink-soft" aria-hidden />
+              <span className="min-w-0 flex-1">
+                <span className="block font-semibold">{dict.materials.hubButton}</span>
+                <span className="block text-xs text-ink-soft">{dict.materials.hubHint}</span>
+              </span>
+            </button>
+
             <StudyStats workspaceId={workspace.id} cards={allCards} />
           </DialogContent>
         </Dialog>
@@ -211,8 +250,10 @@ export function StudyLauncher() {
           onGrade={onGrade}
           onAnswer={(e) => record({ grade: e.grade, prevState: e.prevState, practice: e.practice })}
           onClose={() => setSession(null)}
+          returnFocus={() => hubButton.current}
         />
       )}
+      {quizRun && <QuizSession {...quizRun} onClose={() => setQuizRun(null)} />}
     </>
   );
 }

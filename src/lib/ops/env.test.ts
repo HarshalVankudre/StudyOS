@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   ENV_VARS,
@@ -22,6 +24,13 @@ describe("environment validation", () => {
   it("documents every variable once", () => {
     const names = ENV_VARS.map((v) => v.name);
     expect(new Set(names).size).toBe(names.length);
+    expect(names).toContain("STRIPE_PRICE_PRO_ANNUAL");
+  });
+
+  it("lists every registered variable in .env.example", () => {
+    const example = readFileSync(join(process.cwd(), ".env.example"), "utf8");
+    const listed = new Set([...example.matchAll(/^([A-Z][A-Z0-9_]*)=/gm)].map((m) => m[1]));
+    expect(ENV_VARS.map((v) => v.name).filter((name) => !listed.has(name))).toEqual([]);
   });
 
   it("passes with the required variables set", () => {
@@ -61,6 +70,24 @@ describe("environment validation", () => {
     expect(() =>
       validateEnvironmentOnStartup({ ...env, STUDYOS_ALLOW_INCOMPLETE_ENV: "1" }, () => {}),
     ).not.toThrow();
+  });
+
+  it("requires the Clerk webhook secret in production once billing is configured", () => {
+    const billing = {
+      ...BASE,
+      STRIPE_SECRET_KEY: "sk_live_abc",
+      STRIPE_PRICE_PRO: "price_1",
+      STRIPE_WEBHOOK_SECRET: "whsec_1",
+    };
+    // Without it, an account deleted in Clerk would keep being billed.
+    expect(checkEnvironment(billing).missingRequired).toEqual(["CLERK_WEBHOOK_SIGNING_SECRET"]);
+    expect(() => validateEnvironmentOnStartup(billing, () => {})).toThrow(MissingEnvironmentError);
+    expect(
+      checkEnvironment({ ...billing, CLERK_WEBHOOK_SIGNING_SECRET: "whsec_c" }).missingRequired,
+    ).toEqual([]);
+    // Without billing it stays optional, with a warning about the data.
+    expect(checkEnvironment(BASE).missingRequired).toEqual([]);
+    expect(checkEnvironment(BASE).warnings.join(" ")).toMatch(/CLERK_WEBHOOK_SIGNING_SECRET/);
   });
 
   it("exposes only names and booleans in the public status", () => {

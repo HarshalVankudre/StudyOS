@@ -1,7 +1,13 @@
 "use server";
 
+import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import {
+  checkUsageLimit,
+  MAX_WORKSPACES_PER_USER,
+  workspaceLimitReached,
+} from "@/lib/usage-limits";
 import { getI18n } from "@/lib/i18n/server";
 import { fmt } from "@/lib/i18n/interpolate";
 import * as store from "@/lib/workspace/store";
@@ -79,20 +85,47 @@ export async function deleteWorkspaceForeverAction(id: string): Promise<boolean>
   return ok;
 }
 
-/** Duplicate a workspace; returns the new workspace's id. */
+export type DuplicateWorkspaceResult =
+  | { ok: true; id: string }
+  | { ok: false; code: "not_found" | "limit" | "rate_limited"; message: string };
+
+/**
+ * Duplicate a workspace. Each copy can be up to 2 MB, so copies are
+ * rate-limited and count toward the per-account workspace cap.
+ */
 export async function duplicateWorkspaceAction(
   id: string,
-): Promise<string | null> {
+): Promise<DuplicateWorkspaceResult> {
   const { dict } = await getI18n();
+  const { userId } = await auth();
+  if (!userId || typeof id !== "string" || id.length > 100) {
+    return { ok: false, code: "not_found", message: dict.safety.actionFailed };
+  }
+  if (await workspaceLimitReached(userId)) {
+    return {
+      ok: false,
+      code: "limit",
+      message: fmt(dict.limits.workspaceCap, { max: MAX_WORKSPACES_PER_USER }),
+    };
+  }
+  if (!(await checkUsageLimit(userId, "workspace_duplicate")).allowed) {
+    return { ok: false, code: "rate_limited", message: dict.limits.rateLimited };
+  }
   const newId = await store.duplicateWorkspace(id, (name) =>
     fmt(dict.safety.copyName, { name }),
   );
   revalidatePath("/app");
-  return newId;
+  return newId
+    ? { ok: true, id: newId }
+    : { ok: false, code: "not_found", message: dict.safety.actionFailed };
 }
 
 /** Save the built-in sample workspace and open it. */
 export async function loadDemoAction(): Promise<void> {
+  const { userId } = await auth();
+  // The demo button only shows on an empty home page; an account at the
+  // workspace cap (reachable only by posting the action directly) gets none.
+  if (userId && (await workspaceLimitReached(userId))) redirect("/app");
   const id = await store.saveNewWorkspace(sampleWorkspace);
   redirect(`/app/${id}`);
 }

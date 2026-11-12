@@ -8,9 +8,12 @@ export const dynamic = "force-dynamic";
  * URL is fetched by calendar apps (Google/Apple/Outlook) that can't do Clerk
  * auth, exactly like Google Calendar's "secret address" feeds. Unknown or
  * rotated tokens 404. No write surface; exposes only deadline titles/dates.
+ *
+ * Completed items are left out; `?completed=1` includes them (marked ✓), the
+ * option the settings page offers (CalendarSubscribe).
  */
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ token: string }> },
 ) {
   const { token } = await params;
@@ -19,7 +22,9 @@ export async function GET(
     return new Response("Calendar not found", { status: 404 });
   }
 
-  const body = await buildUserFeed(userId, new Date());
+  const completed = new URL(req.url).searchParams.get("completed");
+  const includeCompleted = completed === "1" || completed === "true";
+  const body = await buildUserFeed(userId, new Date(), { includeCompleted });
   return new Response(body, {
     headers: {
       "Content-Type": "text/calendar; charset=utf-8",

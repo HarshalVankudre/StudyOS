@@ -5,6 +5,7 @@ import { useClerk, useUser } from "@clerk/nextjs";
 import { useEffect, useRef, useState } from "react";
 import { getAccountSummaryAction } from "@/app/app/account-actions";
 import { useI18n } from "@/lib/i18n/client";
+import { balanceReadStarted, reportCreditsBalance, useLiveBalance } from "@/lib/credits-bus";
 
 interface AccountSummary {
   pro: boolean;
@@ -26,16 +27,23 @@ export function AccountMenu({
 }) {
   const { user } = useUser();
   const { openUserProfile, signOut } = useClerk();
-  const { dict, t, locale, dir } = useI18n();
+  const { dict, t, locale, dir, plural } = useI18n();
   const [open, setOpen] = useState(false);
   const [summary, setSummary] = useState<AccountSummary | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
+  // Plan and balance, re-read whenever the menu opens. The balance shown is
+  // the shared live one (lib/credits-bus), so it always matches the header.
   useEffect(() => {
+    const startedAt = balanceReadStarted();
     getAccountSummaryAction()
-      .then(setSummary)
+      .then((next) => {
+        setSummary(next);
+        reportCreditsBalance(next.credits, startedAt);
+      })
       .catch(() => setSummary(null));
   }, [open]);
+  const credits = useLiveBalance(summary?.credits);
 
   // Close on outside click or Escape.
   useEffect(() => {
@@ -81,10 +89,8 @@ export function AccountMenu({
             {pro ? dict.account.pro : dict.account.free}
           </span>
           <span className="text-xs text-ink-soft">
-            {summary
-              ? t(dict.credits.amount, {
-                  count: summary.credits.toLocaleString(locale),
-                })
+            {credits !== undefined
+              ? plural(dict.counts.credits, credits)
               : "…"}
           </span>
         </div>
@@ -176,9 +182,9 @@ export function AccountMenu({
             {name}
           </span>
           <span className="block truncate text-xs text-ink-soft">
-            {summary
+            {summary && credits !== undefined
               ? t(dict.account.creditsAndPlan, {
-                  credits: summary.credits.toLocaleString(locale),
+                  credits: credits.toLocaleString(locale),
                   plan: pro ? dict.account.pro : dict.account.free,
                 })
               : email || dict.account.viewProfile}

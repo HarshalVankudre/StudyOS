@@ -29,7 +29,7 @@ export default async function BuyCreditsPage({
   const { userId } = await auth();
   if (!userId) redirect("/sign-in");
 
-  const [credits, { dict, t, locale }] = await Promise.all([
+  const [credits, { dict, t, locale, plural }] = await Promise.all([
     getCreditBalance(userId),
     getI18n(),
   ]);
@@ -66,7 +66,7 @@ export default async function BuyCreditsPage({
             <span className="text-lime-deep" aria-hidden>
               ●
             </span>
-            {t(P.balance, { count: credits.toLocaleString(locale) })}
+            {plural(dict.counts.balance, credits)}
           </p>
         </div>
 

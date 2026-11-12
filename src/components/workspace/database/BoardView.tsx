@@ -7,7 +7,7 @@ import { pillClasses } from "@/lib/workspace/colors";
 import { titleProperty } from "@/lib/workspace/helpers";
 import { completionField, isRowComplete } from "@/lib/workspace/view-logic";
 import { useI18n } from "@/lib/i18n/client";
-import { useWorkspace } from "../WorkspaceContext";
+import { DraftInput } from "../editor/DraftInput";
 import { EditableCell } from "./cells";
 import { ShowMore, type ViewBodyProps } from "./parts";
 import { BOARD_PAGE_SIZE, rowTitle, visibleProps } from "./shared";
@@ -23,8 +23,7 @@ const CARD_BUTTON =
  */
 export function BoardView(props: ViewBodyProps) {
   const { db, view, rows, actions, onOpen, onAdd } = props;
-  const { rev } = useWorkspace();
-  const { dict, t } = useI18n();
+  const { dict, t, plural } = useI18n();
   const [overOpt, setOverOpt] = useState<string | null>(null);
   const [limits, setLimits] = useState<Record<string, number>>({});
   const dragId = useRef<string | null>(null);
@@ -86,10 +85,10 @@ export function BoardView(props: ViewBodyProps) {
             }`}
           >
             <h3 id={headingId} className="mb-2 flex items-center gap-2 px-1">
-              <span className={`rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${pillClasses(opt.color)}`}>
+              <span dir="auto" className={`rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${pillClasses(opt.color)}`}>
                 {opt.label}
               </span>
-              <span className="text-xs tabular-nums text-ink-faint" aria-label={t(dict.dbViews.count, { count: columnRows.length })}>
+              <span className="text-xs tabular-nums text-ink-faint" aria-label={plural(dict.counts.items, columnRows.length)}>
                 {columnRows.length}
               </span>
             </h3>
@@ -118,11 +117,11 @@ export function BoardView(props: ViewBodyProps) {
                       >
                         <GripVertical className="h-4 w-4" />
                       </span>
-                      <input
-                        key={`${r.id}:${rev}`}
-                        defaultValue={rowTitle(db, r)}
-                        onBlur={(e) => {
-                          if (e.target.value !== rowTitle(db, r)) actions.setCell(r.id, title.id, e.target.value);
+                      <DraftInput
+                        value={rowTitle(db, r)}
+                        dir="auto"
+                        onCommit={(text) => {
+                          if (text !== rowTitle(db, r)) actions.setCell(r.id, title.id, text);
                         }}
                         placeholder={dict.db.untitled}
                         aria-label={title.name}
@@ -165,7 +164,7 @@ export function BoardView(props: ViewBodyProps) {
                       <div className="mt-1.5 space-y-1 px-1">
                         {fieldProps.map((p) => (
                           <div key={p.id} className="flex items-center gap-2 text-xs">
-                            <span className="w-16 shrink-0 truncate text-ink-faint">{p.name}</span>
+                            <span className="w-16 shrink-0 truncate text-ink-faint"><bdi>{p.name}</bdi></span>
                             <div className="min-w-0 flex-1">
                               <EditableCell
                                 databaseId={db.id}

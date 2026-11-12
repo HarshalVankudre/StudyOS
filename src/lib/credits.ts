@@ -1,22 +1,26 @@
 /**
  * StudyOS credit system (server-only).
  *
- * Every AI request spends credits in proportion to the GLM 5.2 tokens it
- * actually used. The peg the product is priced around:
+ * Every AI request spends credits in proportion to what its tokens really
+ * cost on the model that served them (per-model rates, cache reads and
+ * writes included: see lib/ai/model-pricing.ts). The peg the product is
+ * priced around:
  *
- *     1000 credits === $3.00 of GLM 5.2 token spend   →   1 credit = $0.003
+ *     1000 credits === $3.00 of token spend   →   1 credit = $0.003
  *
  * So a request that cost $0.03 of tokens spends ~10 credits, and a big,
  * complex request that cost $0.12 spends ~40 — "based on how complex it is"
  * falls out naturally from real token usage.
  */
 import { prisma } from "@/lib/db";
+import type { Prisma } from "@/generated/prisma";
 import type { TokenUsage } from "@/lib/ai/usage-meter";
+import { callCostUsd, MODEL_PRICES } from "@/lib/ai/model-pricing";
 
-// GLM 5.2 list price on OpenRouter, USD per 1,000,000 tokens.
-// (Switch to the rolling weighted-average rate if you prefer: 0.429 / 4.41.)
-export const GLM_INPUT_USD_PER_MTOK = 1.4;
-export const GLM_OUTPUT_USD_PER_MTOK = 4.4;
+// GLM 5.2 list price on OpenRouter, USD per 1,000,000 tokens (the legacy
+// single rate, still used for usage that does not say which model ran).
+export const GLM_INPUT_USD_PER_MTOK = MODEL_PRICES["z-ai/glm-5.2"].inputPerMTok;
+export const GLM_OUTPUT_USD_PER_MTOK = MODEL_PRICES["z-ai/glm-5.2"].outputPerMTok;
 
 /** The peg: 1000 credits buys $3.00 of token spend. */
 export const USD_PER_1000_CREDITS = 3;
@@ -43,50 +47,170 @@ export const CREDIT_PACK_PRICE_USD = 10;
 /** Flat credit price of one sandbox render run (covers Daytona compute). */
 export const SANDBOX_RUN_CREDITS = 2;
 
-/** Dollar cost of a request's tokens at GLM 5.2 list price. */
-export function usageToUsd(usage: TokenUsage): number {
-  return (
-    (usage.promptTokens / 1_000_000) * GLM_INPUT_USD_PER_MTOK +
-    (usage.completionTokens / 1_000_000) * GLM_OUTPUT_USD_PER_MTOK
-  );
+/**
+ * Dollar cost of a request's tokens. The usage meter prices every call with
+ * its own model's rates (`costUsd`); usage without that is priced here at
+ * `model`'s rates (the legacy GLM 5.2 rate when no model is given).
+ */
+export function usageToUsd(usage: TokenUsage, model?: string): number {
+  if (typeof usage.costUsd === "number") return usage.costUsd;
+  const cacheRead = usage.cacheReadTokens ?? 0;
+  const cacheWrite = usage.cacheWriteTokens ?? 0;
+  return callCostUsd(model, {
+    input: Math.max(0, usage.promptTokens - cacheRead - cacheWrite),
+    output: usage.completionTokens,
+    cacheRead,
+    cacheWrite,
+  });
+}
+
+/** Credits for a dollar amount, rounded up (never below 1 when anything ran). */
+export function usdToCredits(usd: number): number {
+  if (!(usd > 0)) return 0;
+  return Math.max(1, Math.ceil(usd / USD_PER_CREDIT - 1e-9));
+}
+
+/** The dollar value of `credits` at the peg. */
+export function creditsToUsd(credits: number): number {
+  return Math.max(0, credits) * USD_PER_CREDIT;
 }
 
 /** Credits a request costs. 0 when nothing ran (e.g. the local mock); else ≥ 1. */
-export function usageToCredits(usage: TokenUsage): number {
+export function usageToCredits(usage: TokenUsage, model?: string): number {
   if (usage.promptTokens <= 0 && usage.completionTokens <= 0) return 0;
-  return Math.max(1, Math.ceil(usageToUsd(usage) / USD_PER_CREDIT));
+  return Math.max(1, usdToCredits(usageToUsd(usage, model)));
 }
 
-/** Create the account on first sight, seeding the free starter grant once. */
-async function ensureAccount(userId: string): Promise<{ balance: number }> {
+// ---- Accounts, the deletion tombstone and the per-user lock ----------------
+
+/** The Prisma client, or an interactive transaction on it. */
+export type CreditsDb = Prisma.TransactionClient;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Serialize one user's money-moving writes: account creation, grants, pack
+ * reversals and the deletion tombstone all take this transaction-scoped
+ * Postgres advisory lock first. A grant therefore lands entirely before the
+ * tombstone or sees it and is refused; it can never slip in between.
+ * Lock order is always this lock, then the CreditAccount row.
+ */
+async function lockUser(tx: CreditsDb, userId: string): Promise<void> {
+  const key = `studyos:user:${userId}`;
+  await tx.$queryRaw`SELECT 1 AS "locked" FROM pg_advisory_xact_lock(hashtextextended(${key}, 0))`;
+}
+
+/** Run `fn` in a transaction holding the user's credit lock. */
+export async function withUserCreditLock<T>(
+  userId: string,
+  fn: (tx: CreditsDb) => Promise<T>,
+): Promise<T> {
+  return prisma.$transaction(
+    async (tx) => {
+      await lockUser(tx, userId);
+      return fn(tx);
+    },
+    { maxWait: 10_000, timeout: 20_000 },
+  );
+}
+
+async function isTombstoned(tx: CreditsDb, userId: string): Promise<boolean> {
+  const row = await tx.deletedAccount.findUnique({
+    where: { userId },
+    select: { userId: true },
+  });
+  return row !== null;
+}
+
+/**
+ * With the user lock held: make sure the account exists, seeding the signup
+ * grant once. False (and nothing written) for a deleted account.
+ */
+async function ensureAccountTx(tx: CreditsDb, userId: string): Promise<boolean> {
+  const existing = await tx.creditAccount.findUnique({
+    where: { userId },
+    select: { userId: true },
+  });
+  if (existing) return true;
+  if (await isTombstoned(tx, userId)) return false;
+  await tx.creditAccount.create({ data: { userId, balance: FREE_SIGNUP_CREDITS } });
+  await tx.creditLedger.create({
+    data: {
+      userId,
+      delta: FREE_SIGNUP_CREDITS,
+      reason: "free_signup",
+      idempotencyKey: `free_signup:${userId}`,
+    },
+  });
+  return true;
+}
+
+/**
+ * The account, created on first sight with the free starter grant. Null for
+ * an account that was deleted: an AI request still in flight while the
+ * account is erased never recreates it (or its signup credits).
+ */
+async function ensureAccount(userId: string): Promise<{ balance: number } | null> {
   const existing = await prisma.creditAccount.findUnique({ where: { userId } });
   if (existing) return existing;
-  try {
-    await prisma.$transaction([
-      prisma.creditAccount.create({
-        data: { userId, balance: FREE_SIGNUP_CREDITS },
-      }),
-      prisma.creditLedger.create({
-        data: {
-          userId,
-          delta: FREE_SIGNUP_CREDITS,
-          reason: "free_signup",
-          idempotencyKey: `free_signup:${userId}`,
-        },
-      }),
-    ]);
-  } catch {
-    // Lost a race to create the account — fine, it now exists.
-  }
-  const account = await prisma.creditAccount.findUnique({ where: { userId } });
-  return account ?? { balance: 0 };
+  const created = await withUserCreditLock(userId, (tx) => ensureAccountTx(tx, userId));
+  if (!created) return null;
+  return prisma.creditAccount.findUnique({ where: { userId } });
 }
 
-type AllowanceSub = {
+// ---- Pro status and the Pro allowance --------------------------------------
+
+/**
+ * How long after its paid period ends a subscription row still counts as Pro
+ * without a renewal being recorded: covers Stripe's renewal invoice and a
+ * few days of webhook retries. The maintenance job re-reads lapsed rows.
+ */
+export const PRO_GRACE_MS = 7 * DAY_MS;
+
+type ProRow = {
   status: string;
+  currentPeriodEnd: Date | null;
+  disputeId?: string | null;
+};
+
+/**
+ * Does this subscription row grant Pro right now? Active on Stripe, no open
+ * dispute on the payment of its current period, and its paid period (plus
+ * PRO_GRACE_MS) not over. Rows without a known period end (legacy) follow
+ * their status alone.
+ */
+export function subscriptionGrantsPro(row: ProRow | null, now = new Date()): boolean {
+  if (row?.status !== "active") return false;
+  if (row.disputeId) return false;
+  if (row.currentPeriodEnd && row.currentPeriodEnd.getTime() + PRO_GRACE_MS < now.getTime()) {
+    return false;
+  }
+  return true;
+}
+
+/** The Subscription fields the allowance reads. */
+export type AllowanceRow = ProRow & {
+  stripeSubscriptionId: string | null;
+  allowanceSubscriptionId: string | null;
   allowancePeriodStart: Date | null;
   allowancePeriodEnd: Date | null;
-} | null;
+  allowanceYearly: boolean;
+  allowanceStopAt: Date | null;
+  disputedAt: Date | null;
+};
+
+export const ALLOWANCE_ROW_SELECT = {
+  status: true,
+  currentPeriodEnd: true,
+  disputeId: true,
+  stripeSubscriptionId: true,
+  allowanceSubscriptionId: true,
+  allowancePeriodStart: true,
+  allowancePeriodEnd: true,
+  allowanceYearly: true,
+  allowanceStopAt: true,
+  disputedAt: true,
+} as const;
 
 /**
  * Monthly free-tier refresh, applied lazily on any balance read: when a
@@ -97,22 +221,29 @@ type AllowanceSub = {
 async function maybeMonthlyRefresh(
   userId: string,
   balance: number,
-  sub: AllowanceSub,
+  sub: AllowanceRow | null,
 ): Promise<boolean> {
   if (balance >= FREE_MONTHLY_CREDITS) return false;
-  if (sub?.status === "active") return false;
+  if (subscriptionGrantsPro(sub)) return false;
+  // Credits held by a request in flight are still the user's.
+  const held = await prisma.creditHold.aggregate({
+    _sum: { amount: true },
+    where: { userId, state: "held" },
+  });
+  if (balance + (held._sum.amount ?? 0) >= FREE_MONTHLY_CREDITS) return false;
   const monthKey = new Date().toISOString().slice(0, 7); // YYYY-MM
   const idempotencyKey = `free_monthly:${userId}:${monthKey}`;
   // Hot path: getCreditBalance runs on every credit gate, agent charge, and
-  // meter render. Once this month's refresh exists, skip the doomed grant
-  // (which would otherwise open a transaction that always fails P2002).
+  // meter render. Once this month's refresh exists, skip the doomed grant.
   const already = await prisma.creditLedger.findUnique({
     where: { idempotencyKey },
     select: { id: true },
   });
   if (already) return false;
-  await grantCredits(userId, FREE_MONTHLY_CREDITS, "free_monthly", idempotencyKey);
-  return true;
+  return (
+    (await grantCredits(userId, FREE_MONTHLY_CREDITS, "free_monthly", idempotencyKey)) ===
+    "granted"
+  );
 }
 
 /**
@@ -141,76 +272,117 @@ export function addMonthsUtc(date: Date, months: number): Date {
   );
 }
 
-const DAY_MS = 24 * 60 * 60 * 1000;
+/** Further monthly allowances one paid year accrues (its invoice pays the first). */
+export const MAX_ACCRUED_MONTHS = 11;
 
 /**
- * Which monthly allowances (index ≥ 1) are due inside a paid billing period.
- * Allowance 0 is granted by the paid invoice itself; allowance i falls on
- * the i-th monthly anniversary of the period start. Anniversaries within a
- * day of the period end belong to the next invoice, so a monthly period
- * yields none and an annual period yields up to 11.
+ * A paid period long enough to accrue monthly allowances: a yearly price.
+ * Measured in calendar months, so a day or two either way at the boundary
+ * (Feb 29 anchors, month-end clamping) never changes the answer.
+ */
+export function isYearlyPeriod(start: Date, end: Date): boolean {
+  return end.getTime() >= addMonthsUtc(start, 11).getTime();
+}
+
+/**
+ * Which further monthly allowances (1..11) of a yearly paid period are due by
+ * `now`. Allowance 0 is granted by the paid invoice itself; allowance i falls
+ * on the i-th monthly anniversary of the period start. Never more than
+ * MAX_ACCRUED_MONTHS, never an anniversary within a day of the period end
+ * (that month belongs to the next invoice), and none on or after `stopAt`
+ * (the subscription ended, or its payment was refunded or disputed).
  */
 export function dueAllowanceMonths(
   periodStart: Date,
   periodEnd: Date,
   now: Date,
+  stopAt?: Date | null,
 ): number[] {
   const due: number[] = [];
-  for (let i = 1; i < 24; i++) {
+  for (let i = 1; i <= MAX_ACCRUED_MONTHS; i++) {
     const anniversary = addMonthsUtc(periodStart, i);
     if (anniversary.getTime() > periodEnd.getTime() - DAY_MS) break;
+    if (stopAt && anniversary.getTime() >= stopAt.getTime()) break;
     if (anniversary.getTime() > now.getTime()) break;
     due.push(i);
   }
   return due;
 }
 
-/** Ledger key of the i-th monthly allowance inside a paid period. */
-export function allowanceKey(userId: string, periodStart: Date, i: number) {
-  return `pro_grant:${userId}:${Math.floor(periodStart.getTime() / 1000)}:m${i}`;
+/**
+ * Ledger key of the Pro allowance for one calendar month (UTC) of coverage.
+ * Every Pro grant (a paid invoice or an annual anniversary) uses it, so a
+ * month of coverage is granted once however many invoices touch it (plan
+ * switches, proration invoices, retries).
+ */
+export function proMonthKey(userId: string, month: Date): string {
+  return `pro_month:${userId}:${month.toISOString().slice(0, 7)}`;
 }
 
+/** Grant the Pro allowance of the calendar month containing `month`, once. */
+export async function grantProMonth(userId: string, month: Date): Promise<boolean> {
+  const outcome = await grantCredits(
+    userId,
+    PRO_MONTHLY_CREDITS,
+    "pro_monthly",
+    proMonthKey(userId, month),
+  );
+  return outcome === "granted";
+}
+
+const earliest = (...dates: (Date | null | undefined)[]): Date | null =>
+  dates.reduce<Date | null>(
+    (min, d) => (d && (!min || d.getTime() < min.getTime()) ? d : min),
+    null,
+  );
+
 /**
- * Lazily grant the monthly Pro allowances an annual (or any multi-month)
- * subscriber has reached since their paid period began. Idempotent per
- * (period, month) via the ledger key, granted in order so that the newest
- * due month existing means every earlier one does. Returns true when it granted.
+ * Grant the monthly Pro allowances a yearly subscriber has reached by `now`
+ * inside the allowance period, in order. Only for the subscription the
+ * period belongs to, which must still be the one the row tracks. Does not
+ * depend on the live status: months before the subscription's end (or a
+ * refund or dispute) were paid for and are owed even after it ends. Also
+ * called just before the period is replaced, so no paid month is dropped.
+ * Returns true when it granted.
  */
-async function accrueProAllowance(
+export async function accrueProAllowance(
   userId: string,
-  sub: AllowanceSub,
+  sub: AllowanceRow | null,
+  now = new Date(),
 ): Promise<boolean> {
-  if (sub?.status !== "active") return false;
+  if (!sub?.allowanceYearly) return false;
+  if (!sub.allowanceSubscriptionId || sub.allowanceSubscriptionId !== sub.stripeSubscriptionId) {
+    return false;
+  }
   const { allowancePeriodStart: start, allowancePeriodEnd: end } = sub;
   if (!start || !end) return false;
-  const due = dueAllowanceMonths(start, end, new Date());
+  const due = dueAllowanceMonths(start, end, now, earliest(sub.allowanceStopAt, sub.disputedAt));
   if (due.length === 0) return false;
+  // Hot path: months are granted in order, so the newest due month existing
+  // means every earlier one does too.
   const newest = await prisma.creditLedger.findUnique({
-    where: { idempotencyKey: allowanceKey(userId, start, due[due.length - 1]) },
+    where: { idempotencyKey: proMonthKey(userId, addMonthsUtc(start, due[due.length - 1])) },
     select: { id: true },
   });
   if (newest) return false;
+  let granted = false;
   for (const i of due) {
-    await grantCredits(
-      userId,
-      PRO_MONTHLY_CREDITS,
-      "pro_monthly",
-      allowanceKey(userId, start, i),
-    );
+    if (await grantProMonth(userId, addMonthsUtc(start, i))) granted = true;
   }
-  return true;
+  return granted;
 }
 
-/** Current balance (creates + seeds the account on first call). */
+/** Current balance (creates + seeds the account on first call; 0 once deleted). */
 export async function getCreditBalance(userId: string): Promise<number> {
-  const account = await ensureAccount(userId);
+  let account = await ensureAccount(userId);
+  if (!account) return 0;
+  // Credits held by a request that died are given back here at the latest.
+  if ((await releaseExpiredHolds({ userId })) > 0) {
+    account = (await prisma.creditAccount.findUnique({ where: { userId } })) ?? account;
+  }
   const sub = await prisma.subscription.findUnique({
     where: { userId },
-    select: {
-      status: true,
-      allowancePeriodStart: true,
-      allowancePeriodEnd: true,
-    },
+    select: ALLOWANCE_ROW_SELECT,
   });
   const accrued = await accrueProAllowance(userId, sub);
   const refreshed =
@@ -225,42 +397,112 @@ export async function hasCredits(userId: string, min = 1): Promise<boolean> {
   return (await getCreditBalance(userId)) >= min;
 }
 
+// ---- Grants and debits ------------------------------------------------------
+
+/** What a grant did: wrote it, found it already written, or refused it. */
+export type GrantOutcome = "granted" | "duplicate" | "deleted_account";
+
+/**
+ * Add credits inside a transaction that HOLDS THE USER LOCK (see
+ * withUserCreditLock). Refused for a deleted account; idempotent per key.
+ */
+export async function grantCreditsTx(
+  tx: CreditsDb,
+  userId: string,
+  amount: number,
+  reason: string,
+  idempotencyKey?: string,
+): Promise<GrantOutcome> {
+  if (await isTombstoned(tx, userId)) return "deleted_account";
+  if (idempotencyKey) {
+    const done = await tx.creditLedger.findUnique({
+      where: { idempotencyKey },
+      select: { id: true },
+    });
+    if (done) return "duplicate";
+  }
+  if (amount <= 0) return "granted";
+  if (!(await ensureAccountTx(tx, userId))) return "deleted_account";
+  await tx.creditLedger.create({
+    data: { userId, delta: amount, reason, idempotencyKey },
+  });
+  await tx.creditAccount.update({
+    where: { userId },
+    data: { balance: { increment: amount } },
+  });
+  return "granted";
+}
+
 /**
  * Add credits. Idempotent when an `idempotencyKey` is given, so the Stripe
  * webhook and the success-redirect can both call it without double-granting.
+ * Never grants to a deleted account ("deleted_account": the caller refunds
+ * whatever paid for it).
  */
 export async function grantCredits(
   userId: string,
   amount: number,
   reason: string,
   idempotencyKey?: string,
-): Promise<void> {
-  if (amount <= 0) return;
-  await ensureAccount(userId);
+): Promise<GrantOutcome> {
+  if (amount <= 0) return "granted";
   try {
-    await prisma.$transaction([
-      prisma.creditLedger.create({
-        data: { userId, delta: amount, reason, idempotencyKey },
-      }),
-      prisma.creditAccount.update({
-        where: { userId },
-        data: { balance: { increment: amount } },
-      }),
-    ]);
+    return await withUserCreditLock(userId, (tx) =>
+      grantCreditsTx(tx, userId, amount, reason, idempotencyKey),
+    );
   } catch (err) {
-    // A duplicate idempotencyKey means this grant already happened — ignore.
-    if (isUniqueViolation(err)) return;
+    // A duplicate idempotencyKey means this grant already happened.
+    if (isUniqueViolation(err)) return "duplicate";
     throw err;
   }
 }
 
+async function lockBalance(tx: CreditsDb, userId: string): Promise<number | null> {
+  const rows = await tx.$queryRaw<{ balance: number }[]>`
+    SELECT "balance" FROM "CreditAccount"
+    WHERE "userId" = ${userId}
+    FOR UPDATE`;
+  return rows[0]?.balance ?? null;
+}
+
 /**
- * Atomically remove up to `amount` credits, flooring the balance at zero.
- * The account row is locked (SELECT … FOR UPDATE) for the read-decide-write,
- * so concurrent debits serialize and can never drive the balance negative.
- * Never creates an account. With an `idempotencyKey`, a repeat is a no-op
- * (returns 0). Returns the number actually removed.
+ * Remove up to `amount` credits inside a transaction, flooring the balance at
+ * zero. The account row is locked (SELECT … FOR UPDATE) for the
+ * read-decide-write, so concurrent debits serialize and can never drive the
+ * balance negative. Never creates an account. With an `idempotencyKey`, a
+ * repeat is a no-op (returns 0), and the ledger row is written even when it
+ * removes nothing, so a retry of the same event stays a no-op.
  */
+export async function debitCreditsTx(
+  tx: CreditsDb,
+  userId: string,
+  amount: number,
+  reason: string,
+  idempotencyKey?: string,
+): Promise<number> {
+  if (amount <= 0) return 0;
+  const balance = (await lockBalance(tx, userId)) ?? 0;
+  if (idempotencyKey) {
+    const done = await tx.creditLedger.findUnique({
+      where: { idempotencyKey },
+      select: { id: true },
+    });
+    if (done) return 0;
+  }
+  const debit = Math.min(amount, balance);
+  if (debit <= 0 && !idempotencyKey) return 0;
+  await tx.creditLedger.create({
+    data: { userId, delta: -Math.max(0, debit), reason, idempotencyKey },
+  });
+  if (debit <= 0) return 0;
+  await tx.creditAccount.update({
+    where: { userId },
+    data: { balance: { decrement: debit } },
+  });
+  return debit;
+}
+
+/** Atomically remove up to `amount` credits (see debitCreditsTx). */
 export async function debitCredits(
   userId: string,
   amount: number,
@@ -269,26 +511,9 @@ export async function debitCredits(
 ): Promise<number> {
   if (amount <= 0) return 0;
   try {
-    return await prisma.$transaction(async (tx) => {
-      const rows = await tx.$queryRaw<{ balance: number }[]>`
-        SELECT "balance" FROM "CreditAccount"
-        WHERE "userId" = ${userId}
-        FOR UPDATE`;
-      const balance = rows[0]?.balance ?? 0;
-      const debit = Math.min(amount, balance);
-      if (debit <= 0 && !idempotencyKey) return 0;
-      // A keyed debit records its ledger row even when it removes nothing,
-      // so a retry of the same event stays a no-op.
-      await tx.creditLedger.create({
-        data: { userId, delta: -Math.max(0, debit), reason, idempotencyKey },
-      });
-      if (debit <= 0) return 0;
-      await tx.creditAccount.update({
-        where: { userId },
-        data: { balance: { decrement: debit } },
-      });
-      return debit;
-    });
+    return await prisma.$transaction((tx) =>
+      debitCreditsTx(tx, userId, amount, reason, idempotencyKey),
+    );
   } catch (err) {
     if (idempotencyKey && isUniqueViolation(err)) return 0;
     throw err;
@@ -299,7 +524,8 @@ export async function debitCredits(
  * Charge a request's credits. Never fails or blocks after the work is done —
  * it deducts what it can and floors the balance at zero, so a user is never
  * billed mid-stream. Atomic under concurrency (see debitCredits). Returns the
- * number actually charged.
+ * number actually charged. Prefer a hold (reserveCredits) for model work, so
+ * the cost is reserved before the work starts.
  */
 export async function chargeCredits(
   userId: string,
@@ -307,16 +533,181 @@ export async function chargeCredits(
   reason: string,
 ): Promise<number> {
   if (amount <= 0) return 0;
-  await ensureAccount(userId);
+  if (!(await ensureAccount(userId))) return 0;
   return debitCredits(userId, amount, reason);
+}
+
+// ---- Holds: reserve before model work, settle after -------------------------
+
+/**
+ * How long a hold may stay open. Longer than any request's maxDuration
+ * (generation: 300 s), so only a request that died leaves one behind.
+ */
+export const CREDIT_HOLD_TTL_MS = 15 * 60 * 1000;
+
+/** Credits reserved for one request (see reserveCredits). */
+export interface CreditHold {
+  id: string;
+  userId: string;
+  /** Credits taken from the balance when the hold was made. */
+  amount: number;
+  reason: string;
+}
+
+/**
+ * Reserve credits BEFORE model work. Takes min(balance, estimate) from the
+ * balance at once, under the account row lock, so parallel requests cannot
+ * all start on the same credits: when less than `min` (default 1) is
+ * available, nothing is reserved and null is returned (refuse the request).
+ *
+ * Every hold must end in exactly one of:
+ *  - settleCreditHold(hold, actual): the work ran; charge its real cost (the
+ *    difference to the hold is returned, or taken, never below zero);
+ *  - releaseCreditHold(hold): the policy says this outcome is free.
+ * Both are idempotent and a release after a settle does nothing, so callers
+ * can settle on success and always release in `finally`. A hold that is
+ * neither (a crashed request) is released once CREDIT_HOLD_TTL_MS passes.
+ */
+export async function reserveCredits(
+  userId: string,
+  opts: { estimate: number; min?: number; reason: string; ttlMs?: number },
+): Promise<CreditHold | null> {
+  const min = Math.max(1, Math.ceil(opts.min ?? 1));
+  const want = Math.max(min, Math.ceil(opts.estimate));
+  if (!(await ensureAccount(userId))) return null;
+  await releaseExpiredHolds({ userId });
+  return prisma.$transaction(async (tx) => {
+    const balance = (await lockBalance(tx, userId)) ?? 0;
+    if (balance < min) return null;
+    const amount = Math.min(balance, want);
+    const hold = await tx.creditHold.create({
+      data: {
+        userId,
+        amount,
+        reason: opts.reason,
+        expiresAt: new Date(Date.now() + (opts.ttlMs ?? CREDIT_HOLD_TTL_MS)),
+      },
+    });
+    await tx.creditLedger.create({
+      data: { userId, delta: -amount, reason: `${opts.reason}_hold`, idempotencyKey: `hold:${hold.id}` },
+    });
+    await tx.creditAccount.update({
+      where: { userId },
+      data: { balance: { decrement: amount } },
+    });
+    return { id: hold.id, userId, amount, reason: opts.reason };
+  });
+}
+
+/**
+ * The work behind a hold ran: charge `actualCredits` in total. Returns the
+ * credits charged (at most the hold plus what is left in the balance). If
+ * the hold had already expired and been given back, the cost is charged
+ * from the balance now. Idempotent: settling twice charges once.
+ */
+export async function settleCreditHold(
+  hold: CreditHold,
+  actualCredits: number,
+  opts: { reason?: string } = {},
+): Promise<number> {
+  const actual = Math.max(0, Math.ceil(actualCredits));
+  const reason = opts.reason ?? hold.reason;
+  return prisma.$transaction(async (tx) => {
+    const balance = await lockBalance(tx, hold.userId);
+    const row = await tx.creditHold.findUnique({ where: { id: hold.id } });
+    if (!row) return 0; // erased with the account
+    if (row.state === "settled") return row.charged ?? 0;
+    const key = `hold_settle:${row.id}`;
+    let charged: number;
+    let delta: number;
+    if (row.state === "held") {
+      const diff = actual - row.amount;
+      delta = diff < 0 ? -diff : -Math.min(balance ?? 0, diff);
+      charged = row.amount - delta;
+    } else {
+      // Expired (or released) before the work finished: charge it now.
+      delta = -Math.min(balance ?? 0, actual);
+      charged = -delta;
+    }
+    if (delta !== 0 && balance !== null) {
+      await tx.creditLedger.create({
+        data: { userId: row.userId, delta, reason, idempotencyKey: key },
+      });
+      await tx.creditAccount.update({
+        where: { userId: row.userId },
+        data: { balance: { increment: delta } },
+      });
+    }
+    await tx.creditHold.update({
+      where: { id: row.id },
+      data: { state: "settled", charged, settledAt: new Date() },
+    });
+    return charged;
+  });
+}
+
+async function releaseHoldById(id: string, state: "released" | "expired"): Promise<boolean> {
+  return prisma.$transaction(async (tx) => {
+    const seen = await tx.creditHold.findUnique({ where: { id } });
+    if (!seen || seen.state !== "held") return false;
+    // Same lock order as reserve and settle: the account row first.
+    const balance = await lockBalance(tx, seen.userId);
+    const claimed = await tx.creditHold.updateMany({
+      where: { id, state: "held" },
+      data: { state, charged: 0, settledAt: new Date() },
+    });
+    if (claimed.count === 0) return false;
+    if (balance !== null) {
+      await tx.creditLedger.create({
+        data: {
+          userId: seen.userId,
+          delta: seen.amount,
+          reason: `${seen.reason}_release`,
+          idempotencyKey: `hold_release:${id}`,
+        },
+      });
+      await tx.creditAccount.update({
+        where: { userId: seen.userId },
+        data: { balance: { increment: seen.amount } },
+      });
+    }
+    return true;
+  });
+}
+
+/** Give a hold back in full (the outcome is free). No-op once settled or released. */
+export async function releaseCreditHold(hold: Pick<CreditHold, "id">): Promise<boolean> {
+  return releaseHoldById(hold.id, "released");
+}
+
+/** Give back holds left open past their expiry (all users, or one). */
+export async function releaseExpiredHolds(
+  opts: { userId?: string; now?: Date; limit?: number } = {},
+): Promise<number> {
+  const stale = await prisma.creditHold.findMany({
+    where: {
+      state: "held",
+      expiresAt: { lt: opts.now ?? new Date() },
+      ...(opts.userId ? { userId: opts.userId } : {}),
+    },
+    select: { id: true },
+    orderBy: { expiresAt: "asc" },
+    take: opts.limit ?? 500,
+  });
+  let released = 0;
+  for (const h of stale) {
+    if (await releaseHoldById(h.id, "expired")) released++;
+  }
+  return released;
 }
 
 /** Net credits moved by ledger rows whose key starts with `prefix`. */
 export async function ledgerSumForKeyPrefix(
   userId: string,
   prefix: string,
+  db: CreditsDb = prisma,
 ): Promise<number> {
-  const agg = await prisma.creditLedger.aggregate({
+  const agg = await db.creditLedger.aggregate({
     _sum: { delta: true },
     where: { userId, idempotencyKey: { startsWith: prefix } },
   });

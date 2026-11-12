@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { auth } from "@clerk/nextjs/server";
 import { hasCredits } from "@/lib/credits";
+import { MIN_GENERATION_BALANCE } from "@/lib/credits-info";
 import { getI18n } from "@/lib/i18n/server";
 import { GeneratorClient } from "./GeneratorClient";
 
@@ -17,11 +18,12 @@ export default async function GeneratePage({
   const value = (await searchParams).prompt;
   const initialPrompt = typeof value === "string" ? value.slice(0, 2000) : "";
 
-  // Tell the student they are out of credits BEFORE they describe their
-  // studies and answer questions, not after. A failed lookup never blocks.
+  // Tell the student they lack the credits for a build (the server's
+  // minimum to start one) BEFORE they describe their studies and answer
+  // questions, not after. A failed lookup never blocks.
   const { userId } = await auth();
   const outOfCredits = userId
-    ? !(await hasCredits(userId).catch(() => true))
+    ? !(await hasCredits(userId, MIN_GENERATION_BALANCE).catch(() => true))
     : false;
 
   return <GeneratorClient initialPrompt={initialPrompt} outOfCredits={outOfCredits} />;

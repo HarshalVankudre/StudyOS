@@ -1,25 +1,38 @@
 import type { NextRequest } from "next/server";
 import { verifyWebhook } from "@clerk/nextjs/webhooks";
 import { eraseUserData } from "@/lib/account/erase-user-data";
-import { cancelAllBillingForUser, markAccountDeleted } from "@/lib/billing";
+import { markAccountDeleted, stopBillingForDeletedAccount } from "@/lib/billing";
 import { reportError } from "@/lib/ops/report-error";
+import { isBillingConfigured } from "@/lib/stripe";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
  * Clerk → us. When an account is deleted from Clerk's own UI (user profile or
- * dashboard), erase that user's StudyOS data. Register this URL in the Clerk
- * dashboard (Webhooks) with the `user.deleted` event and put the endpoint's
- * signing secret in CLERK_WEBHOOK_SIGNING_SECRET.
+ * dashboard), stop its billing and erase that user's StudyOS data. Register
+ * this URL in the Clerk dashboard (Webhooks) with the `user.deleted` event
+ * and put the endpoint's signing secret in CLERK_WEBHOOK_SIGNING_SECRET.
+ * With billing configured the secret is required: without it a user who
+ * deletes their account in Clerk would keep being charged.
  *
  * The Svix signature (id + timestamp + body, 5-minute tolerance) is verified by
- * Clerk's own verifyWebhook. Erasure is idempotent, so Clerk's retries and the
- * webhook fired by our in-app delete are harmless.
+ * Clerk's own verifyWebhook. Every step is idempotent, so Clerk's retries and
+ * the webhook fired by our in-app delete are harmless.
  */
 export async function POST(req: Request) {
   const signingSecret = process.env.CLERK_WEBHOOK_SIGNING_SECRET;
-  if (!signingSecret) return new Response("Not found", { status: 404 });
+  if (!signingSecret) {
+    if (!isBillingConfigured()) return new Response("Not found", { status: 404 });
+    // Billing is live but deletions in Clerk cannot be verified: fail loudly
+    // (Clerk shows failed deliveries and retries; the error is reported).
+    reportError(new Error("CLERK_WEBHOOK_SIGNING_SECRET is not set while billing is on"), {
+      source: "api",
+      route: "/api/clerk/webhook",
+      method: "POST",
+    });
+    return new Response("Webhook not configured", { status: 503 });
+  }
 
   let event: Awaited<ReturnType<typeof verifyWebhook>>;
   try {
@@ -34,17 +47,18 @@ export async function POST(req: Request) {
   const userId = event.data.id;
   if (!userId) return new Response("ignored", { status: 200 });
 
-  // Same order as the in-app deleteAccountAction: stop billing, erase, tombstone.
   try {
-    await cancelAllBillingForUser(userId);
-  } catch {
-    // Billing may still be live: keep the row that maps to it. A non-2xx makes
-    // Clerk retry with backoff.
-    return new Response("Billing cancel failed", { status: 503 });
-  }
-  try {
-    await eraseUserData(userId);
+    // Tombstone first (nothing can be granted or recreated from here on); it
+    // also queues the billing cancellation with the Stripe ids, so erasing
+    // the rows below can never lose track of a live subscription.
     await markAccountDeleted(userId);
+    // Cancel now if Stripe answers; if not, the queued job is retried by the
+    // maintenance run until it succeeds (and any charge meanwhile is refunded,
+    // since the account is tombstoned).
+    const billingStopped = await stopBillingForDeletedAccount(userId);
+    await eraseUserData(userId);
+    // A non-2xx makes Clerk retry soon as well.
+    if (!billingStopped) return new Response("Billing cancel queued", { status: 503 });
     return new Response("ok", { status: 200 });
   } catch (error) {
     reportError(error, {

@@ -250,3 +250,102 @@ body {
     animation: none;
   }
 }
+
+/* ---------- Focus (keyboard) ---------- */
+
+/* Also outline focusable elements the rule above does not cover. */
+:where(summary, [contenteditable="true"], [role="button"], [role="option"], [role="menuitem"], [role="tab"], [role="switch"]):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+/* The skip link focuses <main> itself; a ring around the whole page is noise. */
+:where(main, #main-content)[tabindex="-1"]:focus-visible {
+  outline: none !important;
+}
+
+/* ---------- Print / Save as PDF ---------- */
+
+@media print {
+  /* Light tokens on paper, whatever the screen theme. */
+  :root,
+  .light {
+    --bg: #ffffff;
+    --surface: #ffffff;
+    --surface-2: #ffffff;
+    --text: #111111;
+    --text-soft: #333333;
+    --text-faint: #555555;
+    --border-c: rgba(0, 0, 0, 0.15);
+    --border-strong-c: rgba(0, 0, 0, 0.25);
+    --hover-c: transparent;
+    --accent: #0f766e;
+    --accent-faint: transparent;
+    --card: #ffffff;
+    --background: #ffffff;
+    --foreground: #111111;
+    --elev-1: none;
+    --elev-2: none;
+    --elev-3: none;
+  }
+  @page {
+    margin: 16mm 14mm;
+  }
+  html,
+  body {
+    background: #fff !important;
+    color: #111 !important;
+    height: auto !important;
+    min-height: 0 !important;
+  }
+  body {
+    transition: none;
+  }
+  /* App chrome: sidebar, header toolbar, chat, floating buttons, toasts, dialogs. */
+  aside,
+  nav,
+  [data-print="hide"],
+  [data-sonner-toaster],
+  [data-slot="dialog-overlay"],
+  [data-slot="dialog-content"],
+  [role="dialog"] {
+    display: none !important;
+  }
+  /* The editor is a fixed-height scrolling frame on screen; let it flow onto pages. */
+  .h-\[100dvh\],
+  main,
+  main > div {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+  textarea,
+  input {
+    border: 0 !important;
+    background: transparent !important;
+    resize: none;
+  }
+  a {
+    color: inherit;
+    text-decoration: underline;
+  }
+  h1,
+  h2,
+  h3,
+  h4 {
+    break-after: avoid;
+  }
+  table,
+  figure,
+  img,
+  pre,
+  blockquote {
+    break-inside: avoid;
+  }
+  img {
+    max-width: 100% !important;
+  }
+  .reveal {
+    opacity: 1 !important;
+    animation: none !important;
+  }
+}

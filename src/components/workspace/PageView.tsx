@@ -15,7 +15,10 @@ import { useI18n } from "@/lib/i18n/client";
 import { cn } from "@/lib/utils";
 import { BlockText, type BlockTextHandle } from "./BlockText";
 import { DatabaseView } from "./DatabaseView";
+import { useBlockDeepLink } from "./DeepLinkContext";
 import { FlashcardsBlock } from "./FlashcardsBlock";
+import { GradesBlock } from "./grades/GradesBlock";
+import { QuizBlock } from "./quiz/QuizBlock";
 import { ReactArtifact } from "./ReactArtifact";
 import { useWorkspace } from "./WorkspaceContext";
 import {
@@ -33,6 +36,7 @@ import {
   moveBlockTo,
   newDatabase,
   newId,
+  studyKitSlashItems,
   textKindLabel,
   type InsertAction,
   type InsertItem,
@@ -49,6 +53,7 @@ import {
   type RowHandle,
 } from "./editor/EditorContext";
 import { InsertMenu } from "./editor/InsertMenu";
+import { openStudyKit } from "./materials/events";
 
 /** The authenticated, owner-checked source for a media asset. */
 export function mediaImgSrc(assetId: string): string {
@@ -60,10 +65,19 @@ const ADD_BUTTON = "__add-block__";
 /** Pointer travel before a press on the handle becomes a drag. */
 const DRAG_THRESHOLD_PX = 5;
 
-export function PageView({ page }: { page: Page }) {
+export function PageView({
+  page,
+  focusTitle = false,
+  onTitleFocused,
+}: {
+  page: Page;
+  /** A page that was just created: focus its title with the text selected. */
+  focusTitle?: boolean;
+  onTitleFocused?: () => void;
+}) {
   // A fresh editor per page: menus, drafts and pending focus never leak
   // from one page into the next.
-  return <PageEditor key={page.id} page={page} />;
+  return <PageEditor key={page.id} page={page} focusTitle={focusTitle} onTitleFocused={onTitleFocused} />;
 }
 
 interface InsertState {
@@ -72,10 +86,29 @@ interface InsertState {
   seq: number;
 }
 
-function PageEditor({ page }: { page: Page }) {
+function PageEditor({
+  page,
+  focusTitle,
+  onTitleFocused,
+}: {
+  page: Page;
+  focusTitle: boolean;
+  onTitleFocused?: () => void;
+}) {
   const { update, workspace } = useWorkspace();
   const { dict, t } = useI18n();
   const pageId = page.id;
+
+  const titleRef = useRef<HTMLInputElement>(null);
+  useLayoutEffect(() => {
+    if (!focusTitle) return;
+    const input = titleRef.current;
+    if (input) {
+      input.focus();
+      input.select();
+    }
+    onTitleFocused?.();
+  }, [focusTitle, onTitleFocused]);
 
   // Latest blocks for event handlers (which run after commit).
   const blocksRef = useRef(page.blocks);
@@ -87,9 +120,15 @@ function PageEditor({ page }: { page: Page }) {
     () => buildInsertItems(dict, t, workspace.databases),
     [dict, t, workspace.databases],
   );
-  const insertItemsRef = useRef(insertItems);
+  // The "/" menu also offers the study-kit actions (the "+" menu lists them
+  // in a section of their own).
+  const slashItems = useMemo(
+    () => [...insertItems, ...studyKitSlashItems(dict, true)],
+    [insertItems, dict],
+  );
+  const insertItemsRef = useRef(slashItems);
   useLayoutEffect(() => {
-    insertItemsRef.current = insertItems;
+    insertItemsRef.current = slashItems;
   });
 
   // ---- Focus management -------------------------------------------------
@@ -122,6 +161,9 @@ function PageEditor({ page }: { page: Page }) {
   const listRef = useRef<HTMLDivElement>(null);
   const [dropTop, setDropTop] = useState<number | null>(null);
   const suppressClick = useRef(false);
+
+  // A deep link (?block=) to a block on this page: scroll to it, highlight it.
+  useBlockDeepLink(listRef);
 
   const editor = useMemo<EditorApi>(() => {
     const mutate = (fn: (blocks: Block[], d: Workspace) => void) =>
@@ -170,10 +212,18 @@ function PageEditor({ page }: { page: Page }) {
           // No blank card: the schema requires card text, and the deck's own
           // "Add card" flow handles authoring.
           return { block: { id, type: "flashcards", title: dict.study.newDeckTitle, cards: [] } };
+        case "quiz":
+          return { block: { id, type: "quiz", title: dict.quiz.newQuizTitle, questions: [] } };
+        case "grades":
+          // Unconfigured: the block's own setup step detects the columns.
+          return { block: { id, type: "grades", title: dict.grades.defaultTitle } };
         case "linked":
           return {
             block: { id, type: "database_view", databaseId: action.databaseId, viewId: action.viewId },
           };
+        case "studyKit":
+          // Opens a dialog (see slashPick); never inserted as a block.
+          return { block: makeTextBlock("paragraph", "", id) };
         case "database": {
           const dbId = newId();
           const viewId = newId();
@@ -361,6 +411,13 @@ function PageEditor({ page }: { page: Page }) {
       slashPick(id, item, text, caret) {
         if (!isTextBlock(blocks()[indexOf(id)])) return;
         const action = item.action;
+        if (action.kind === "studyKit") {
+          // Keep what was written (without "/query") and open the dialog.
+          mutate((bs) => setText(bs, id, text));
+          if (action.make === "material") openStudyKit({ mode: "material" });
+          else openStudyKit({ mode: "page", pageId, make: action.make === "page_quiz" ? "quiz" : "flashcards" });
+          return;
+        }
         if (action.kind === "text") {
           // A text type turns this block into it, keeping what was written.
           mutate((bs) => replaceText(bs, id, (x) => convertTextBlock(x, action.textKind, text)));
@@ -557,7 +614,9 @@ function PageEditor({ page }: { page: Page }) {
             className="w-12 rounded bg-transparent px-1 text-center text-3xl outline-none hover:bg-hover focus:bg-hover sm:w-14 sm:text-4xl"
           />
           <DraftInput
+            ref={titleRef}
             value={page.title}
+            dir="auto"
             aria-label={dict.page.pageTitle}
             onCommit={(title) =>
               update((d) => {
@@ -872,6 +931,10 @@ function BlockBody({ block, pageId }: { block: Exclude<Block, TextBlock>; pageId
       return <ReactArtifact source={block.source} title={block.title} />;
     case "flashcards":
       return <FlashcardsBlock pageId={pageId} block={block} />;
+    case "quiz":
+      return <QuizBlock pageId={pageId} block={block} />;
+    case "grades":
+      return <GradesBlock pageId={pageId} block={block} />;
     default:
       return null;
   }

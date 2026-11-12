@@ -6,12 +6,23 @@ import { DEFAULT_LOCALE, type Locale } from "@/lib/i18n/config";
 import { streamChatCompletion, type ChatMessage } from "./openrouter";
 import { WORKSPACE_SHAPE, languageDirective } from "./generate";
 import { applyAgentOps, type AgentOp } from "./agent-ops";
+import { AGENT_VIEW_DOC } from "./agent-view-ops";
 import { assertResultWithinLimits } from "./limits";
 import { toolRegistry } from "./tools/registry";
 import { skillRegistry } from "./skills/registry";
 import "./skills/catalog"; // ensure Stage-1 skills + their tools are registered
 import { workspaceAreas } from "./agent";
-import type { AgentBudget } from "./budgets";
+import {
+  affordableOutputTokens,
+  estimateSimpleTurnUsd,
+  estimateTokens,
+  stepsForRequest,
+  type AgentBudget,
+} from "./budgets";
+import { focusAreas, summarizeOps, workspaceOutline } from "./agent-context";
+import { AiTruncatedError } from "./ai-errors";
+import { providerForModel } from "./provider";
+import { currentUsage } from "./usage-meter";
 import { clockPromptBlock, studentClock, type StudentClock } from "./student-clock";
 import {
   TaskCancelledError,
@@ -31,8 +42,26 @@ import type {
   AgentStreamEvent,
 } from "./agent-shared";
 import { getDictionary } from "@/lib/i18n/dictionaries";
+import { fmt } from "@/lib/i18n/interpolate";
+import { toolStepInfo } from "./agent-steps";
 
-const MAX_HISTORY = 8;
+/** Most history turns the model ever sees (the route already windows them). */
+const MAX_HISTORY = 12;
+
+/**
+ * Output ceilings. On Claude models thinking counts against max_tokens, so
+ * these are generous: billing is for tokens used, not for the ceiling, and a
+ * truncated reply wastes the whole call. The spend guard lowers them only
+ * when the turn's remaining budget could not cover the worst case.
+ */
+export const PLAN_MAX_TOKENS = 8_000;
+export const STEP_MAX_TOKENS = 16_000;
+/** After a truncation the same step is retried with more room. */
+export const STEP_RETRY_MAX_TOKENS = 32_000;
+/** A call that cannot afford at least this much output is not started. */
+export const MIN_CALL_OUTPUT_TOKENS = 1_500;
+/** Observations fed back to the model are capped at this many characters. */
+const OBSERVATION_MAX_CHARS = 12_000;
 
 /** Thrown when a model call is cut off by the wall-clock deadline (not an error). */
 class ModelDeadlineError extends Error {
@@ -44,6 +73,7 @@ class ModelDeadlineError extends Error {
 
 export interface RunAgentLoopParams {
   workspace: Workspace;
+  /** Recent conversation, oldest first, already windowed (see agent-history). */
   history: AgentMessage[];
   message: string;
   model: string;
@@ -79,10 +109,10 @@ export interface RunAgentLoopParams {
 const TOOL_INPUT_HINTS: Record<string, string> = {
   summarize_workspace: "{}",
   find_entities: '{"query":"<substring>"}',
-  read_area: '{"id":"<page or database id>"}',
+  read_area: '{"id":"<page or database id>","offset"?:0,"limit"?:60}',
   inspect_workspace: "{}",
   apply_ops:
-    '{"ops":[ <minimal operations; same vocabulary as the editor> ]}  // e.g. {"op":"update_page","pageId":"<id>","title":"<new>"}',
+    '{"ops":[ <minimal operations, see OPERATIONS> ]}  // e.g. {"op":"update_page","pageId":"<id>","title":"<new>"}',
   run_in_sandbox:
     '{"inputs":[{"path":"main.tex","content":"..."}],"setup":[],"run":["pdflatex -interaction=nonstopmode main.tex","pdftoppm -png -r 200 main.pdf out/page"],"outputs":["out/page-1.png"],"timeoutSec":90}',
   check_component: '{"source":"function App(){ return <div>...</div> }"}',
@@ -98,6 +128,173 @@ export function selectAllowedTools(skillToolIds: string[]): string[] {
     return !!def && def.enabled !== false;
   });
 }
+
+// ---------------------------------------------------------------------------
+// Prompt. One conversation per turn, so every call reuses the previous call's
+// prompt as its prefix (provider prompt caching):
+//   [system] [history] [outline + clock + request] → plan → [execute + focus]
+//   → step → [observation] → step → …
+// Nothing volatile goes into the system prompt; the clock rides in the
+// context message, which is fixed for the whole turn.
+
+const OPERATIONS_DOC = `OPERATIONS (apply_ops input.ops; always reuse the EXACT ids shown):
+- {"op":"update_row","databaseId":"<id>","rowId":"<id>","cells":{"<propertyId>":<value>}}   // changes only these cells
+- {"op":"add_row","databaseId":"<id>","row":{"id":"<new unique id>","cells":{...}}}
+- {"op":"delete_row","databaseId":"<id>","rowId":"<id>"}
+- {"op":"update_database","databaseId":"<id>","name"?,"icon"?,"description"?}
+- {"op":"add_database","database":<full Database>}
+- {"op":"delete_database","databaseId":"<id>"}
+- {"op":"replace_database","database":<full Database with the SAME id>}   // only for large restructuring
+- {"op":"add_property","databaseId":"<id>","property":<DatabaseProperty>}
+- {"op":"update_property","databaseId":"<id>","property":<DatabaseProperty with the SAME id>}
+- {"op":"delete_property","databaseId":"<id>","propertyId":"<id>"}
+- {"op":"add_view","databaseId":"<id>","view":<DatabaseView>,"preset"?:{...}}
+- {"op":"update_view","databaseId":"<id>","view":{"id":"<viewId>", ...only the fields to change},"preset"?:{...}}
+- {"op":"delete_view","databaseId":"<id>","viewId":"<id>"}
+- {"op":"add_page","page":<full Page>}
+- {"op":"update_page","pageId":"<id>","title"?,"icon"?}
+- {"op":"delete_page","pageId":"<id>"}
+- {"op":"set_page_blocks","pageId":"<id>","blocks":[<Block>...]}   // replaces the page's blocks: include the existing ones you keep
+- {"op":"replace_page","page":<full Page with the SAME id>}
+- {"op":"update_workspace","name"?,"icon"?,"homePageId"?}
+Cells are keyed by property id: select/status = an option id; multi_select/relation = arrays of ids; dates = "YYYY-MM-DD"; checkbox = boolean; number = number.`;
+
+function skillMenu(): { ids: string[]; guide: string[] } {
+  const canRender = !!skillRegistry.get("render-visual");
+  const canInteractive = !!skillRegistry.get("interactive-builder");
+  const canFlashcards = !!skillRegistry.get("flashcard-maker");
+  const canQuiz = !!skillRegistry.get("quiz-maker");
+  return {
+    ids: [
+      "precise-edit",
+      "study-planner",
+      ...(canFlashcards ? ["flashcard-maker"] : []),
+      ...(canQuiz ? ["quiz-maker"] : []),
+      ...(canRender ? ["render-visual"] : []),
+      ...(canInteractive ? ["interactive-builder"] : []),
+    ],
+    guide: [
+      "Pick precise-edit for a specific change (add, move, rename or reschedule an item; sort or filter a view). Pick study-planner for building or reworking exam/assignment/revision plans across several areas.",
+      canFlashcards
+        ? "Pick flashcard-maker when the user wants flashcards, a study deck, quiz cards, or Q&A/term-definition pairs to memorize or review."
+        : "",
+      canQuiz
+        ? "Pick quiz-maker when the user wants a practice quiz, practice test, mock exam or multiple-choice/true-false questions to take (a quiz block, not a custom widget). A quiz the course will hold on a date is coursework to track (precise-edit), not a practice quiz."
+        : "",
+      canRender
+        ? "Pick render-visual when the user wants a LaTeX formula, math, diagram, plot, figure, or a cheat-sheet/document rendered as an IMAGE placed into a page."
+        : "",
+      canInteractive
+        ? `Pick interactive-builder when the user wants a live/interactive widget — a chart of their data, ${canQuiz ? "" : "a quiz, "}a calculator, or an interactive diagram.`
+        : "",
+    ].filter(Boolean),
+  };
+}
+
+export function buildSystemPrompt(locale: Locale): string {
+  const menu = skillMenu();
+  return [
+    "You are the StudyOS workspace agent. You change a student's study workspace (pages made of blocks; databases with properties, rows and views) when they ask in plain English, and answer questions about it. Every turn has two phases. Always reply with exactly one JSON object and nothing else.",
+    "",
+    "PHASE 1 — PLAN (the message that ends with the REQUEST). Return one of:",
+    '{"action":"reply","reply":"<concise answer; no edit needed>"}',
+    '{"action":"clarify","reply":"<one question>","choices":[{"id":"a","label":"<short>","value":"<full answer>"}]}  // 2-4 choices, only when materially ambiguous',
+    `{"action":"execute","skillId":"<${menu.ids.join("|")}>","summary":"<one-sentence user-facing goal>","affectedAreaIds":["<existing page or database id>"]}`,
+    ...menu.guide,
+    "- affectedAreaIds: the pages/databases you will change or must read (their full contents are then shown to you). Keep it to what is needed.",
+    "- Clarify only when a wrong guess would make a destructive or broad change; give 2-4 mutually exclusive choices and no Other choice (the app adds one). A reversible small edit with enough detail needs no question.",
+    "- Earlier messages are context. Follow-ups like \"make that one due Monday instead\" refer to the items named in the previous turns (their ids are in the [Changed: …] notes).",
+    "",
+    "PHASE 2 — ACT (after an EXECUTE message). Return one of, one per message:",
+    '{"action":"tool","tool":"<id>","input":{...}}',
+    '{"action":"tool","tool":"apply_ops","input":{"ops":[...]},"reply":"<1-3 sentence summary for the student>"}  // add "reply" when this apply completes the request: the turn ends as soon as it succeeds',
+    '{"action":"final","reply":"<1-3 sentence summary of what you changed>"}',
+    "Each tool result comes back as an Observation. Only the tools listed in the EXECUTE message are available.",
+    "",
+    "RULES:",
+    "- Use the ids shown in the outline and focus areas; call read_area or find_entities only for something not shown. Do not re-read what you were already shown.",
+    "- Stage changes only with apply_ops, as the SMALLEST operations; never touch unrelated rows, properties, views, pages or databases. The server validates the whole workspace, so no verification step is needed after a successful apply_ops.",
+    "- Apply a request everywhere it logically belongs, as separate minimal operations. If many operations are needed, send them in batches of at most 25 per apply_ops.",
+    "- Dated coursework (a quiz, exam, assignment, deadline or reading the course holds on a date) is a ROW in the matching tracker database (assignments/deadlines/exams), with its date, course and type set from the existing options. Do not add page blocks for it unless the student asks for a page or study material.",
+    "- New ids must be unique (e.g. a short random string). Dates are local calendar days \"YYYY-MM-DD\" computed from the student's clock in the request message. Unknown real-world facts stay TBD; never invent grades or dates the student did not give.",
+    "- Valid colors: zinc, red, rose, orange, amber, yellow, lime, green, emerald, teal, cyan, sky, blue, indigo, violet, purple, fuchsia, pink.",
+    "",
+    OPERATIONS_DOC,
+    "",
+    AGENT_VIEW_DOC,
+    "",
+    "Shapes of full objects (Database/Page/Block/View):",
+    WORKSPACE_SHAPE,
+    languageDirective(locale),
+  ].join("\n");
+}
+
+function buildContextMessage(ws: Workspace, message: string, clockBlock: string): string {
+  return [
+    "WORKSPACE OUTLINE ([ids] in brackets; read_area shows full contents):",
+    workspaceOutline(ws),
+    "",
+    clockBlock,
+    "",
+    `REQUEST: ${message}`,
+    "",
+    "Phase 1: return the plan JSON.",
+  ].join("\n");
+}
+
+function buildExecuteMessage(
+  ws: Workspace,
+  skillId: string,
+  skillInstructions: string,
+  allowedTools: string[],
+  areaIds: string[],
+): string {
+  const tools = allowedTools.map((id) => `- ${id}: input ${TOOL_INPUT_HINTS[id] ?? "{}"}`).join("\n");
+  const focus = focusAreas(ws, areaIds);
+  return [
+    `EXECUTE with skill "${skillId}". Guidance: ${skillInstructions}`,
+    "Tools you may call:",
+    tools,
+    focus ? `Focus areas (current contents):\n${focus}` : "No focus areas were selected; use the outline.",
+    "Phase 2: reply with one JSON tool call or final.",
+  ].join("\n");
+}
+
+function historyMessages(history: AgentMessage[]): ChatMessage[] {
+  return history
+    .slice(-MAX_HISTORY)
+    .filter((h) => h.content.trim())
+    .map((h): ChatMessage => ({ role: h.role, content: h.content }));
+}
+
+function charsOf(messages: ChatMessage[]): number {
+  return messages.reduce((sum, m) => sum + m.content.length, 0);
+}
+
+/**
+ * Up-front estimate for the route: prompt size of the shared prefix and the
+ * expected USD of the smallest real edit (plan + one applying step).
+ */
+export function estimateAgentTurn(input: {
+  workspace: Workspace;
+  history: AgentMessage[];
+  message: string;
+  model: string;
+  locale: Locale;
+  clock?: StudentClock;
+}): { prefixTokens: number; simpleTurnUsd: number } {
+  const clockBlock = clockPromptBlock(input.clock ?? studentClock(), "agent");
+  const prefix: ChatMessage[] = [
+    { role: "system", content: buildSystemPrompt(input.locale) },
+    ...historyMessages(input.history),
+    { role: "user", content: buildContextMessage(input.workspace, input.message, clockBlock) },
+  ];
+  const prefixTokens = estimateTokens(charsOf(prefix));
+  const cached = providerForModel(input.model) === "anthropic";
+  return { prefixTokens, simpleTurnUsd: estimateSimpleTurnUsd(input.model, prefixTokens, cached) };
+}
+
+// ---------------------------------------------------------------------------
 
 export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentResponse> {
   const { workspace, history, message, model, budget, taskId, ownerId } = params;
@@ -116,11 +313,21 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentRes
   const dict = getDictionary(locale);
   const clockBlock = clockPromptBlock(params.clock ?? studentClock(), "agent");
 
+  // ---- Spend guard ----------------------------------------------------
+  // `currentUsage()` is the route's meter: the real, per-model priced spend
+  // of this turn so far. Each call's max_tokens is sized so its worst case
+  // still fits under the ceiling; a call that can't fit is not started.
+  const spentUsd = () => currentUsage()?.costUsd ?? 0;
+  let ceilingUsd = budget.maxCostUsd ?? Number.POSITIVE_INFINITY;
+  const sizeCall = (messages: ChatMessage[], desired: number): number | null => {
+    if (!Number.isFinite(ceilingUsd)) return desired;
+    const promptTokens = estimateTokens(charsOf(messages));
+    const affordable = affordableOutputTokens(model, promptTokens, ceilingUsd - spentUsd());
+    if (affordable < MIN_CALL_OUTPUT_TOKENS) return null;
+    return Math.min(desired, affordable);
+  };
+
   let modelTurns = 0;
-  // Gate against the model deadline (not the full wall deadline) so no new turn
-  // starts inside the reserved save-tail window.
-  const overBudget = () =>
-    now() >= modelDeadline || modelTurns >= budget.maxModelTurns;
 
   // One model call: streams the model's reasoning ("thinking") to the client
   // under `phase`, and aborts at the model deadline so a single turn cannot
@@ -136,6 +343,7 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentRes
     // Fail fast if the task was already cancelled before this turn started — the
     // model deadline signal alone can't represent a user Stop.
     throwIfTaskCancelled(params.signal);
+    modelTurns += 1;
     const remaining = modelDeadline - now();
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -156,6 +364,8 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentRes
       return await streamChatCompletion(model, messages, maxTokens, {
         temperature: opts?.temperature,
         signal: controller.signal,
+        // The prefix is byte-stable across this turn's calls.
+        cache: true,
         onReasoning: (delta) => {
           void emit({ type: "thinking", phase, delta });
         },
@@ -179,27 +389,58 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentRes
   // boundary below; an aborted task throws TaskCancelledError out of the loop.
   throwIfTaskCancelled(params.signal);
 
+  const prefix: ChatMessage[] = [
+    { role: "system", content: buildSystemPrompt(locale) },
+    ...historyMessages(history),
+    { role: "user", content: buildContextMessage(workspace, message, clockBlock) },
+  ];
+  // Everything after the prefix, appended in order and never rewritten, so
+  // each call's prompt starts with the previous call's prompt.
+  const convo: ChatMessage[] = [];
+  const messagesNow = () => [...prefix, ...convo];
+
+  const stoppedEarly = (reason: "budget" | "time"): AgentResponse => ({
+    reply: dict.ai.agent.stoppedNothing,
+    changed: false,
+    stopReason: reason,
+  });
+
   // ---- Plan ----------------------------------------------------------
   await emit({ type: "phase", phase: "planning", message: dict.agentChat.phase.planning, progress: 18 });
-  let plan: AgentPlanDecision;
-  try {
-    modelTurns += 1;
-    const planRaw = await callModel(buildPlanMessages(history, message, areas, locale, false, clockBlock), 1400, "planning", { temperature: 0.2 });
+  let plan: AgentPlanDecision | null = null;
+  let planMax = PLAN_MAX_TOKENS;
+  let truncations = 0;
+  let parseFailures = 0;
+  while (!plan) {
+    const maxTokens = sizeCall(messagesNow(), planMax);
+    if (maxTokens === null) return stoppedEarly("budget");
+    let planRaw: string;
+    try {
+      planRaw = await callModel(messagesNow(), maxTokens, "planning", { temperature: 0.2 });
+    } catch (error) {
+      // Running out of time during planning degrades to a plain reply, exactly
+      // like the step loop — not a hard agent error.
+      if (error instanceof ModelDeadlineError) {
+        return { reply: dict.ai.agent.fallbackReply, changed: false, stopReason: "time" };
+      }
+      // Cut off (thinking counts against max_tokens): retry once with room.
+      if (error instanceof AiTruncatedError) {
+        truncations += 1;
+        if (truncations > 1) return stoppedEarly("budget");
+        planMax = PLAN_MAX_TOKENS * 2;
+        continue;
+      }
+      throw error;
+    }
+    convo.push({ role: "assistant", content: planRaw });
     try {
       plan = parseAgentPlan(planRaw);
-    } catch {
-      // one bounded repair
-      modelTurns += 1;
-      const retry = await callModel(buildPlanMessages(history, message, areas, locale, true, clockBlock), 1400, "planning", { temperature: 0 });
-      plan = parseAgentPlan(retry);
+    } catch (error) {
+      // One bounded repair, then the parse error ends the turn (uncharged).
+      parseFailures += 1;
+      if (parseFailures > 1) throw error;
+      convo.push({ role: "user", content: "Your previous reply was not valid JSON. Return ONLY the plan JSON object." });
     }
-  } catch (error) {
-    // Running out of budget during planning should degrade gracefully (a plain
-    // reply), exactly like the step loop — not surface as a hard agent error.
-    if (error instanceof ModelDeadlineError) {
-      return { reply: dict.ai.agent.fallbackReply, changed: false };
-    }
-    throw error;
   }
 
   if (plan.action === "reply") return { reply: plan.reply, changed: false };
@@ -212,40 +453,80 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentRes
   await emit({ type: "plan", summary: plan.summary, areas: affectedAreas });
   for (const area of affectedAreas) await emit({ type: "area", areaId: area.id, status: "queued", progress: 35 });
 
+  const allowedTools = selectAllowedTools(skill.toolIds);
+  convo.push({
+    role: "user",
+    content: buildExecuteMessage(
+      workspace,
+      skill.id,
+      skill.instructions,
+      allowedTools,
+      plan.affectedAreaIds.filter((id) => areas.some((a) => a.id === id)),
+    ),
+  });
+
+  // Budget proportional to the request: steps by the kind and breadth of the
+  // work, and a spend ceiling to match (never above the hard ceiling).
+  const stepLimit = Math.min(
+    stepsForRequest(skill.id, affectedAreas.length, budget),
+    Math.max(0, budget.maxModelTurns - modelTurns),
+  );
+  const planSpend = spentUsd();
+  if (planSpend > 0 && Number.isFinite(ceilingUsd)) {
+    const perStep = Math.max(planSpend, ceilingUsd / 50) * 2;
+    ceilingUsd = Math.min(ceilingUsd, planSpend + perStep * stepLimit);
+  }
+
   let candidate = workspace;
   let changed = false;
   let toolCalls = 0;
   let repairs = 0;
-  const observations: ChatMessage[] = [];
-  const allowedTools = selectAllowedTools(skill.toolIds);
+  let steps = 0;
+  let stepMax = STEP_MAX_TOKENS;
+  const appliedOps: AgentOp[] = [];
+  let appliedBatches = 0;
+  let finalReply: string | null = null;
+  let stopReason: "budget" | "time" | undefined;
 
   await emit({ type: "phase", phase: "updating", message: dict.agentChat.phase.updating, progress: 40 });
 
-  let finalReply = dict.ai.agent.fallbackReply;
-  while (!overBudget() && toolCalls < budget.maxToolCalls) {
-    modelTurns += 1;
+  while (finalReply === null) {
+    if (now() >= modelDeadline) { stopReason = "time"; break; }
+    if (steps >= stepLimit || toolCalls >= budget.maxToolCalls) { stopReason = "budget"; break; }
+    const maxTokens = sizeCall(messagesNow(), stepMax);
+    if (maxTokens === null) { stopReason = "budget"; break; }
+    steps += 1;
     let stepRaw: string;
     try {
-      stepRaw = await callModel(
-        buildStepMessages(candidate, message, skill.instructions, allowedTools, observations, locale, clockBlock),
-        4000,
-        "updating",
-        { temperature: 0.1 },
-      );
+      stepRaw = await callModel(messagesNow(), maxTokens, "updating", { temperature: 0.1 });
     } catch (error) {
       // Hitting the model deadline mid-turn is expected near the budget ceiling:
-      // stop gracefully and finalize with what the loop has so far. Re-throw
-      // anything else (a genuine transport/model error).
-      if (error instanceof ModelDeadlineError) break;
+      // stop gracefully and finalize with what the loop has so far.
+      if (error instanceof ModelDeadlineError) { stopReason = "time"; break; }
+      // A truncated step is recoverable: say so and retry with more room
+      // (the cut-off text is dropped; nothing from it was applied).
+      if (error instanceof AiTruncatedError) {
+        if (repairs >= budget.maxRepairs) { stopReason = "budget"; break; }
+        repairs += 1;
+        stepMax = STEP_RETRY_MAX_TOKENS;
+        convo.push({
+          role: "user",
+          content: "Your previous reply was cut off before it was complete, so nothing from it was applied. Reply again with ONE shorter JSON object: think briefly, and send at most 15 operations per apply_ops (continue in the next step).",
+        });
+        continue;
+      }
       throw error;
     }
+    stepMax = STEP_MAX_TOKENS;
+    convo.push({ role: "assistant", content: stepRaw });
+
     let step;
     try {
       step = parseAgentStep(stepRaw);
     } catch (error) {
-      if (repairs >= budget.maxRepairs) break;
+      if (repairs >= budget.maxRepairs) { stopReason = "budget"; break; }
       repairs += 1;
-      observations.push({ role: "user", content: `Your last message was not valid JSON (${error instanceof Error ? error.message : "parse error"}). Reply with exactly one JSON object: a tool call or {"action":"final","reply":"..."}.` });
+      convo.push({ role: "user", content: `Your last message was not valid JSON (${error instanceof Error ? error.message : "parse error"}). Reply with exactly one JSON object: a tool call or {"action":"final","reply":"..."}.` });
       continue;
     }
 
@@ -257,7 +538,7 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentRes
     // tool call
     toolCalls += 1;
     if (!allowedTools.includes(step.tool)) {
-      observations.push({ role: "user", content: `Tool "${step.tool}" is not available for this task. Available: ${allowedTools.join(", ")}.` });
+      convo.push({ role: "user", content: `Tool "${step.tool}" is not available for this task. Available: ${allowedTools.join(", ")}.` });
       continue;
     }
     const ctx = {
@@ -269,27 +550,30 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentRes
     const def = toolRegistry.get(step.tool);
     try {
       const output = await toolRegistry.run(step.tool, step.input, ctx);
+      convo.push({ role: "user", content: `Observation from ${step.tool}: ${JSON.stringify(output).slice(0, OBSERVATION_MAX_CHARS)}` });
       // The orchestrator owns the candidate: fold a successful apply_ops in.
       if (step.tool === "apply_ops" && (output as { ok?: boolean }).ok) {
         const ops = (step.input as { ops: AgentOp[] }).ops;
         candidate = applyAgentOps(candidate, ops);
         changed = true;
+        appliedOps.push(...ops);
+        appliedBatches += 1;
         for (const area of affectedAreas) await emit({ type: "area", areaId: area.id, status: "working", progress: 60 });
+        // "Apply and finish" in one call: no separate final step needed.
+        if (step.reply) finalReply = step.reply;
       } else if (step.tool === "apply_ops") {
-        if (repairs >= budget.maxRepairs) break;
+        if (repairs >= budget.maxRepairs) { stopReason = "budget"; break; }
         repairs += 1;
       }
       if (def?.toProgress) {
         const progress = def.toProgress(step.input as never, output as never);
-        await emit({ type: "discovery", discovery: { id: `tool-${toolCalls}`, title: progress.title, detail: progress.detail }, progress: 65 });
+        await emit({ type: "discovery", discovery: { id: `tool-${toolCalls}`, title: progress.title, detail: progress.detail, step: toolStepInfo(step.tool, step.input, output) }, progress: 65 });
       }
-      observations.push({ role: "assistant", content: JSON.stringify(step) });
-      observations.push({ role: "user", content: `Observation from ${step.tool}: ${JSON.stringify(output).slice(0, 4000)}` });
     } catch (error) {
       // A cancelled task surfaces here as a tool abort — never feed it back as a
       // recoverable tool failure; let it end the loop.
       if (isTaskCancelledError(error, params.signal)) throw error;
-      observations.push({ role: "user", content: `Tool ${step.tool} failed: ${error instanceof Error ? error.message : "error"}. Choose another action.` });
+      convo.push({ role: "user", content: `Tool ${step.tool} failed: ${error instanceof Error ? error.message : "error"}. Choose another action.` });
     }
   }
 
@@ -299,79 +583,36 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentRes
   await emit({ type: "phase", phase: "validating", message: dict.agentChat.phase.validating, progress: 80 });
   for (const area of affectedAreas) await emit({ type: "area", areaId: area.id, status: "complete", progress: 88 });
 
-  if (!changed) return { reply: finalReply, changed: false, affectedAreas };
+  // A stop at the limit keeps every change already staged (each apply_ops
+  // batch was validated as a whole workspace, so the partial result is
+  // coherent) and says plainly that it stopped.
+  const stop = finalReply === null ? stopReason : undefined;
+  const reply =
+    finalReply ??
+    (stop
+      ? changed
+        ? fmt(dict.ai.agent.stoppedPartial, { count: appliedBatches })
+        : dict.ai.agent.stoppedNothing
+      : dict.ai.agent.fallbackReply);
+
+  if (!changed) return { reply, changed: false, affectedAreas, ...(stop ? { stopReason: stop } : {}) };
 
   assertResultWithinLimits(JSON.stringify(candidate));
   const validated = safeParseWorkspace(candidate);
   if (!validated.success) {
     throw new Error(`Agent produced an invalid workspace: ${validated.error.issues[0]?.message ?? "schema"}`);
   }
-  return { reply: finalReply, changed: true, workspace: validated.data, affectedAreas };
+  return {
+    reply,
+    changed: true,
+    workspace: validated.data,
+    affectedAreas,
+    changeNote: summarizeOps(appliedOps, validated.data),
+    ...(stop ? { stopReason: stop } : {}),
+  };
 }
 
 function resolveAreas(ids: string[], areas: AgentArea[]): AgentArea[] {
   const found = ids.map((id) => areas.find((a) => a.id === id)).filter((a): a is AgentArea => Boolean(a));
   return found.length ? found : areas.slice(0, 6);
-}
-
-function buildPlanMessages(history: AgentMessage[], message: string, areas: AgentArea[], locale: Locale, corrective = false, clockBlock = ""): ChatMessage[] {
-  // render-visual is only reachable when its skill is registered (AGENT_SANDBOX on);
-  // otherwise the planner must not be told about it.
-  const canRender = !!skillRegistry.get("render-visual");
-  const canInteractive = !!skillRegistry.get("interactive-builder");
-  const canFlashcards = !!skillRegistry.get("flashcard-maker");
-  const skillMenu = [
-    "precise-edit",
-    "study-planner",
-    ...(canFlashcards ? ["flashcard-maker"] : []),
-    ...(canRender ? ["render-visual"] : []),
-    ...(canInteractive ? ["interactive-builder"] : []),
-  ].join("|");
-  const system = [
-    "You are the planning layer of the StudyOS workspace agent. Decide what to do for the latest message.",
-    "Return exactly one JSON object and nothing else, one of:",
-    '{"action":"reply","reply":"<concise answer, no edit needed>"}',
-    '{"action":"clarify","reply":"<one question>","choices":[{"id":"a","label":"<short>","value":"<full answer>"}]}  // 2-4 choices, only when materially ambiguous',
-    `{"action":"execute","skillId":"<${skillMenu}>","summary":"<one-sentence user-facing goal>","affectedAreaIds":["<existing id>"]}`,
-    "Pick study-planner for exam/assignment/revision/schedule work; otherwise precise-edit.",
-    canFlashcards
-      ? "Pick flashcard-maker when the user wants flashcards, a study deck, quiz cards, or Q&A/term-definition pairs to memorize or review."
-      : "",
-    canRender
-      ? "Pick render-visual when the user wants a LaTeX formula, math, diagram, plot, figure, or a cheat-sheet/document rendered as an IMAGE placed into a page. It embeds an image in the workspace (PNG), not a downloadable file."
-      : "",
-    canInteractive
-      ? "Pick interactive-builder when the user wants a live/interactive widget — a chart of their data, a quiz, a calculator, or an interactive diagram."
-      : "",
-    corrective ? "Your previous reply was not valid JSON. Return ONLY the JSON object." : "",
-    "Valid workspace area ids:",
-    JSON.stringify(areas),
-    languageDirective(locale),
-  ].filter(Boolean).join("\n");
-  return [
-    { role: "system", content: system },
-    ...history.slice(-MAX_HISTORY).map((h): ChatMessage => ({ role: h.role, content: h.content })),
-    // The clock goes in the final user turn, after the stable system prompt and
-    // history, so it never invalidates a cached prefix.
-    { role: "user", content: `Workspace summary: ${areas.length} area(s).\nLatest user message: ${message}${clockBlock ? `\n\n${clockBlock}` : ""}` },
-  ];
-}
-
-function buildStepMessages(ws: Workspace, message: string, skillInstructions: string, allowedTools: string[], observations: ChatMessage[], locale: Locale, clockBlock = ""): ChatMessage[] {
-  const catalog = allowedTools.map((id) => `- ${id}: input ${TOOL_INPUT_HINTS[id] ?? "{}"}`).join("\n");
-  const system = [
-    "You are executing a StudyOS workspace change as a step-by-step tool loop.",
-    "Skill guidance:", skillInstructions,
-    "Return exactly one JSON object per turn, no prose:",
-    '{"action":"tool","tool":"<id>","input":{...}}  OR  {"action":"final","reply":"<1-3 sentence summary of what you changed>"}',
-    "Available tools:", catalog,
-    "Rules: inspect before editing; stage changes only via apply_ops with the SMALLEST operations; reuse existing ids; cells are keyed by property id (select/status = option id, dates = ISO strings); after a successful apply_ops, verify then return final.",
-    "Operation shapes for any full objects you include:", WORKSPACE_SHAPE,
-    languageDirective(locale),
-  ].join("\n");
-  return [
-    { role: "system", content: system },
-    { role: "user", content: `Workspace JSON:\n${JSON.stringify(ws)}\n\nUser request: ${message}${clockBlock ? `\n\n${clockBlock}` : ""}` },
-    ...observations.slice(-12),
-  ];
 }

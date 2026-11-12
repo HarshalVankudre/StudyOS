@@ -3,8 +3,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { recordReviewsAction } from "@/app/app/study-actions";
 import { isoDay } from "@/lib/study/days";
-import { ReviewBuffer } from "@/lib/study/recorder";
-import type { ReviewEvent } from "@/lib/study/stats";
+import { ReviewBuffer, type StudyEvent } from "@/lib/study/recorder";
 
 /** Fired on `window` after answers reach the server (the streak can refresh). */
 export const STUDIED_EVENT = "studyos:studied";
@@ -15,7 +14,7 @@ const FLUSH_DELAY_MS = 4_000;
  * sent at once (so the streak lights up), later ones in batches; anything
  * pending is sent when the session closes or the tab is hidden.
  */
-export function useReviewRecorder(workspaceId: string): (event: ReviewEvent) => void {
+export function useReviewRecorder(workspaceId: string): (event: StudyEvent) => void {
   const buffer = useRef<ReviewBuffer | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sentOnce = useRef(false);
@@ -49,7 +48,7 @@ export function useReviewRecorder(workspaceId: string): (event: ReviewEvent) => 
   }, [flush]);
 
   return useCallback(
-    (event: ReviewEvent) => {
+    (event: StudyEvent) => {
       buffer.current ??= new ReviewBuffer();
       buffer.current.add(workspaceId, isoDay(new Date()), event);
       if (!sentOnce.current) {

@@ -7,7 +7,7 @@ import type { Block, Workspace } from "@/lib/workspace/types";
 vi.mock("streamdown", () => ({
   Streamdown: ({ children }: { children: string }) => <div data-testid="md">{children}</div>,
 }));
-vi.mock("@/lib/streamdown-plugins", () => ({ streamdownPlugins: {} }));
+vi.mock("@/lib/streamdown-plugins", () => ({ streamdownPlugins: {}, streamdownRehypePlugins: [] }));
 vi.mock("./DatabaseView", () => ({
   DatabaseView: ({ databaseId }: { databaseId: string }) => <div data-testid="db-view">{databaseId}</div>,
 }));
@@ -36,7 +36,15 @@ beforeAll(() => {
 
 let current: Workspace;
 
-function Harness({ initial, onUpdate }: { initial: Block[]; onUpdate?: () => void }) {
+function Harness({
+  initial,
+  onUpdate,
+  focusTitle,
+}: {
+  initial: Block[];
+  onUpdate?: () => void;
+  focusTitle?: boolean;
+}) {
   const [ws, setWs] = useState<Workspace>(() => ({
     id: "w",
     name: "W",
@@ -62,7 +70,7 @@ function Harness({ initial, onUpdate }: { initial: Block[]; onUpdate?: () => voi
     <WorkspaceProvider
       value={{ workspace: ws, update, status: "saved", rev: 0, agentBusy: false, setAgentBusy: () => {} }}
     >
-      <PageView page={ws.pages[0]} />
+      <PageView page={ws.pages[0]} focusTitle={focusTitle} />
     </WorkspaceProvider>
   );
 }
@@ -244,6 +252,64 @@ describe("PageView editor: slash menu", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByText("No matching blocks")).not.toBeInTheDocument();
     expect(blocks()[0]).toEqual(para("a", "/xyz"));
+  });
+});
+
+describe("PageView editor: slash menu extras", () => {
+  it("opens when \"/\" is typed over selected text", async () => {
+    const { user } = setup([para("a", "replace me")]);
+    const el = area(0);
+    await user.click(el);
+    el.setSelectionRange(0, el.value.length);
+    await user.keyboard("/");
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+    expect(area(0).value).toBe("/");
+  });
+
+  it("offers the study-kit actions and opens the study kit", async () => {
+    const opened = vi.fn();
+    window.addEventListener("studyos:study-kit", (e) => opened((e as CustomEvent).detail));
+    const { user } = setup([para("a", "Notes")]);
+    await caretAt(user, area(0), 5);
+    await user.keyboard(" /quiz");
+    const options = within(screen.getByRole("listbox")).getAllByRole("option").map((o) => o.textContent);
+    expect(options).toContain("Quiz from this page");
+    await user.click(screen.getByRole("option", { name: "Quiz from this page" }));
+    expect(opened).toHaveBeenCalledWith({ mode: "page", pageId: "p", make: "quiz" });
+    // The typed command is removed, the text kept, and no block inserted.
+    expect(blocks()).toEqual([para("a", "Notes ")]);
+  });
+});
+
+describe("PageView editor: a new page", () => {
+  it("focuses the title with its text selected", () => {
+    render(<Harness initial={[para("a", "")]} focusTitle />);
+    const title = screen.getByRole("textbox", { name: "Page title" }) as HTMLInputElement;
+    expect(title).toHaveFocus();
+    expect([title.selectionStart, title.selectionEnd]).toEqual([0, title.value.length]);
+  });
+});
+
+describe("PageView editor: block menu on a phone", () => {
+  it("shows the turn-into choices inside the menu instead of a side submenu", async () => {
+    const original = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: query.includes("max-width"),
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    })) as unknown as typeof window.matchMedia;
+    try {
+      const { user } = setup([para("a", "Remember this")]);
+      await user.click(screen.getByRole("button", { name: "Block options" }));
+      const menu = await screen.findByRole("menu");
+      await user.click(within(menu).getByRole("menuitem", { name: "Turn into" }));
+      // Same menu, no submenu.
+      await user.click(within(menu).getByRole("menuitem", { name: "Quote" }));
+      expect(blocks()[0]).toEqual({ id: "a", type: "quote", text: "Remember this" });
+    } finally {
+      window.matchMedia = original;
+    }
   });
 });
 

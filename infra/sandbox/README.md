@@ -50,7 +50,6 @@ Set these in the internal Cloud Run service (never in the public production serv
 | Variable | Description |
 |---|---|
 | `AGENT_SANDBOX` | Set to `1` to enable sandbox execution. Must be unset or `0` in production. |
-| `AUTHENTIC_AGENT` | Set to `1` to enable the authentic agent loop (required alongside `AGENT_SANDBOX`). |
 | `DAYTONA_API_KEY` | API key for the Daytona cloud workspace service. |
 | `STUDYOS_SANDBOX_SNAPSHOT` | Name/ID of the prebuilt Daytona snapshot image to use for workspaces. |
 | `ASSETS_BUCKET` | GCS bucket name where artifacts are stored (e.g. `studyos-sandbox-assets`). |

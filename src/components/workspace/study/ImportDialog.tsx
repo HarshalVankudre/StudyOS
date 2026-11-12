@@ -40,7 +40,7 @@ export function ImportDialog({
   onImport: (cards: Flashcard[]) => void;
   onClose: () => void;
 }) {
-  const { dict, t } = useI18n();
+  const { dict, t, plural } = useI18n();
   const T = dict.studyTools;
   const [text, setText] = useState("");
   const [choice, setChoice] = useState<DelimiterChoice>("auto");
@@ -167,7 +167,7 @@ export function ImportDialog({
                 ))}
               </ul>
               {plan.length > PREVIEW_ROWS && (
-                <p className="text-xs text-ink-soft">{t(T.previewMore, { count: plan.length - PREVIEW_ROWS })}</p>
+                <p className="text-xs text-ink-soft">{plural(dict.counts.moreRows, plan.length - PREVIEW_ROWS)}</p>
               )}
             </section>
           )}
@@ -185,7 +185,7 @@ export function ImportDialog({
             disabled={newCount === 0}
             className="min-h-11 rounded-lg bg-lime px-4 text-sm font-semibold text-lime-on transition hover:bg-lime-deep disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {newCount > 0 ? t(T.importButton, { count: newCount }) : T.nothingToImport}
+            {newCount > 0 ? plural(dict.counts.importCards, newCount) : T.nothingToImport}
           </button>
         </div>
       </DialogContent>

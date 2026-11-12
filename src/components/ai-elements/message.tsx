@@ -12,7 +12,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { streamdownPlugins } from "@/lib/streamdown-plugins";
+import { streamdownPlugins, streamdownRehypePlugins } from "@/lib/streamdown-plugins";
 import { sanitizeLatexText } from "@/lib/ai/sanitize";
 import type { UIMessage } from "ai";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
@@ -268,7 +268,7 @@ export const MessageBranchPrevious = ({
       variant="ghost"
       {...props}
     >
-      {children ?? <ChevronLeftIcon size={14} />}
+      {children ?? <ChevronLeftIcon size={14} className="rtl:-scale-x-100" />}
     </Button>
   );
 };
@@ -291,7 +291,7 @@ export const MessageBranchNext = ({
       variant="ghost"
       {...props}
     >
-      {children ?? <ChevronRightIcon size={14} />}
+      {children ?? <ChevronRightIcon size={14} className="rtl:-scale-x-100" />}
     </Button>
   );
 };
@@ -321,16 +321,24 @@ export type MessageResponseProps = ComponentProps<typeof Streamdown>;
 
 export const MessageResponse = memo(
   ({ className, children, ...props }: MessageResponseProps) => (
-    <Streamdown
-      className={cn(
-        "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
-        className
-      )}
-      plugins={streamdownPlugins}
-      {...props}
-    >
-      {typeof children === "string" ? sanitizeLatexText(children) : children}
-    </Streamdown>
+    // The reply takes its direction from its own text (an English answer
+    // stays left-to-right in the Arabic interface); the bubble around it keeps
+    // the interface direction.
+    <div dir="auto" className="contents">
+      <Streamdown
+        className={cn(
+          "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
+          className
+        )}
+        plugins={streamdownPlugins}
+        {...props}
+        // After the spread so no caller can re-open external images: AI replies
+        // may only show images from our own origin and asset routes.
+        rehypePlugins={streamdownRehypePlugins}
+      >
+        {typeof children === "string" ? sanitizeLatexText(children) : children}
+      </Streamdown>
+    </div>
   ),
   (prevProps, nextProps) =>
     prevProps.children === nextProps.children &&

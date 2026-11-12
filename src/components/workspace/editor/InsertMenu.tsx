@@ -1,10 +1,24 @@
 "use client";
 
-import { useId, useMemo, useRef, useState } from "react";
+import { useContext, useId, useMemo, useRef, useState } from "react";
 import { Popover } from "radix-ui";
+import { FileStack, Layers, ListChecks } from "lucide-react";
 import { useI18n } from "@/lib/i18n/client";
-import { filterInsertItems, type InsertItem } from "./blockOps";
+import { openStudyKit } from "../materials/events";
+import {
+  buildStudyKitItems,
+  filterInsertItems,
+  type InsertItem,
+  type StudyKitMenuItem,
+} from "./blockOps";
+import { EditorContext } from "./EditorContext";
 import { InsertList, optionId } from "./InsertList";
+
+const STUDY_KIT_ICONS = {
+  material: FileStack,
+  page_flashcards: Layers,
+  page_quiz: ListChecks,
+} as const;
 
 /**
  * The "+" insert menu: a searchable list of block types anchored to whatever
@@ -27,6 +41,12 @@ export function InsertMenu({
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const filtered = useMemo(() => filterInsertItems(items, query), [items, query]);
+  // The page this menu edits (for "from this page" actions).
+  const pageId = useContext(EditorContext)?.pageId;
+  const studyItems = useMemo(
+    () => filterInsertItems(buildStudyKitItems(dict), query).filter((item) => pageId || item.action === "material"),
+    [dict, query, pageId],
+  );
   const listId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const picked = useRef(false);
@@ -37,6 +57,16 @@ export function InsertMenu({
   const pick = (item: InsertItem) => {
     picked.current = true;
     onPick(item);
+  };
+
+  const pickStudyKit = (item: StudyKitMenuItem) => {
+    picked.current = true;
+    onClose();
+    // The dialog hands focus back to whatever had it when it opened: make
+    // that the button this menu came from, not the page body.
+    if (anchor?.isConnected) anchor.focus();
+    if (item.action === "material" || !pageId) openStudyKit({ mode: "material" });
+    else openStudyKit({ mode: "page", pageId, make: item.action === "page_quiz" ? "quiz" : "flashcards" });
   };
 
   return (
@@ -108,6 +138,27 @@ export function InsertMenu({
             onPick={pick}
             onActiveChange={setActive}
           />
+          {studyItems.length > 0 && (
+            <div role="group" aria-label={dict.materials.menuSection} className="mt-1 border-t border-line pt-1">
+              <p className="px-2 pb-0.5 pt-1.5 text-[11px] font-semibold text-ink-faint">{dict.materials.menuSection}</p>
+              {studyItems.map((item) => {
+                const Icon = STUDY_KIT_ICONS[item.action];
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => pickStudyKit(item)}
+                    className="flex min-h-11 w-full items-center gap-3 rounded-sm px-2 text-start text-sm text-ink transition hover:bg-hover focus-visible:bg-hover focus-visible:outline-none sm:min-h-9"
+                  >
+                    <span className="grid size-7 shrink-0 place-items-center rounded border border-line bg-card text-ink-soft">
+                      <Icon className="size-4" aria-hidden />
+                    </span>
+                    <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>

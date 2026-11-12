@@ -57,6 +57,13 @@ describe("recordReviewsAction", () => {
     expect(arg.update.reviews).toEqual({ increment: 3 });
   });
 
+  it("only counts reviews in workspaces that are not in the trash (finding 17)", async () => {
+    await recordReviewsAction([{ workspaceId: "w1", localDate: utcToday, counts: counts({ reviews: 1 }) }]);
+    expect(m.workspaceFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ ownerId: "user_1", deletedAt: null }) }),
+    );
+  });
+
   it("ignores other people's workspaces, impossible days and empty batches", async () => {
     m.workspaceFindMany.mockResolvedValue([]);
     await recordReviewsAction([{ workspaceId: "not-mine", localDate: utcToday, counts: counts({ reviews: 1 }) }]);
@@ -88,6 +95,20 @@ describe("recordReviewsAction", () => {
     expect(await recordReviewsAction([])).toEqual({ ok: false });
   });
 
+  it("records quiz answers, and accepts batches from older clients without the quiz counters", async () => {
+    await recordReviewsAction([{ workspaceId: "w1", localDate: utcToday, counts: counts({ quizAnswers: 4, quizCorrect: 3 }) }]);
+    expect(m.studyDayUpsert.mock.calls[0][0].update.quizAnswers).toEqual({ increment: 4 });
+    const legacy = { ...counts({ reviews: 1, good: 1 }) } as Partial<ReturnType<typeof zeroCounts>>;
+    delete legacy.quizAnswers;
+    delete legacy.quizCorrect;
+    expect(
+      await recordReviewsAction([
+        { workspaceId: "w1", localDate: utcToday, counts: legacy as ReturnType<typeof zeroCounts> },
+      ]),
+    ).toEqual({ ok: true });
+    expect(m.studyDayUpsert.mock.calls[1][0].create).toMatchObject({ reviews: 1, quizAnswers: 0 });
+  });
+
   it("falls back to an update when two tabs create the same day at once", async () => {
     m.studyDayUpsert.mockRejectedValueOnce(new Error("Unique constraint failed"));
     m.studyDayUpdate.mockResolvedValue({});
@@ -110,6 +131,14 @@ describe("getStudyStatsAction", () => {
     const s = await getStudyStatsAction(offset);
     // -2 (row), -1 (legacy, local evening), today (practice) → 3 days.
     expect(s.current).toBe(3);
+    expect(s.studiedToday).toBe(true);
+  });
+
+  it("counts a day with only quiz answers as a study day", async () => {
+    const today = utcDay(new Date());
+    m.studyDayFindMany.mockResolvedValue([row(shiftDay(today, -1), { reviews: 2 }), row(today, { quizAnswers: 5, quizCorrect: 3 })]);
+    const s = await getStudyStatsAction(0);
+    expect(s.current).toBe(2);
     expect(s.studiedToday).toBe(true);
   });
 

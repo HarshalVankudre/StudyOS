@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { SandboxRunner, SandboxRunSpec } from "@/lib/ai/sandbox/runner";
 import type { CreateAssetFn } from "@/lib/assets/service";
 import { mimeForOutputPath } from "@/lib/assets/mime";
-import type { ToolDefinition } from "./registry";
+import type { ToolContext, ToolDefinition } from "./registry";
 
 const MAX_CMDS = 20;
 const MAX_FILES = 5;
@@ -43,18 +43,32 @@ const sandboxOutput = z.object({
   exitCode: z.number().int(),
 });
 
+/** A run's reserved credits: charge them (the run delivered) or give them back. */
+export interface SandboxCharge {
+  settle: () => Promise<void>;
+  release: () => Promise<void>;
+}
+
+/**
+ * The cost guard: `reserve` runs before a run and either reserves the run's
+ * credits (and a daily-quota slot) or refuses, saying why.
+ */
+export interface SandboxQuota {
+  reserve: (
+    ownerId: string,
+  ) => Promise<{ ok: true; charge: SandboxCharge } | { ok: false; reason: "credits" | "quota" }>;
+}
+
 export function createSandboxTool(deps: {
   runner: SandboxRunner;
   createAsset: CreateAssetFn;
   enabled: boolean;
   /**
-   * Optional cost guard: `check` throws/refuses before a run (daily quota),
-   * `settle` charges after a run started (each run costs real compute).
+   * Optional cost guard (see SandboxQuota): the credits are reserved BEFORE
+   * the run, so parallel runs cannot all start on the same credits, then
+   * settled when the run delivered an image and released otherwise.
    */
-  quota?: {
-    check: (ownerId: string) => Promise<{ allowed: boolean }>;
-    settle: (ownerId: string) => Promise<void>;
-  };
+  quota?: SandboxQuota;
 }): ToolDefinition<typeof sandboxInput, typeof sandboxOutput> {
   return {
     id: "run_in_sandbox",
@@ -68,41 +82,25 @@ export function createSandboxTool(deps: {
     handler: async (input, ctx) => {
       if (!ctx.ownerId) throw new Error("run_in_sandbox requires an owner");
 
-      if (deps.quota && !(await deps.quota.check(ctx.ownerId)).allowed) {
-        throw new Error(
-          "Daily rendering limit reached — this resets tomorrow. Let the user know instead of retrying.",
-        );
+      let charge: SandboxCharge | null = null;
+      if (deps.quota) {
+        const reserved = await deps.quota.reserve(ctx.ownerId);
+        if (!reserved.ok) {
+          throw new Error(
+            reserved.reason === "credits"
+              ? "Not enough credits to render — let the user know instead of retrying."
+              : "Daily rendering limit reached — this resets tomorrow. Let the user know instead of retrying.",
+          );
+        }
+        charge = reserved.charge;
       }
-
-      const spec: SandboxRunSpec = {
-        inputs: input.inputs,
-        setup: input.setup,
-        run: input.run,
-        outputs: input.outputs,
-        timeoutSec: input.timeoutSec,
-      };
-      const result = await deps.runner.run(spec, ctx.signal);
-      // Charge once the run completed. (A run that throws — timeout/infra
-      // error — is not charged: we don't bill users for failed renders. The
-      // daily quota was already consumed by the pre-run check.)
-      await deps.quota?.settle(ctx.ownerId).catch(() => {});
-
-      const artifacts: { assetId: string; mime: string; filename: string }[] = [];
-      for (const artifact of result.artifacts) {
-        const mime = mimeForOutputPath(artifact.path);
-        if (!mime) continue; // skip anything not an allowed image
-        const filename = artifact.path.split("/").pop() ?? artifact.path;
-        const handle = await deps.createAsset({
-          ownerId: ctx.ownerId,
-          bytes: artifact.bytes,
-          mime,
-          filename,
-          sourceRunId: ctx.taskId,
-        });
-        artifacts.push(handle);
+      try {
+        return await runAndStore(input, ctx, ctx.ownerId, charge);
+      } finally {
+        // A run that was not charged (it threw, or delivered nothing) gives
+        // its credits back. A no-op after a settle.
+        await charge?.release().catch(() => {});
       }
-
-      return { artifacts, logTail: result.logTail, exitCode: result.exitCode };
     },
     toProgress: (_input, output) => ({
       title: output.artifacts.length
@@ -110,4 +108,46 @@ export function createSandboxTool(deps: {
         : "Ran a sandbox render",
     }),
   };
+
+  async function runAndStore(
+    input: z.infer<typeof sandboxInput>,
+    ctx: ToolContext,
+    ownerId: string,
+    charge: SandboxCharge | null,
+  ): Promise<z.infer<typeof sandboxOutput>> {
+    const spec: SandboxRunSpec = {
+      inputs: input.inputs,
+      setup: input.setup,
+      run: input.run,
+      outputs: input.outputs,
+      timeoutSec: input.timeoutSec,
+    };
+    const result = await deps.runner.run(spec, ctx.signal);
+
+    const artifacts: { assetId: string; mime: string; filename: string }[] = [];
+    for (const artifact of result.artifacts) {
+      const mime = mimeForOutputPath(artifact.path);
+      if (!mime) continue; // skip anything not an allowed image
+      const filename = artifact.path.split("/").pop() ?? artifact.path;
+      const handle = await deps.createAsset({
+        ownerId,
+        bytes: artifact.bytes,
+        mime,
+        filename,
+        sourceRunId: ctx.taskId,
+      });
+      artifacts.push(handle);
+    }
+
+    // Charge only a run that delivered at least one image. A run that throws
+    // (timeout, infra error), exits without writing its outputs, or produced
+    // nothing usable is not billed: we don't charge for failed renders. The
+    // daily quota was already consumed by the reservation, which bounds how
+    // many failed runs anyone can provoke.
+    if (artifacts.length > 0) {
+      await charge?.settle().catch(() => {});
+    }
+
+    return { artifacts, logTail: result.logTail, exitCode: result.exitCode };
+  }
 }
