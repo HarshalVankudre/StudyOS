@@ -53,6 +53,9 @@ const nextConfig: NextConfig = {
     // traced through serverExternalPackages below.
     "/api/import/syllabus": ["./src/lib/import/extract-core.mjs", "./src/lib/import/extract-child.mjs"],
     "/api/materials": ["./src/lib/import/extract-core.mjs", "./src/lib/import/extract-child.mjs"],
+    "/api/notebooks/import-pdf": ["./src/lib/import/extract-core.mjs", "./src/lib/import/extract-child.mjs"],
+    // Brackets escaped: keys are picomatch globs, where [id] is a character class.
+    "/api/notebooks/\\[id\\]/pdf": ["./src/lib/import/extract-core.mjs", "./src/lib/import/extract-child.mjs"],
   },
   // Pin the workspace root to this folder so Next ignores stray lockfiles
   // elsewhere on the machine (silences the inferred-root warning).
@@ -66,11 +69,12 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["unpdf", "fflate"],
   experimental: {
     // The proxy buffers request bodies and silently cuts them off at this
-    // size (10 MB by default), so it must fit the largest upload: a Notion
-    // export, up to 25 MB plus multipart overhead (/api/import/notion; the
-    // syllabus and material uploads stay at 10 MB). Every route still caps
-    // its own body (lib/import/upload-body.ts).
-    proxyClientMaxBodySize: "26mb",
+    // size (10 MB by default), so it must fit the largest upload: a PDF
+    // imported into a notebook, up to 30 MB plus multipart overhead
+    // (MAX_PDF_BYTES, lib/notebooks/model.ts), ahead of a Notion export
+    // (25 MB, /api/import/notion); the syllabus and material uploads stay at
+    // 10 MB. Every route still caps its own body (lib/import/upload-body.ts).
+    proxyClientMaxBodySize: "31mb",
     serverActions: {
       // Autosave sends the whole workspace document. Workspaces may be up to
       // 2 MB (MAX_WORKSPACE_BYTES, the same cap as agent results), so leave

@@ -16,6 +16,10 @@
  *    someone gives them a retention rule here.
  *  - Trashed workspaces (Workspace.deletedAt): purged 30 days after deletion,
  *    see purgeTrashedWorkspaces.
+ *  - Trashed handwritten notebooks (Notebook.deletedAt): purged 30 days after
+ *    deletion with their pages and the PDFs they imported (stored objects
+ *    included), at most TRASH_PURGE_BATCH a run (lib/notebooks/server/store
+ *    purgeTrashedNotebooks); the rest go on the next run.
  *  - AgentChatMessage (the agent chat's memory): the model only ever reads the
  *    last few turns and the panel redraws the last 60, so messages older than
  *    180 days go, and at most the newest 200 per workspace are kept. A purged
@@ -42,6 +46,7 @@ import { SHARE_ENABLE_KIND } from "@/lib/share/config";
 import { TEST_EMAIL_KIND } from "@/lib/notifications/config";
 import { runBillingMaintenance, type BillingMaintenanceResult } from "@/lib/billing";
 import { reportError } from "@/lib/ops/report-error";
+import { purgeTrashedNotebooks } from "@/lib/notebooks/server/store";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -53,6 +58,7 @@ export const RETENTION = {
   studyEventDays: 430,
   analyticsEventDays: 760,
   trashedWorkspaceDays: 30,
+  trashedNotebookDays: 30,
   agentChatMessageDays: 180,
   agentChatMaxPerWorkspace: 200,
   notificationLogDays: 60,
@@ -81,6 +87,8 @@ export interface RetentionResult {
   studyEvents: number;
   analyticsEvents: number;
   trashedWorkspaces: number;
+  /** Null when the notebook purge failed (reported, retried next run). */
+  trashedNotebooks: number | null;
   agentChatMessagesExpired: number;
   agentChatMessagesOverCap: number;
   notificationLogs: number;
@@ -149,6 +157,11 @@ export async function runRetention(now = new Date()): Promise<RetentionResult> {
   });
 
   const trashedWorkspaces = await purgeTrashedWorkspaces(now);
+  // Deletes stored PDF objects too, so it never stops the rest of retention.
+  const trashedNotebooks = await purgeTrashedNotebooks(ago(now, RETENTION.trashedNotebookDays)).catch((error) => {
+    reportError(error, { source: "retention", route: "purgeTrashedNotebooks" });
+    return null;
+  });
 
   const agentChatMessagesExpired = await prisma.agentChatMessage.deleteMany({
     where: { createdAt: { lt: ago(now, RETENTION.agentChatMessageDays) } },
@@ -199,6 +212,7 @@ export async function runRetention(now = new Date()): Promise<RetentionResult> {
     studyEvents: studyEvents.count,
     analyticsEvents: analyticsEvents.count,
     trashedWorkspaces,
+    trashedNotebooks,
     agentChatMessagesExpired: agentChatMessagesExpired.count,
     agentChatMessagesOverCap: Number(agentChatMessagesOverCap),
     notificationLogs: notificationLogs.count,

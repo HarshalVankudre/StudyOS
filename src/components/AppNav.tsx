@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bot, CalendarDays, ChartColumn, GraduationCap, Sun, type LucideIcon } from "lucide-react";
+import { Bot, CalendarDays, ChartColumn, GraduationCap, NotebookPen, Sun, type LucideIcon } from "lucide-react";
 import { useI18n } from "@/lib/i18n/client";
 import { cn } from "@/lib/utils";
 
@@ -22,7 +22,8 @@ export function activeSection(pathname: string, hrefs: string[]): string | null 
 /**
  * The signed-in app's sections as one row of pills under the header: the same
  * on Today, Agenda, Insights, Grades and the Agent Center, and on a phone it
- * scrolls sideways instead of wrapping.
+ * scrolls sideways instead of wrapping. The notebook library has it too;
+ * the notebook editor is full screen and has its own back link.
  */
 export function AppNav({ className }: { className?: string }) {
   const { dict } = useI18n();
@@ -32,6 +33,7 @@ export function AppNav({ className }: { className?: string }) {
     { href: "/app/agenda", label: dict.agenda.label, Icon: CalendarDays },
     { href: "/app/insights", label: dict.insights.label, Icon: ChartColumn },
     { href: "/app/grades", label: dict.gradesOverview.label, Icon: GraduationCap },
+    { href: "/app/notebooks", label: dict.notebooks.nav, Icon: NotebookPen },
     { href: "/app/agents", label: dict.agentCenter.label, Icon: Bot },
   ];
   const active = activeSection(pathname, sections.map((s) => s.href));

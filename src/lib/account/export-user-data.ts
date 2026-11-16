@@ -22,15 +22,28 @@
  * their token, Stripe ids only as "has a customer".
  *
  * The document is STREAMED (streamUserDataExport): workspaces (up to 2 MB
- * each), study material (up to a few hundred KB each) and agent chat
- * messages (one row per message, growing with use) are read a page at a time
- * as the download is consumed, so an export never holds a user's whole data
- * in memory at once. Everything else is small and loaded up front.
+ * each), study material (up to a few hundred KB each), agent chat messages
+ * (one row per message, growing with use) and handwritten notebook pages
+ * (each with its ink, up to 6 MB) are read a page at a time as the download
+ * is consumed, so an export never holds a user's whole data in memory at
+ * once. Everything else is small and loaded up front.
+ *
+ * Handwritten notebooks: the notebooks and folders (metadata), every page
+ * (template, size, PDF background reference, its ink as the binary blob of
+ * lib/notebooks/codec.ts in base64, its PDF and handwriting text), and the
+ * PDFs the student imported WITH THEIR BYTES (base64): they are data the
+ * student provided, so they belong in a portable copy. The bytes are written
+ * one file at a time and in chunks (streamNotebookFiles), so a file of up to
+ * 40 MB is never held as one string; a file whose bytes cannot be read
+ * (storage outage) is listed with `data: null` and `unavailable: true`
+ * instead of breaking the whole download.
  */
 import "server-only";
 
 import { prisma } from "@/lib/db";
 import { claimWithinLimit } from "@/lib/usage-limits";
+import { readPdfBytes } from "@/lib/notebooks/server/file-store";
+import { reportError } from "@/lib/ops/report-error";
 
 export const EXPORT_FORMAT_VERSION = 1;
 
@@ -54,6 +67,10 @@ export const EXPORT_WORKSPACE_BATCH = 2;
 export const EXPORT_MATERIAL_BATCH = 5;
 /** Agent chat messages read per round trip (each at most a few KB). */
 export const EXPORT_CHAT_BATCH = 200;
+/** Notebook pages read per round trip (each with up to 6 MB of ink). */
+export const EXPORT_NOTEBOOK_PAGE_BATCH = 4;
+/** Bytes of an imported PDF encoded per chunk (a multiple of 3: chunks concatenate to valid base64). */
+const PDF_BASE64_CHUNK = 3 * 64 * 1024;
 
 /** Models deliberately not in the export (see the header for why). */
 export const EXPORT_EXCLUDED_MODELS = [
@@ -125,9 +142,81 @@ const STREAMED = {
         select: { id: true, workspaceId: true, role: true, content: true, createdAt: true },
       }),
   },
+  // Handwritten notebook pages, with their ink (pages of notebooks in the
+  // trash too: still stored, so still exported).
+  notebookPages: {
+    batch: EXPORT_NOTEBOOK_PAGE_BATCH,
+    listIds: (userId: string) =>
+      prisma.notebookPage.findMany({
+        where: { ownerId: userId },
+        orderBy: [{ notebookId: "asc" }, { position: "asc" }, { id: "asc" }],
+        select: { id: true },
+      }),
+    load: async (userId: string, ids: string[]) =>
+      (
+        await prisma.notebookPage.findMany({
+          where: { ownerId: userId, id: { in: ids } },
+          select: {
+            id: true, notebookId: true, position: true, template: true, width: true, height: true,
+            pdfFileId: true, pdfPage: true, ink: true, inkVersion: true, strokeCount: true, pdfText: true,
+            inkText: true, inkTextVersion: true, createdAt: true, updatedAt: true,
+          },
+        })
+      ).map(({ ink, ...page }) => ({
+        ...page,
+        template: parseJson(page.template),
+        inkFormat: "studyos-ink-v1",
+        ink: Buffer.from(ink.buffer, ink.byteOffset, ink.byteLength).toString("base64"),
+      })),
+  },
 } as const;
 
 type StreamedKey = keyof typeof STREAMED;
+
+/**
+ * The student's imported PDFs, one JSON object each, the bytes as base64
+ * written in chunks (see the header).
+ */
+async function* streamNotebookFiles(userId: string): AsyncGenerator<string> {
+  const ids = (
+    await prisma.notebookFile.findMany({
+      where: { ownerId: userId },
+      orderBy: { createdAt: "asc" },
+      select: { id: true },
+    })
+  ).map((row) => row.id);
+  let first = true;
+  for (const id of ids) {
+    const row = await prisma.notebookFile.findFirst({
+      where: { ownerId: userId, id },
+      select: {
+        id: true, notebookId: true, name: true, mime: true, sizeBytes: true, sha256: true, pageCount: true,
+        createdAt: true, storageKey: true, data: true,
+      },
+    });
+    if (!row) continue; // deleted while the export ran
+    const { storageKey, data, ...meta } = row;
+    let bytes: Uint8Array | null = null;
+    try {
+      bytes = await readPdfBytes({ storageKey, data });
+    } catch (error) {
+      reportError(error, { source: "export", route: "streamNotebookFiles", userId });
+    }
+    const head = JSON.stringify({ ...meta, unavailable: bytes === null });
+    const sep = first ? "" : ",";
+    first = false;
+    if (!bytes) {
+      yield `${sep}${head.slice(0, -1)},"data":null}`;
+      continue;
+    }
+    yield `${sep}${head.slice(0, -1)},"data":"`;
+    for (let at = 0; at < bytes.byteLength; at += PDF_BASE64_CHUNK) {
+      const chunk = bytes.subarray(at, Math.min(bytes.byteLength, at + PDF_BASE64_CHUNK));
+      yield Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength).toString("base64");
+    }
+    yield '"}';
+  }
+}
 type ExportProfile = { email?: string | null; name?: string | null };
 
 async function* streamCollection(userId: string, key: StreamedKey): AsyncGenerator<string> {
@@ -162,6 +251,9 @@ export async function* userDataExportChunks(
     yield* streamCollection(userId, key);
     yield "]";
   }
+  yield ',"notebookFiles":[';
+  yield* streamNotebookFiles(userId);
+  yield "]";
   for (const [key, value] of Object.entries(rest)) {
     yield `,${JSON.stringify(key)}:${JSON.stringify(value)}`;
   }
@@ -248,6 +340,8 @@ async function loadExportSummary(userId: string, profile: ExportProfile, now: Da
     referralsMade,
     invitedBy,
     contractNotices,
+    notebooks,
+    notebookFolders,
   ] = await Promise.all([
     prisma.dailyStudyPlan.findMany({
       where: { userId },
@@ -409,6 +503,21 @@ async function loadExportSummary(userId: string, profile: ExportProfile, now: Da
         proEndsAt: true,
       },
     }),
+    // Handwritten notebooks (also those in the trash). Pages are streamed
+    // (notebookPages), imported PDFs too (notebookFiles).
+    prisma.notebook.findMany({
+      where: { ownerId: userId },
+      orderBy: { createdAt: "asc" },
+      select: {
+        id: true, title: true, cover: true, folderId: true, workspaceId: true, paper: true, pageCount: true,
+        version: true, deletedAt: true, createdAt: true, updatedAt: true,
+      },
+    }),
+    prisma.notebookFolder.findMany({
+      where: { ownerId: userId },
+      orderBy: { createdAt: "asc" },
+      select: { id: true, name: true, createdAt: true, updatedAt: true },
+    }),
   ]);
 
   return {
@@ -475,6 +584,8 @@ async function loadExportSummary(userId: string, profile: ExportProfile, now: Da
           }
         : null,
     },
+    notebooks: notebooks.map((n) => ({ ...n, paper: parseJson(n.paper) })),
+    notebookFolders,
     usageEvents,
   };
 }

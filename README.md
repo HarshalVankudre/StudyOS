@@ -39,6 +39,7 @@ in on their own. Miss a day and the plan rebuilds around what's left.
 | **Built for the Klausurenphase** | An exam that decides a module (a *Klausur*, or any exam worth half the grade or more) is planned from six weeks out: twice a week, then every other day, then daily in the last two weeks, with about 30 hours of preparation (6 per ECTS when the table has credits, or your own estimate). With several exams in the same weeks the nearest gets the most of the day. |
 | **Fristen that cannot be missed** | Exam registration and deregistration, re-enrolment (*Rückmeldung*) and fee deadlines are read as what they are: ten minutes of paperwork that cannot be made up. They are never mistaken for an exam, are guaranteed a place in the plan in their last three days, and are reminded 7, 3 and 1 day before. A registration window in a university's calendar file is imported as a deadline on the day it closes. |
 | **Study kits from your own material** | Upload slides, notes or readings (PDF, Word, text). StudyOS writes summary notes, flashcards and a practice quiz; every card and question keeps a quote from your material, and the quote is verified against the document before it is kept. Unverifiable suggestions are dropped. You see the cost first and pay only if it works. |
+| **Handwritten notebooks** | Notebooks you write in by hand, like paper: pens with pressure, a highlighter, an eraser, a lasso to move, resize and recolor what you wrote, and shapes. Ruled, grid, dotted and Cornell paper, or import a PDF (lecture slides, worksheets) and annotate it page by page. Your handwriting is recognised in the background so the search finds it, and a notebook linked to a course makes study kits from your notes. Works with Apple Pencil on iPad as an installed web app, and with a pen, touch or mouse on a PC. |
 | **Practice quizzes** | Multiple choice, true/false and short answers, an exam mode (optional timer, no feedback until you submit) and a round of the questions you keep missing. |
 | **Flashcards on FSRS** | Spaced repetition with FSRS scheduling, a gentle catch-up after days off, streak freezes, practice mode, statistics, and import/export for Anki and Quizlet text formats. |
 | **Grade tracker** | Where you stand and what you need on the rest to reach a target, in percentages, US letter grades or GPA, UK degree classes or German grades, with a what-if mode. With German grades you enter module grades (1,0 to 5,0) and credits directly and get the Notenschnitt: weighted by ECTS, failed modules left out, cut off after the first decimal as examination regulations prescribe. The same calculation is free and needs no account at `/tools/grade-calculator`. |
@@ -56,7 +57,9 @@ in on their own. Miss a day and the plan rebuilds around what's left.
 
 Studying is free on every plan: flashcard reviews, quizzes, Today, the grade tracker,
 editing, deadline sync, export and undo never use credits. Credits pay for AI work.
-There are no feature gates: every feature is on both plans.
+There are no feature gates: every feature is on both plans. Handwriting recognition
+for search uses no credits either: it only indexes your own notes, and a daily cap
+(300 pages a day on Free, 1,500 on Pro) bounds it instead.
 
 - **Free** is a trial: a new account gets 300 credits once, to try everything. There
   is no monthly top-up.

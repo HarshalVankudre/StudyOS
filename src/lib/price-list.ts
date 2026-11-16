@@ -66,7 +66,9 @@ export type LimitedKind =
   | "workspace_duplicate"
   | "notion_import"
   | "syllabus_upload"
-  | "daily_plan";
+  | "daily_plan"
+  | "notebook_pdf"
+  | "handwriting";
 
 export type UsageLimits = Record<LimitedKind, { free: number; pro: number; windowMs: number }>;
 
@@ -110,6 +112,15 @@ const DEFAULT_USAGE_LIMITS: UsageLimits = {
   // "Plan my day" / "Rebuild from today": no model call, but each one loads
   // and plans across every workspace the student owns.
   daily_plan: { free: 30, pro: 30, windowMs: HOUR },
+  // PDF imports into notebooks (POST /api/notebooks/import-pdf and
+  // /api/notebooks/:id/pdf): each stores up to 40 MB and starts a capped
+  // extraction process. No model call.
+  notebook_pdf: { free: 20, pro: 60, windowMs: HOUR },
+  // Handwriting recognition of notebook pages for search (one small vision
+  // model call per page image). Uses no credits: it only indexes the
+  // student's own notes. A daily cap bounds the model spend instead; the
+  // client sends a page again only after its ink changed.
+  handwriting: { free: 300, pro: 1500, windowMs: DAY },
 };
 
 /** The numbers a price list is made of (see the header). */

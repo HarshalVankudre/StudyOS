@@ -1,10 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ runRetention: vi.fn(), retryAssets: vi.fn(), retryReferrals: vi.fn(), reseed: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  runRetention: vi.fn(),
+  retryAssets: vi.fn(),
+  retryReferrals: vi.fn(),
+  reseed: vi.fn(),
+  retryNotebookFiles: vi.fn(),
+}));
 vi.mock("@/lib/ops/retention", () => ({ runRetention: mocks.runRetention }));
 vi.mock("@/lib/account/erase-user-data", () => ({ retryOrphanedAssetDeletes: mocks.retryAssets }));
 vi.mock("@/lib/referral/reward", () => ({ retryPendingReferralRewards: mocks.retryReferrals }));
 vi.mock("@/lib/notifications/service", () => ({ reseedNotificationSchedules: mocks.reseed }));
+vi.mock("@/lib/notebooks/server/store", () => ({ retryOrphanedNotebookFiles: mocks.retryNotebookFiles }));
 
 const REFERRALS = { tried: 3, rewarded: 1, rejected: 0, waiting: 2, failed: 0 };
 
@@ -22,6 +29,7 @@ beforeEach(() => {
   mocks.retryAssets.mockResolvedValue({ retried: 2, deleted: 1 });
   mocks.retryReferrals.mockResolvedValue(REFERRALS);
   mocks.reseed.mockResolvedValue(4);
+  mocks.retryNotebookFiles.mockResolvedValue({ retried: 1, deleted: 1 });
   vi.spyOn(console, "log").mockImplementation(() => {});
 });
 afterEach(() => {
@@ -53,6 +61,7 @@ describe("POST /api/ops/maintenance", () => {
       orphanedAssets: { retried: 2, deleted: 1 },
       referralRewards: REFERRALS,
       notificationSchedules: 4,
+      orphanedNotebookFiles: { retried: 1, deleted: 1 },
     });
   });
 

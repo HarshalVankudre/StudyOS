@@ -204,6 +204,11 @@ describe("README", () => {
     expect(section).toContain(`cost more than ${ACTION_PRICES.message}`);
     expect(section).toContain(`both get ${n(REFERRAL_CREDITS)} credits`);
     expect(section).toContain(`for up to ${REFERRAL_MAX_REWARDS} friends, ${REFERRAL_MAX_PER_DAY} in any 24 hours`);
+    // Handwriting recognition: no credits, a daily cap.
+    expect(USAGE_LIMITS.handwriting.windowMs).toBe(24 * 60 * 60 * 1000);
+    expect(section).toContain(
+      `(${n(USAGE_LIMITS.handwriting.free)} pages a day on Free, ${n(USAGE_LIMITS.handwriting.pro)} on Pro)`,
+    );
   });
 
   it("its price table is the module's price list, row for row", () => {

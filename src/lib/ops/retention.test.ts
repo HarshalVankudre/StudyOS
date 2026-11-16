@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   deletionReasonDeleteMany: vi.fn(),
   contractNoticeDeleteMany: vi.fn(),
   billing: vi.fn(),
+  purgeNotebooks: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -30,6 +31,7 @@ vi.mock("@/lib/db", () => ({
 }));
 
 vi.mock("@/lib/billing", () => ({ runBillingMaintenance: mocks.billing }));
+vi.mock("@/lib/notebooks/server/store", () => ({ purgeTrashedNotebooks: mocks.purgeNotebooks }));
 vi.mock("@/lib/ops/report-error", () => ({ reportError: vi.fn() }));
 
 import { USAGE_LIMITS } from "@/lib/usage-limits";
@@ -52,6 +54,7 @@ beforeEach(() => {
   mocks.errorEventDeleteMany.mockResolvedValue({ count: 9 });
   mocks.contractNoticeDeleteMany.mockResolvedValue({ count: 11 });
   mocks.billing.mockResolvedValue(BILLING);
+  mocks.purgeNotebooks.mockResolvedValue(5);
 });
 
 const BILLING = { jobsCompleted: 1, jobsFailed: 0, holdsReleased: 2, subscriptionsResynced: 0 };
@@ -104,6 +107,7 @@ describe("data retention", () => {
       studyEvents: 3,
       analyticsEvents: 3,
       trashedWorkspaces: 6,
+      trashedNotebooks: 5,
       agentChatMessagesExpired: 7,
       agentChatMessagesOverCap: 4,
       notificationLogs: 8,
@@ -147,5 +151,17 @@ describe("data retention", () => {
     expect(mocks.workspaceDeleteMany).toHaveBeenCalledWith({
       where: { deletedAt: { lt: daysBefore(30) } },
     });
+  });
+
+  it("purges notebooks trashed more than 30 days ago, and keeps going when that fails", async () => {
+    await runRetention(NOW);
+    expect(RETENTION.trashedNotebookDays).toBe(30);
+    expect(mocks.purgeNotebooks).toHaveBeenCalledWith(daysBefore(30));
+
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.purgeNotebooks.mockRejectedValue(new Error("storage down"));
+    const result = await runRetention(NOW);
+    expect(result.trashedNotebooks).toBeNull();
+    expect(result.notificationLogs).toBe(8);
   });
 });

@@ -731,13 +731,15 @@ async function readPageText(page, maxChars, deadline) {
   return text.length > maxChars ? text.slice(0, maxChars) : text;
 }
 
-async function extractPdf(bytes, deadline, limits) {
-  if (!limits.skipPdfPrecheck) assertPdfStreamsBounded(bytes, limits.maxPdfInflatedBytes);
-
+/**
+ * Start loading a PDF with PDF.js, configured never to read files or the
+ * network and never to evaluate code. Returns the loading task.
+ */
+async function openPdf(bytes) {
   const { getResolvedPDFJS } = await import("unpdf");
   const pdfjs = await getResolvedPDFJS();
   // PDF.js may transfer (detach) the buffer it is given, so hand it a copy.
-  const task = pdfjs.getDocument({
+  return pdfjs.getDocument({
     data: new Uint8Array(bytes),
     // No font/CMap/wasm locations: PDF.js never reads files or the network.
     useSystemFonts: false,
@@ -749,6 +751,12 @@ async function extractPdf(bytes, deadline, limits) {
     isOffscreenCanvasSupported: false,
     verbosity: 0,
   });
+}
+
+async function extractPdf(bytes, deadline, limits) {
+  if (!limits.skipPdfPrecheck) assertPdfStreamsBounded(bytes, limits.maxPdfInflatedBytes);
+
+  const task = await openPdf(bytes);
 
   let timer;
   const timeout = new Promise((_, reject) => {
@@ -787,6 +795,87 @@ async function extractPdf(bytes, deadline, limits) {
   } finally {
     if (timer) clearTimeout(timer);
     // Always release PDF.js resources (also stops work after a timeout).
+    void task.destroy().catch(() => {});
+    work.catch(() => {});
+  }
+}
+
+
+/** Time kept back from the deadline for reading page sizes once text reading stops. */
+const LAYOUT_TEXT_RESERVE_MS = 5_000;
+
+/**
+ * Every page's size and text, for a PDF imported as notebook pages
+ * (mode "layout"). Unlike text extraction, a page without text (a scan, a
+ * picture slide) is fine and every page is listed: the pages are drawn as
+ * backgrounds. A PDF with more than `maxPdfPages` pages is refused
+ * ("too_large", detail "too many pages") instead of being cut short. Text
+ * is capped per page (`maxPageChars`) and in total (`maxChars`); once the
+ * total cap is reached, or the deadline is near, later pages keep their
+ * size and get no text (`textTruncated`).
+ */
+async function extractPdfLayout(bytes, limits) {
+  if (bytes.byteLength === 0) throw new ExtractError("unreadable", "empty file");
+  if (bytes.byteLength > limits.maxBytes) throw new ExtractError("too_large");
+  if (detectSourceKind(bytes, "", "application/pdf") !== "pdf") throw new ExtractError("unsupported");
+  if (!limits.skipPdfPrecheck) assertPdfStreamsBounded(bytes, limits.maxPdfInflatedBytes);
+
+  const deadline = limits.deadline;
+  const textDeadline = deadline - LAYOUT_TEXT_RESERVE_MS;
+  const maxPageChars = Math.max(0, limits.maxPageChars ?? limits.maxChars);
+  const task = await openPdf(bytes);
+
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new ExtractError("timeout")), Math.max(0, deadline - Date.now()));
+  });
+
+  const work = (async () => {
+    let document;
+    try {
+      document = await task.promise;
+    } catch (error) {
+      throw new ExtractError("unreadable", error instanceof Error ? error.name : "load failed");
+    }
+    const pageCount = document.numPages;
+    if (pageCount < 1) throw new ExtractError("unreadable", "no pages");
+    if (pageCount > limits.maxPdfPages) throw new ExtractError("too_large", "too many pages");
+    const pages = [];
+    let total = 0;
+    let textTruncated = false;
+    for (let number = 1; number <= pageCount; number += 1) {
+      if (Date.now() > deadline) throw new ExtractError("timeout");
+      const page = await document.getPage(number);
+      // The viewport applies the page's /Rotate, as a viewer draws it.
+      const viewport = page.getViewport({ scale: 1 });
+      let text = "";
+      const room = Math.min(maxPageChars, limits.maxChars - total);
+      if (room > 0 && Date.now() < textDeadline) {
+        try {
+          text = tidy(await readPageText(page, room, textDeadline));
+        } catch (error) {
+          if (!(error instanceof ExtractError && error.code === "timeout")) throw error;
+          textTruncated = true;
+        }
+        if (text.length > room) text = text.slice(0, room);
+      } else {
+        textTruncated = true;
+      }
+      page.cleanup();
+      total += text.length;
+      pages.push({
+        width: Math.abs(viewport.width) || 0,
+        height: Math.abs(viewport.height) || 0,
+        text,
+      });
+    }
+    return { kind: "pdf", pageCount, pages, textTruncated };
+  })();
+
+  try {
+    return await Promise.race([work, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
     void task.destroy().catch(() => {});
     work.catch(() => {});
   }
@@ -871,8 +960,15 @@ async function extractPages(bytes, fileName, mimeType, limits) {
  */
 export async function runExtraction(request) {
   try {
-    const run = request.mode === "pages" ? extractPages : extractText;
-    const value = await run(request.bytes, request.fileName, request.mimeType, request.limits);
+    const value =
+      request.mode === "layout"
+        ? await extractPdfLayout(request.bytes, request.limits)
+        : await (request.mode === "pages" ? extractPages : extractText)(
+            request.bytes,
+            request.fileName,
+            request.mimeType,
+            request.limits,
+          );
     return { ok: true, value };
   } catch (error) {
     if (error instanceof ExtractError) {

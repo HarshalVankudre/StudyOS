@@ -71,6 +71,15 @@ describe("environment validation", () => {
     ).toBe(false);
   });
 
+  it("warns in production when handwriting search has no usable model", () => {
+    const warns = (vars: Record<string, string>) =>
+      checkEnvironment({ ...BASE, ...vars }).warnings.some((w) => /Handwriting search is OFF/.test(w));
+    expect(warns({})).toBe(true); // default claude-haiku-5-5, no ANTHROPIC_API_KEY
+    expect(warns({ ANTHROPIC_API_KEY: "sk-ant-x" })).toBe(false);
+    expect(warns({ STUDYOS_HANDWRITING_MODEL: "google/gemini-3-flash" })).toBe(false); // OpenRouter key is in BASE
+    expect(warns({ NODE_ENV: "development" })).toBe(false);
+  });
+
   it("passes with the required variables set", () => {
     const report = checkEnvironment(BASE);
     expect(report.missingRequired).toEqual([]);

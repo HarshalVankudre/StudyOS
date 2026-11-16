@@ -32,14 +32,21 @@ const m = vi.hoisted(() => {
     referralCode: { findUnique: fn(), deleteMany: fn() },
     referral: { findMany: fn(), findUnique: fn(), deleteMany: fn(), updateMany: fn() },
     contractNotice: { findMany: fn(), updateMany: fn() },
+    notebook: { findMany: fn(), deleteMany: fn() },
+    notebookFolder: { findMany: fn(), deleteMany: fn() },
+    notebookPage: { findMany: fn(), deleteMany: fn() },
+    notebookFile: { findMany: fn(), findFirst: fn(), deleteMany: fn() },
     $transaction: vi.fn(),
     $queryRaw: vi.fn(),
     storeDelete: vi.fn(),
+    pdfDelete: vi.fn(),
+    pdfRead: vi.fn(),
   };
 });
 
 vi.mock("@/lib/db", () => ({ prisma: m }));
 vi.mock("@/lib/assets/storage", () => ({ gcsAssetStore: () => ({ delete: m.storeDelete }) }));
+vi.mock("@/lib/notebooks/server/file-store", () => ({ deletePdfObjects: m.pdfDelete, readPdfBytes: m.pdfRead }));
 
 import {
   allowDataExport,
@@ -97,6 +104,13 @@ beforeEach(() => {
   m.notificationLog.findMany.mockResolvedValue([
     { kind: "daily", localDate: "2026-11-11", status: "sent", message: true, createdAt: new Date(0), sentAt: new Date(0) },
   ]);
+  m.notebook.findMany.mockResolvedValue([]);
+  m.notebookFolder.findMany.mockResolvedValue([]);
+  m.notebookPage.findMany.mockResolvedValue([]);
+  m.notebookFile.findMany.mockResolvedValue([]);
+  m.notebookFile.findFirst.mockResolvedValue(null);
+  m.pdfDelete.mockImplementation(async (keys: string[]) => ({ deleted: keys, failed: 0 }));
+  m.pdfRead.mockImplementation(async (row: { data: Uint8Array | null }) => row.data);
   m.calendarFeed.findMany.mockResolvedValue([
     { workspaceId: "w1", databaseId: "d1", label: "canvas.uni.edu", platform: "canvas", settings: '{"series":[]}', lastSyncedAt: null, lastSummary: null, createdAt: new Date(0) },
   ]);
@@ -439,7 +453,7 @@ describe("eraseUserData", () => {
     expect(m.storeDelete).toHaveBeenCalledTimes(2);
     expect(m.$transaction).toHaveBeenCalledTimes(1);
     // Every user-owned model (schema-coverage.test.ts checks none is missing).
-    expect(m.$transaction.mock.calls[0][0]).toHaveLength(28);
+    expect(m.$transaction.mock.calls[0][0]).toHaveLength(32);
     // Withdrawal and cancellation notices are legal records: kept, unlinked from the account.
     expect(m.contractNotice.updateMany).toHaveBeenCalledWith({ where: { userId: "user_1" }, data: { userId: null } });
     // The invite link and the invites the student made go; the invite they
@@ -463,5 +477,68 @@ describe("eraseUserData", () => {
     expect(m.focusSession.deleteMany).toHaveBeenCalledWith({ where: { userId: "user_1" } });
     expect(m.workspace.deleteMany).toHaveBeenCalledWith({ where: { ownerId: "user_1" } });
     expect(m.subscription.deleteMany).toHaveBeenCalledWith({ where: { userId: "user_1" } });
+  });
+});
+
+describe("handwritten notebooks in the data export and the erasure", () => {
+  it("exports notebooks, folders, every page with its ink, and imported PDFs with their bytes", async () => {
+    m.notebook.findMany.mockResolvedValue([
+      { id: "nb1", title: "Bio", cover: "teal", folderId: "f1", workspaceId: null, paper: '{"size":"a4"}', pageCount: 1, version: 3, deletedAt: null, createdAt: new Date(0), updatedAt: new Date(0) },
+    ]);
+    m.notebookFolder.findMany.mockResolvedValue([{ id: "f1", name: "Semester 1", createdAt: new Date(0), updatedAt: new Date(0) }]);
+    const page = {
+      id: "pg1", notebookId: "nb1", position: 1, template: '{"kind":"ruled","paper":"white"}', width: 794, height: 1123,
+      pdfFileId: null, pdfPage: null, ink: new Uint8Array([0x53, 0x4e, 0x01]), inkVersion: 2, strokeCount: 0,
+      pdfText: "", inkText: "mitosis", inkTextVersion: 2, createdAt: new Date(0), updatedAt: new Date(0),
+    };
+    m.notebookPage.findMany.mockImplementation(async (q: { where: { id?: { in: string[] } } }) =>
+      q.where.id?.in ? [page] : [{ id: "pg1" }],
+    );
+    // 200 KB, more than one base64 chunk.
+    const pdf = new Uint8Array(200_000).map((_, i) => i % 251);
+    m.notebookFile.findMany.mockResolvedValue([{ id: "file1" }]);
+    m.notebookFile.findFirst.mockResolvedValue({
+      id: "file1", notebookId: "nb1", name: "slides.pdf", mime: "application/pdf", sizeBytes: pdf.length, sha256: "ab",
+      pageCount: 2, createdAt: new Date(0), storageKey: null, data: pdf,
+    });
+
+    const data = await buildUserDataExport("user_1");
+    expect(data.notebooks).toEqual([expect.objectContaining({ id: "nb1", title: "Bio", paper: { size: "a4" } })]);
+    expect(data.notebookFolders).toEqual([expect.objectContaining({ id: "f1", name: "Semester 1" })]);
+    expect(data.notebookPages).toEqual([
+      expect.objectContaining({ id: "pg1", ink: "U04B", inkFormat: "studyos-ink-v1", inkText: "mitosis", template: { kind: "ruled", paper: "white" } }),
+    ]);
+    expect(data.notebookFiles).toHaveLength(1);
+    expect(data.notebookFiles[0]).toMatchObject({ id: "file1", name: "slides.pdf", unavailable: false });
+    expect(Buffer.from(data.notebookFiles[0].data, "base64").equals(Buffer.from(pdf))).toBe(true);
+    expect(m.notebookFile.findFirst.mock.calls[0][0].where).toEqual({ ownerId: "user_1", id: "file1" });
+  });
+
+  it("lists a PDF whose bytes cannot be read instead of breaking the download", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    m.notebookFile.findMany.mockResolvedValue([{ id: "file1" }]);
+    m.notebookFile.findFirst.mockResolvedValue({
+      id: "file1", notebookId: null, name: "a.pdf", mime: "application/pdf", sizeBytes: 9, sha256: "ab",
+      pageCount: 1, createdAt: new Date(0), storageKey: "notebooks/user_1/file1.pdf", data: null,
+    });
+    m.pdfRead.mockRejectedValue(new Error("storage down"));
+    const data = await buildUserDataExport("user_1");
+    expect(data.notebookFiles).toEqual([expect.objectContaining({ id: "file1", unavailable: true, data: null })]);
+  });
+
+  it("erases every notebook row, keeping only PDF rows whose stored object could not be deleted", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    m.notebookFile.findMany.mockResolvedValue([
+      { id: "inline", storageKey: null },
+      { id: "ok", storageKey: "k-ok" },
+      { id: "stuck", storageKey: "k-stuck" },
+    ]);
+    m.pdfDelete.mockResolvedValue({ deleted: ["k-ok"], failed: 1 });
+    expect(await eraseUserData("user_1")).toEqual({ assetsPending: 1 });
+    expect(m.pdfDelete).toHaveBeenCalledWith(["k-ok", "k-stuck"]);
+    expect(m.notebookFile.deleteMany).toHaveBeenCalledWith({ where: { ownerId: "user_1", id: { in: ["inline", "ok"] } } });
+    expect(m.notebookPage.deleteMany).toHaveBeenCalledWith({ where: { ownerId: "user_1" } });
+    expect(m.notebook.deleteMany).toHaveBeenCalledWith({ where: { ownerId: "user_1" } });
+    expect(m.notebookFolder.deleteMany).toHaveBeenCalledWith({ where: { ownerId: "user_1" } });
   });
 });
