@@ -18,6 +18,7 @@ export function CalendarSubscribe({ initialUrl }: { initialUrl: string | null })
   // Completed items are left out of the feed unless the link asks for them.
   const [includeCompleted, setIncludeCompleted] = useState(false);
   const [pending, startTransition] = useTransition();
+  const [resetFailed, setResetFailed] = useState(false);
   const completedId = useId();
 
   if (!url) return null;
@@ -36,8 +37,12 @@ export function CalendarSubscribe({ initialUrl }: { initialUrl: string | null })
 
   const reset = () =>
     startTransition(async () => {
-      const next = await resetCalendarFeedAction();
+      setResetFailed(false);
+      // Offline, or the app was updated meanwhile: say so here. Thrown inside
+      // this transition the error would replace the page with the error screen.
+      const next = await resetCalendarFeedAction().catch(() => null);
       if (next) setUrl(next);
+      else setResetFailed(true);
     });
 
   return (
@@ -88,6 +93,11 @@ export function CalendarSubscribe({ initialUrl }: { initialUrl: string | null })
           {pending ? C.resetting : C.reset}
         </button>
       </div>
+      {resetFailed && (
+        <p role="alert" className="mt-3 text-sm text-rose-600">
+          {dict.safety.actionFailed}
+        </p>
+      )}
 
       <p className="mt-3 text-xs text-ink-soft">{C.instructions}</p>
     </div>

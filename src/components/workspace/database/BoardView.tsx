@@ -81,7 +81,7 @@ export function BoardView(props: ViewBodyProps) {
               dropInto(opt.id);
             }}
             className={`w-[80vw] max-w-72 shrink-0 snap-start rounded-md p-1 transition sm:w-64 ${
-              isOver ? "bg-lime/10 ring-2 ring-lime/40" : ""
+              isOver ? "bg-lime/10 ring-2 ring-lime-deep/40" : ""
             }`}
           >
             <h3 id={headingId} className="mb-2 flex items-center gap-2 px-1">

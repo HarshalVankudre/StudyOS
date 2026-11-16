@@ -2,6 +2,8 @@
 
 import { usePathname } from "next/navigation";
 import { useEffect, useState, useSyncExternalStore } from "react";
+import { FeedbackHost } from "@/components/account/FeedbackHost";
+import { NotionImportHost } from "@/components/import/NotionImportHost";
 import { InstallHint } from "@/components/onboarding/InstallHint";
 import { CommandPalette, workspaceIdFromPath } from "./CommandPalette";
 import {
@@ -22,7 +24,8 @@ export function hasHeaderSearch(pathname: string | null): boolean {
 
 /**
  * Everything every /app page shares: the ⌘/Ctrl+K palette, the "?" shortcut
- * sheet, the phone install hint and the offline service worker. A floating
+ * sheet, the "Send feedback" and "Import from Notion" dialogs, the phone install hint and the offline
+ * service worker. A floating
  * search button serves touch screens (workspace pages on larger screens have
  * one in their header instead).
  */
@@ -89,6 +92,8 @@ export function AppShell() {
           there sat on top of Today's items on phones. */}
       {!workspaceIdFromPath(pathname) && !hasHeaderSearch(pathname) && <SearchButton variant="floating" />}
       <InstallHint />
+      <FeedbackHost />
+      <NotionImportHost />
     </>
   );
 }

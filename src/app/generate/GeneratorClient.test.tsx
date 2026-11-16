@@ -226,6 +226,64 @@ describe("GeneratorClient", () => {
     expect(screen.queryByRole("link", { name: en.generate.cancelled.history })).not.toBeInTheDocument();
   });
 
+  it("while building, the page behind the overlay takes no focus (no leaving mid-build by keyboard)", async () => {
+    const user = await goToQuestions();
+    const stream = openStream();
+    fetchMock.mockImplementation(() => Promise.resolve(stream.response));
+    const back = screen.getByRole("link", { name: en.generate.backToWorkspaces });
+    expect(back.closest("[inert]")).toBeNull();
+    await user.click(screen.getByRole("button", { name: /build my workspace/i }));
+    await screen.findByRole("button", { name: "Cancel generation" });
+    expect(back.closest("[inert]")).not.toBeNull();
+    expect(screen.getByRole("button", { name: /build my workspace/i }).closest("[inert]")).not.toBeNull();
+    // The overlay itself stays usable.
+    expect(screen.getByRole("button", { name: "Cancel generation" }).closest("[inert]")).toBeNull();
+    stream.push({ type: "error", code: "generation_failed", message: "x" });
+    stream.close();
+    await waitFor(() => expect(back.closest("[inert]")).toBeNull());
+  });
+
+  it("a Cancel after the workspace was saved never reads as stopped; an invite reward's balance is re-read", async () => {
+    mocks.summary.mockResolvedValue({ credits: 270 });
+    const user = await goToQuestions();
+    let push!: (event: unknown) => void;
+    let fail!: (error: unknown) => void;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const encoder = new TextEncoder();
+        push = (event) => controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+        fail = (error) => controller.error(error);
+      },
+    });
+    fetchMock.mockImplementation((url: string, init: RequestInit) => {
+      if (url === "/api/generate") {
+        // Disconnecting errors the stream, as a real aborted fetch does.
+        init.signal?.addEventListener("abort", () => fail(new DOMException("aborted", "AbortError")));
+        return Promise.resolve(new Response(body, { status: 200 }));
+      }
+      // The server cannot stop it any more: the page disconnects at once.
+      return Promise.resolve(Response.json({ cancelled: false }));
+    });
+    const timers = vi.spyOn(window, "setTimeout");
+    await user.click(screen.getByRole("button", { name: /build my workspace/i }));
+    const cancel = await screen.findByRole("button", { name: "Cancel generation" });
+    // Saved and charged; the server is still trying the invite reward.
+    push({ type: "complete", workspaceId: "ws-9", credits: 30, balance: 240, rewardPending: true });
+    await waitFor(() => expect(mocks.push).toHaveBeenCalledWith("/app/ws-9"));
+    await user.click(cancel);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/generate/cancel", expect.anything()));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByText(en.generate.cancelled.title)).not.toBeInTheDocument();
+    expect(screen.queryByText(en.generate.cancelled.unknown)).not.toBeInTheDocument();
+    expect(screen.queryByText(en.generate.failed.title)).not.toBeInTheDocument();
+    // The balance is read again once the reward had time to land.
+    const refresh = timers.mock.calls.find(([, delay]) => delay === 4_000);
+    expect(refresh).toBeDefined();
+    const before = mocks.summary.mock.calls.length;
+    (refresh![0] as () => void)();
+    expect(mocks.summary.mock.calls.length).toBe(before + 1);
+  });
+
   it("when the server cannot be told, cancel disconnects and is honest about a possible charge", async () => {
     const user = await goToQuestions();
     let signal: AbortSignal | undefined;

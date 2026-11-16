@@ -1,11 +1,23 @@
 /**
- * Push configuration from the environment. Notifications exist only when a
- * complete, valid VAPID key pair and subject are set; otherwise every
- * notification surface hides itself and the dispatch does nothing.
+ * Push configuration from the environment. Push exists only when a complete,
+ * valid VAPID key pair and subject are set; otherwise every push surface
+ * hides itself. Email is the other channel (lib/email/config); with neither,
+ * the notification settings are hidden and the dispatch does nothing.
  */
+import { emailConfigured } from "@/lib/email/config";
 import { fromB64url, isP256PublicKey, vapidKeysMatch, type VapidKeys } from "./webpush";
 
 type Env = Record<string, string | undefined>;
+
+/**
+ * Test emails a student may send per day ("Send a test email"), on top of
+ * the per-instance limit of a few per ten minutes: each one goes out from our
+ * sending domain, so a script must not be able to use the button to burn its
+ * reputation. Counted as UsageEvent rows of TEST_EMAIL_KIND (lib/usage-limits
+ * claimWithinLimit), aged out by lib/ops/retention.
+ */
+export const TEST_EMAILS_PER_DAY = 5;
+export const TEST_EMAIL_KIND = "notification_test_email";
 
 let cache: { signature: string; value: VapidKeys | null } | null = null;
 
@@ -44,6 +56,11 @@ export function validSubject(subject: string): boolean {
 
 export function pushConfigured(env: Env = process.env): boolean {
   return vapidConfig(env) !== null;
+}
+
+/** Any channel is set up (push, or email: lib/email/config): the settings section shows. */
+export function notificationsConfigured(env: Env = process.env): boolean {
+  return pushConfigured(env) || emailConfigured(env);
 }
 
 /** The public key the browser subscribes with (safe to show). */

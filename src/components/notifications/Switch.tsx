@@ -30,7 +30,7 @@ export function Switch({
       <span
         className={cn(
           "relative inline-block h-6 w-11 rounded-full border transition-colors",
-          checked ? "border-lime bg-lime" : "border-line-strong bg-surface-2",
+          checked ? "border-lime-deep bg-lime" : "border-line-strong bg-surface-2",
         )}
       >
         <span

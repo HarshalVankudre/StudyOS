@@ -16,6 +16,7 @@
  */
 import type { Block, Database, GradesBlock, GradesColumns, Page, Workspace } from "@/lib/workspace/types";
 import {
+  ALL_GRADE_COLUMN_KEYS,
   GRADE_COLUMN_KEYS,
   categoryRowsOf,
   columnFits,
@@ -95,7 +96,7 @@ export function ensureScoreColumn(db: Database, name: string): string {
 function cleanColumns(db: Database, columns: GradesColumns | undefined): GradesColumns | undefined {
   if (!columns) return undefined;
   const out: GradesColumns = {};
-  for (const key of GRADE_COLUMN_KEYS) {
+  for (const key of ALL_GRADE_COLUMN_KEYS) {
     const id = columns[key];
     if (id === null) out[key] = null;
     else if (typeof id === "string") {

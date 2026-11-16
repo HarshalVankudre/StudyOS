@@ -12,21 +12,27 @@
  * Policy (proportionate, never punitive):
  *  - Credit pack: the share of the pack clawed back follows the total money
  *    returned on its payment (refunds that did not fail, plus disputes not
- *    closed in our favour), limited to what is left in the balance, so the
- *    balance never goes below zero and the app keeps working. Credits already
- *    spent are not chased, then or later. A dispute closed in our favour
+ *    closed in our favour) against the total charged for it, tax included
+ *    (both in the payment's own currency), limited to what is left in the
+ *    balance, so the balance never goes below zero and the app keeps
+ *    working. Credits already
+ *    spent are not chased, then or later. A dispute in another currency than
+ *    the charged total, or of at least 98% of it, counts as the whole pack.
+ *    A dispute closed in our favour
  *    ("won", or an inquiry "warning_closed") or a refund that failed gives
  *    back what it took. A refund or dispute that arrives before the pack was
  *    granted applies at the grant: the pack lands at its net share.
- *    (lib/billing.ts reconcilePackTx.)
+ *    Lost: the user's subscription stops renewing (cancel at period end):
+ *    the Pro period already paid for is kept, nothing is charged again.
+ *    (lib/billing.ts reconcilePackTx, stopBillingAfterLostDispute.)
  *  - Subscription payment (lib/billing.ts refreshAllowanceState): monthly
  *    credits already granted are never clawed back. Refunded in full: the
  *    allowance it paid for stops accruing further months (until the refund
  *    fails, if it does). Disputed while it pays the current period (whether
  *    or not its invoice was processed yet): Pro and accrual pause until the
  *    dispute closes; closed in our favour, both resume. Lost: the user's
- *    subscription is canceled (whichever payment it was on), so a customer
- *    who took the money back is not charged again.
+ *    subscription is canceled at once (whichever subscription payment it was
+ *    on), so a customer who took the money back is not charged again.
  *
  * All steps are idempotent under webhook retries: events are keyed by
  * (kind, Stripe object id) and credit movements by ledger idempotency keys.
@@ -34,17 +40,21 @@
 import type Stripe from "stripe";
 import {
   type PackInfo,
+  packInfoFromSession,
   recordBillingEvent,
   recordPackEvents,
   refreshAllowanceState,
   stopBillingAfterLostDispute,
   userForCustomer,
 } from "@/lib/billing";
-import { CREDIT_PACK_PRICE_USD, CREDIT_PACK_SIZE } from "@/lib/credits";
 import { prisma } from "@/lib/db";
 import { stripe, stripeId } from "@/lib/stripe";
 
-/** The credit pack a PaymentIntent paid for, or null when it is not a pack. */
+/**
+ * The credit pack a PaymentIntent paid for, or null when it is not a pack.
+ * Its amount is what the grant used too (packInfoFromSession): the total
+ * charged, tax included, in the currency refunds and disputes are stated in.
+ */
 async function packForPaymentIntent(pi: string): Promise<PackInfo | null> {
   const sessions = await stripe.checkout.sessions.list({
     payment_intent: pi,
@@ -54,12 +64,7 @@ async function packForPaymentIntent(pi: string): Promise<PackInfo | null> {
   if (!s || s.mode !== "payment" || s.metadata?.kind !== "credits") return null;
   const userId = s.client_reference_id ?? s.metadata.userId;
   if (!userId) return null;
-  return {
-    userId,
-    credits: Number(s.metadata.credits) || CREDIT_PACK_SIZE,
-    amountCents: s.amount_total || CREDIT_PACK_PRICE_USD * 100,
-    sessionId: s.id,
-  };
+  return packInfoFromSession(userId, s);
 }
 
 /** The user a (non-pack) payment belongs to: the row it pays for, else the charge's customer. */
@@ -159,13 +164,14 @@ async function userForDispute(dispute: Stripe.Dispute, pi: string | null): Promi
   return userForCustomer(stripeId(charge.customer));
 }
 
+/** A dispute's fact row; its currency is in the detail ("…; currency eur", lib/billing.ts disputedAmount). */
 function disputeFact(dispute: Stripe.Dispute, detail: string) {
   return {
     kind: "dispute",
     stripeObjectId: dispute.id,
     amountCents: dispute.amount,
     occurredAt: fromUnix(dispute.created),
-    detail,
+    detail: dispute.currency ? `${detail}; currency ${dispute.currency.toLowerCase()}` : detail,
   };
 }
 
@@ -204,6 +210,13 @@ export async function handleDisputeClosed(dispute: Stripe.Dispute): Promise<void
       disputeFact(dispute, `credit_pack; reason ${dispute.reason}`),
       closed,
     ]);
+    // A chargeback lost on a credit pack is still money taken back: the
+    // customer is not billed again. Nothing of the subscription was taken
+    // back, though, so its paid period (an annual one's monthly allowances
+    // included) is kept: it stops renewing instead of ending now.
+    if (dispute.status === "lost") {
+      await stopBillingAfterLostDispute(pack.userId, dispute.id, { creditPack: true });
+    }
     return;
   }
 

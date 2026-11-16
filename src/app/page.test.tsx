@@ -111,6 +111,19 @@ describe("landing page", () => {
     expect(container.textContent).toContain(formatLongDay("2031-04-09", "en"));
   });
 
+  test("links the legal notice in the footer only once it is configured", async () => {
+    vi.stubEnv("STUDYOS_OPERATOR_NAME", "");
+    vi.stubEnv("STUDYOS_OPERATOR_ADDRESS", "");
+    const { unmount } = render(await Home());
+    expect(screen.queryByRole("link", { name: en.legal.notice })).toBeNull();
+    unmount();
+
+    vi.stubEnv("STUDYOS_OPERATOR_NAME", "Example Learning GmbH");
+    vi.stubEnv("STUDYOS_OPERATOR_ADDRESS", "Musterstraße 1|10115 Berlin");
+    render(await Home());
+    expect(screen.getByRole("link", { name: en.legal.notice })).toHaveAttribute("href", "/legal-notice");
+  });
+
   test("prices and the support address come from configuration", async () => {
     let { container, unmount } = render(await Home());
     expect(container.textContent).toContain("$7.99/month");
@@ -143,6 +156,47 @@ describe("landing page", () => {
     expect(text).toContain("€6/month");
     expect(text).toContain("€0");
     expect(text).not.toContain("$5");
+  });
+
+  test("with billing on and Pro not on sale, names no Pro price anywhere (as the pricing page)", async () => {
+    vi.stubEnv("STRIPE_SECRET_KEY", "sk_test");
+    vi.stubEnv("STRIPE_PRICE_PRO", "price_month");
+    vi.stubEnv("STUDYOS_PRO_MONTHLY_PRICE", "5");
+    // An archived Price cannot be sold.
+    mocks.stripe.setPrice("price_month", { unit_amount: 600, currency: "eur", active: false });
+    const { container } = render(await Home());
+    const text = container.textContent ?? "";
+    expect(text).not.toContain("€6");
+    expect(text).not.toContain("$5");
+    expect(text).toContain(en.landing.plans.titleUnpriced);
+    expect(text).toContain(fmt(en.landing.trust.billingUnpriced, { trial: TRIAL_CREDITS.toLocaleString("en") }));
+    expect(screen.getByTestId("plan-unavailable")).toHaveTextContent(en.credits.unavailable);
+  });
+
+  test.each(LOCALES.map((l) => l.code))("%s: exactly one trust item names Pro's price, and the price-free lines name none", (locale) => {
+    const L = getDictionary(locale).landing;
+    expect(L.trust.items.filter((item) => item.body.includes("{price}"))).toHaveLength(1);
+    expect(L.trust.billingUnpriced).not.toContain("{price}");
+    expect(L.plans.titleUnpriced).not.toContain("{price}");
+  });
+
+  test("says next to the Pro price whether it includes VAT, only while Stripe Tax is on (as the pricing page)", async () => {
+    vi.stubEnv("STRIPE_AUTOMATIC_TAX", "");
+    let view = render(await Home());
+    expect(screen.queryByTestId("vat-note")).toBeNull();
+    view.unmount();
+
+    vi.stubEnv("STRIPE_AUTOMATIC_TAX", "1");
+    view = render(await Home());
+    expect(screen.getByTestId("vat-note")).toHaveTextContent(en.checkout.vatIncluded);
+    // Under the Pro price, not the Free one.
+    expect(screen.getByTestId("vat-note").parentElement).toHaveTextContent(en.landing.plans.pro);
+    view.unmount();
+
+    vi.stubEnv("STRIPE_TAX_BEHAVIOR", "exclusive");
+    useLocale("de");
+    render(await Home());
+    expect(screen.getByTestId("vat-note")).toHaveTextContent(getDictionary("de").checkout.vatExcluded);
   });
 
   test("signed-in visitors go to the app", async () => {

@@ -129,7 +129,7 @@ export const MAX_FOLDER_NAME = 80;
 export const MAX_NOTEBOOKS_PER_USER = 500;
 export const MAX_FOLDERS_PER_USER = 100;
 export const MAX_PAGES_PER_NOTEBOOK = 2000;
-/** Largest PDF a student can import (Cloud Run refuses HTTP/1 request bodies over 32 MiB). */
+/** Largest PDF a student can import (the proxy body limit in next.config.ts fits it). */
 export const MAX_PDF_BYTES = 30 * 1024 * 1024;
 export const MAX_PDF_PAGES = 500;
 

@@ -21,6 +21,7 @@ vi.mock("@/components/LanguageSwitcher", () => ({
 vi.mock("@/components/ThemeToggle", () => ({
   ThemeToggle: () => <div data-testid="theme-toggle" />,
 }));
+vi.mock("@/components/AppNav", () => ({ AppNav: () => null }));
 vi.mock("./DailyAgentBootstrap", () => ({
   DailyAgentBootstrap: () => <div data-testid="agent-bootstrap" />,
 }));

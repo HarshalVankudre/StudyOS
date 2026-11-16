@@ -43,6 +43,38 @@ function item(code: ReasonCode, overrides: Partial<DailyStudyPlanItem> = {}): Da
 
 const KINDS: DailyStudyPlanItem["kind"][] = ["deadline", "exam", "flashcards", "quiz", "task"];
 
+describe("formality strings are complete in every language", () => {
+  const KEYS = {
+    today: ["kindFormality", "reasonFormalityOverdue", "reasonFormalityToday", "reasonFormalityTomorrow", "reasonFormalitySoon"],
+    agenda: ["kindFormality"],
+    notifications: ["msgFormalityTomorrow", "msgFormalityIn", "msgFormalityNudge"],
+  } as const;
+  const placeholders = (text: string) => [...new Set(text.match(/\{\w+\}/g) ?? [])].sort();
+  const forms = (value: unknown): Record<string, string> =>
+    typeof value === "string" ? { other: value } : (value as Record<string, string>);
+
+  for (const code of LOCALES.map((l) => l.code)) {
+    it(`has every new string in ${code}, with the English placeholders`, () => {
+      const dict = getDictionary(code) as unknown as Record<string, Record<string, unknown>>;
+      const en = getDictionary("en") as unknown as Record<string, Record<string, unknown>>;
+      for (const [section, keys] of Object.entries(KEYS)) {
+        for (const key of keys) {
+          const value = dict[section][key];
+          expect(value, `${code} ${section}.${key}`).toBeDefined();
+          const want = placeholders(forms(en[section][key]).other);
+          const own = forms(value);
+          expect(typeof own.other, `${code} ${section}.${key}`).toBe("string");
+          expect(placeholders(own.other), `${code} ${section}.${key}`).toEqual(want);
+          // Other plural forms may spell the number out ("يومين"), never add a placeholder.
+          for (const form of Object.values(own)) {
+            for (const p of placeholders(form)) expect(want, `${code} ${section}.${key}: ${p}`).toContain(p);
+          }
+        }
+      }
+    });
+  }
+});
+
 describe("plan text is rendered in the student's language", () => {
   const english = getDictionary("en").today;
 
@@ -111,6 +143,39 @@ describe("plan text is rendered in the student's language", () => {
     expect(runSummaryText({ v: 2, items: 1, minutes: 25, workspaces: 1 }, en, "en")).toBe("Planned 1 item · 25 min");
     expect(workloadText({ overloaded: true, days: 1, neededMinutes: 90, availableMinutes: 60, startToday: [] }, en, "en").title)
       .toBe("Heads-up: the next day is full");
+  });
+
+  it("words an administrative deadline as a Frist that closes, not as work", () => {
+    const de = getDictionary("de").today;
+    const en = getDictionary("en").today;
+    const frist = (code: ReasonCode, days: number) =>
+      item(code, { title: "Prüfungsanmeldung", minutes: 10, reason: { code, days, effortMinutes: 10 }, dueDate: "2027-01-10" });
+    expect(kindLabel(frist("formality_soon", 3), de)).toBe("Frist");
+    expect(itemReason(frist("formality_soon", 3), de, "de")).toBe(
+      "Frist endet in 3 Tagen. Ein paar Minuten jetzt; nachholen lässt sie sich nicht.",
+    );
+    expect(itemReason(frist("formality_today", 0), de, "de")).toBe(
+      "Frist endet heute. Ein paar Minuten jetzt; nachholen lässt sie sich nicht.",
+    );
+    expect(itemReason(frist("formality_tomorrow", 1), de, "de")).toBe(
+      "Frist endet morgen. Ein paar Minuten jetzt; nachholen lässt sie sich nicht.",
+    );
+    expect(itemReason(frist("formality_overdue", -2), de, "de")).toBe(
+      "Die Frist war am 10. Jan. Schau gleich nach, ob es noch geht.",
+    );
+    expect(itemReason(frist("formality_soon", 3), en, "en")).toBe(
+      "Closes in 3 days. A few minutes now; it can’t be made up later.",
+    );
+    expect(kindLabel(frist("formality_today", 0), en)).toBe("Admin deadline");
+    // Never the restart note, however long it waited.
+    const waited = { ...frist("formality_today", 0), carry: { from: "2027-01-06", count: 4 } };
+    expect(itemNotes(waited, de, "de").join(" ")).toContain("Verschoben von");
+  });
+
+  it("labels the long days of exam season in hours", () => {
+    const de = getDictionary("de").today;
+    expect([180, 240, 360].map((m) => formatDuration(m, getDictionary("en").today))).toEqual(["3 h", "4 h", "6 h"]);
+    for (const m of [180, 240, 360]) expect(formatDuration(m, de)).toMatch(/^\d Std\.$/);
   });
 
   it("builds deep links from the stored target", () => {

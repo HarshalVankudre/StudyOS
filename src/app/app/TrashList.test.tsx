@@ -62,6 +62,19 @@ describe("TrashList", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  it("shows the purge day in a fixed zone, so server and browser renders agree", () => {
+    // 01:00 UTC on Dec 12 is still Dec 11 in New York.
+    const zone = process.env.TZ;
+    process.env.TZ = "America/New_York";
+    try {
+      render(<TrashList items={[{ ...items[0], purgeAt: "2026-12-12T01:00:00.000Z" }]} />);
+      expect(screen.getByText(/Dec 12, 2026/)).toBeInTheDocument();
+    } finally {
+      if (zone === undefined) delete process.env.TZ;
+      else process.env.TZ = zone;
+    }
+  });
+
   it("restores a workspace", async () => {
     const user = userEvent.setup();
     render(<TrashList items={items} />);

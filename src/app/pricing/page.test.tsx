@@ -53,7 +53,7 @@ vi.mock("@/app/app/billing-actions", () => ({
 vi.mock("@/components/LanguageSwitcher", () => ({ LanguageSwitcher: () => null }));
 vi.mock("@/components/ThemeToggle", () => ({ ThemeToggle: () => null }));
 
-import PricingPage from "./page";
+import PricingPage, { generateMetadata } from "./page";
 import "@/lib/stripe"; // creates the fake (lib/plan-pricing reads it lazily)
 
 const page = async () => render(await PricingPage({ searchParams: Promise.resolve({}) }));
@@ -84,7 +84,16 @@ describe("pricing page", () => {
     mocks.models.free = "claude-haiku-5-5";
     mocks.models.pro = "claude-haiku-5-5";
     useLocale("en");
-    for (const name of ["STRIPE_SECRET_KEY", "STRIPE_PRICE_PRO", "STRIPE_PRICE_PRO_ANNUAL", "STUDYOS_PRO_ANNUAL_PRICE", "STUDYOS_PRO_MONTHLY_PRICE"]) {
+    for (const name of [
+      "STRIPE_SECRET_KEY",
+      "STRIPE_PRICE_PRO",
+      "STRIPE_PRICE_PRO_ANNUAL",
+      "STUDYOS_PRO_ANNUAL_PRICE",
+      "STUDYOS_PRO_MONTHLY_PRICE",
+      "STRIPE_PRICE_CREDIT_PACK",
+      "STRIPE_AUTOMATIC_TAX",
+      "STRIPE_TAX_BEHAVIOR",
+    ]) {
       vi.stubEnv(name, "");
     }
     mocks.stripe.reset();
@@ -172,6 +181,98 @@ describe("pricing page", () => {
     expect(text).toContain("€7/month");
     expect(text).not.toContain("$9");
     expect(screen.queryByRole("radio", { name: en.pricing.yearly })).toBeNull();
+  });
+
+  test("with a Stripe pack price, the pack shows its amount and currency", async () => {
+    vi.stubEnv("STRIPE_SECRET_KEY", "sk_test");
+    vi.stubEnv("STRIPE_PRICE_PRO", "price_month");
+    vi.stubEnv("STRIPE_PRICE_CREDIT_PACK", "price_pack");
+    mocks.stripe.setPrice("price_month", { unit_amount: 700, currency: "eur" });
+    mocks.stripe.setPrice("price_pack", { type: "one_time", recurring: null, unit_amount: 999, currency: "eur" });
+    await page();
+    expect(screen.getByTestId("pack-price")).toHaveTextContent("€9.99");
+    expect(screen.getByTestId("pack-price")).not.toHaveTextContent("$");
+  });
+
+  test("a pack its Stripe Price cannot sell shows no price and no Buy button, only that it is not available", async () => {
+    vi.stubEnv("STRIPE_SECRET_KEY", "sk_test");
+    vi.stubEnv("STRIPE_PRICE_PRO", "price_month");
+    vi.stubEnv("STRIPE_PRICE_CREDIT_PACK", "price_pack");
+    mocks.stripe.setPrice("price_month", { unit_amount: 700, currency: "eur" });
+    // Archived on Stripe: checkout would refuse it.
+    mocks.stripe.setPrice("price_pack", { type: "one_time", recurring: null, unit_amount: 999, currency: "eur", active: false });
+    mocks.auth.mockResolvedValue({ userId: "user_1" });
+    const { container } = await page();
+    expect(screen.queryByTestId("pack-price")).toBeNull();
+    expect(container.textContent).not.toContain("9.99");
+    expect(screen.queryByRole("button", { name: new RegExp(en.pricing.credits.buy.replace("{count}", ".*")) })).toBeNull();
+    const unavailable = screen.getByTestId("pack-unavailable");
+    expect(unavailable).toHaveTextContent(en.credits.unavailable);
+    expect(unavailable).toHaveTextContent(en.credits.packUnavailableNote);
+    // Pro is still for sale.
+    expect(screen.getByRole("button", { name: new RegExp(en.pricing.pro.upgrade) })).toBeInTheDocument();
+  });
+
+  test("Pro its Stripe Price cannot sell (here: several currencies) shows no price and no Upgrade, only that it is not available", async () => {
+    vi.stubEnv("STRIPE_SECRET_KEY", "sk_test");
+    vi.stubEnv("STRIPE_PRICE_PRO", "price_month");
+    mocks.stripe.setPrice("price_month", { unit_amount: 700, currency: "eur", currency_options: { eur: {}, usd: {} } });
+    const retrieve = vi.spyOn(mocks.stripe.stripe.prices, "retrieve");
+    mocks.auth.mockResolvedValue({ userId: "user_1" });
+    const { container } = await page();
+    // Read with its other currencies, which are only returned when expanded.
+    expect(retrieve).toHaveBeenCalledWith("price_month", { expand: ["currency_options"] });
+    expect(screen.queryByRole("button", { name: new RegExp(en.pricing.pro.upgrade) })).toBeNull();
+    expect(screen.getByTestId("pro-unavailable")).toHaveTextContent(en.pricing.pro.unavailableNote);
+    const proCard = screen.getByRole("region", { name: en.pricing.pro.name }).textContent ?? "";
+    expect(proCard).not.toMatch(/€7|\$7\.99/);
+    expect(container.textContent).not.toContain(en.spend.purchasesComingSoon);
+  });
+
+  test("with Stripe Tax on, a Stripe Price whose VAT handling differs from the note is not sold", async () => {
+    vi.stubEnv("STRIPE_SECRET_KEY", "sk_test");
+    vi.stubEnv("STRIPE_PRICE_PRO", "price_month");
+    vi.stubEnv("STRIPE_AUTOMATIC_TAX", "1");
+    // No tax behavior of its own; the account default says tax is added on top.
+    mocks.stripe.setPrice("price_month", { unit_amount: 700, currency: "eur", tax_behavior: "unspecified" });
+    mocks.stripe.setTaxDefault("exclusive");
+    let view = await page();
+    expect(screen.getByTestId("pro-unavailable")).toBeInTheDocument();
+    view.unmount();
+    // The default agrees with the note (inclusive): sold.
+    mocks.stripe.setTaxDefault("inclusive");
+    clearProPriceCache();
+    view = await page();
+    expect(screen.queryByTestId("pro-unavailable")).toBeNull();
+    expect(view.container.textContent).toContain("€7/month");
+    expect(screen.getByTestId("vat-note")).toHaveTextContent(en.checkout.vatIncluded);
+  });
+
+  test("without one, the pack shows the price list's USD price", async () => {
+    vi.stubEnv("STRIPE_SECRET_KEY", "sk_test");
+    vi.stubEnv("STRIPE_PRICE_PRO", "price_month");
+    mocks.stripe.setPrice("price_month", { unit_amount: 700, currency: "eur" });
+    await page();
+    expect(screen.getByTestId("pack-price")).toHaveTextContent(`$${CREDIT_PACK_PRICE_USD}`);
+  });
+
+  test("says whether prices include VAT only while Stripe Tax is on", async () => {
+    let view = await page();
+    expect(screen.queryByTestId("vat-note")).toBeNull();
+    expect(view.container.textContent).not.toContain(en.checkout.vatIncluded);
+    view.unmount();
+
+    vi.stubEnv("STRIPE_AUTOMATIC_TAX", "1");
+    view = await page();
+    expect(screen.getByTestId("vat-note")).toHaveTextContent(en.checkout.vatIncluded);
+    // Beside the Pro prices and beside the pack's price.
+    expect(view.container.textContent?.split(en.checkout.vatIncluded).length).toBe(3);
+    view.unmount();
+
+    vi.stubEnv("STRIPE_TAX_BEHAVIOR", "exclusive");
+    useLocale("de");
+    await page();
+    expect(screen.getByTestId("vat-note")).toHaveTextContent(getDictionary("de").checkout.vatExcluded);
   });
 
   test("states the plans, prices and limits the code implements", async () => {
@@ -270,5 +371,30 @@ describe("pricing page", () => {
       "href",
       "/sign-up?redirect_url=%2Fpricing",
     );
+  });
+
+  test("shares as itself: its own title, description and address, as a large card", async () => {
+    const metadata = await generateMetadata();
+    expect(metadata.openGraph).toMatchObject({
+      title: en.meta.pricingTitle,
+      description: en.meta.pricingDescription,
+      url: "/pricing",
+      siteName: "StudyOS",
+      type: "website",
+    });
+    expect(metadata.twitter).toMatchObject({ card: "summary_large_image", title: en.meta.pricingTitle });
+  });
+
+  test("links the legal notice in the footer only once it is configured", async () => {
+    vi.stubEnv("STUDYOS_OPERATOR_NAME", "");
+    vi.stubEnv("STUDYOS_OPERATOR_ADDRESS", "");
+    const { unmount } = await page();
+    expect(screen.queryByRole("link", { name: en.legal.notice })).toBeNull();
+    unmount();
+
+    vi.stubEnv("STUDYOS_OPERATOR_NAME", "Example Learning GmbH");
+    vi.stubEnv("STUDYOS_OPERATOR_ADDRESS", "Musterstraße 1|10115 Berlin");
+    await page();
+    expect(screen.getByRole("link", { name: en.legal.notice })).toHaveAttribute("href", "/legal-notice");
   });
 });

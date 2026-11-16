@@ -9,3 +9,6 @@ node_modules
 .vercel
 .claude
 src/generated
+
+# Anthropic's typefaces: local only, shipping them needs a licence (see globals.css)
+public/fonts/anthropic

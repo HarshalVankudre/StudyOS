@@ -41,7 +41,7 @@ type Source =
 type Step = "start" | "loading" | "preview" | "done";
 
 const PRIMARY =
-  "inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-lime px-4 text-sm font-semibold text-lime-on transition hover:bg-lime-deep disabled:cursor-not-allowed disabled:opacity-40";
+  "inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-lime px-4 text-sm font-semibold text-lime-on transition hover:bg-lime-hover disabled:cursor-not-allowed disabled:opacity-40";
 const SECONDARY =
   "inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-line-strong bg-card px-4 text-sm font-semibold text-ink transition hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50";
 
@@ -401,7 +401,7 @@ export function ImportDeadlinesDialog({ db, onClose }: { db: Database; onClose: 
     list.length > 0 && (
       <section aria-labelledby={id} className="flex flex-col gap-1">
         <div className="flex flex-wrap items-center gap-2">
-          <h4 id={id} className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
+          <h4 id={id} className="text-xs font-semibold text-ink-faint">
             {title} · {list.length}
           </h4>
           {bulk && bulkButtons(list)}
@@ -420,7 +420,7 @@ export function ImportDeadlinesDialog({ db, onClose }: { db: Database; onClose: 
         <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 px-3 py-2 [&::-webkit-details-marker]:hidden">
           <ChevronDown className="size-4 shrink-0 text-ink-faint transition group-open:rotate-180" aria-hidden />
           <span className="min-w-0 flex-1">
-            <span id="feed-other" className="block text-xs font-semibold uppercase tracking-wide text-ink-faint">
+            <span id="feed-other" className="block text-xs font-semibold text-ink-faint">
               {F.groups.other} · {list.length}
             </span>
             <span className="block text-xs text-ink-soft">{F.otherHint}</span>
@@ -575,7 +575,7 @@ export function ImportDeadlinesDialog({ db, onClose }: { db: Database; onClose: 
               {otherGroup(groups.other)}
               {groups.series.length > 0 && (
                 <section aria-labelledby="feed-series" className="flex flex-col gap-1">
-                  <h4 id="feed-series" className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
+                  <h4 id="feed-series" className="text-xs font-semibold text-ink-faint">
                     {F.groups.repeating} · {groups.series.length}
                   </h4>
                   <p className="text-xs text-ink-soft">{F.repeatingHint}</p>
@@ -632,7 +632,7 @@ export function ImportDeadlinesDialog({ db, onClose }: { db: Database; onClose: 
 
           {step === "done" && done && (
             <div role="status" className="flex flex-col items-center gap-2 py-6 text-center">
-              <CalendarCheck className="size-8 text-lime" aria-hidden />
+              <CalendarCheck className="size-8 text-lime-deep" aria-hidden />
               <p className="font-display text-base font-bold text-ink">{F.doneTitle}</p>
               {(done.added > 0 || done.updated === 0) && (
                 <p className="text-sm text-ink-soft">{t(F.doneAdded, { count: done.added, table: db.name || dict.db.untitled })}</p>

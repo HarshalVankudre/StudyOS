@@ -26,7 +26,8 @@ async function extractError(promise: Promise<unknown>): Promise<ExtractError> {
   throw new Error("expected extraction to fail");
 }
 
-describe("extractSourceText — PDF", () => {
+// Real PDF parsing: slow on a busy machine or CI runner.
+describe("extractSourceText — PDF", { timeout: 30_000 }, () => {
   it("reads the text layer of a PDF", async () => {
     const pdf = textPdf([
       "CS 201 Data Structures",

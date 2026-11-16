@@ -18,6 +18,7 @@
  *
  * Pure: shared by the browser preview and the sync engine.
  */
+import { titleIsFormality } from "@/lib/agents/daily-study/classify";
 import { courseCode } from "./mapping";
 import type { FeedEvent } from "./normalize";
 
@@ -103,7 +104,9 @@ export function looksLikeCoursework(event: FeedEvent): boolean {
   if (event.role === "opening") return false;
   if ((event.days ?? 1) > 1) return false;
   if (breakLikeTitle(event.title)) return false;
-  const work = assignmentLikeTitle(event.title);
+  // An administrative deadline (exam registration, re-enrolment) counts too:
+  // the daily plan's own reading (titleIsFormality).
+  const work = assignmentLikeTitle(event.title) || titleIsFormality(event.title);
   if (!work && sessionLikeTitle(event.title)) return false;
   return work || event.role === "deadline" || hasCourseCode(event);
 }

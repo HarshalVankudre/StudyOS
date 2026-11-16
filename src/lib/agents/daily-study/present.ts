@@ -12,6 +12,7 @@ import { plural } from "@/lib/i18n/plural";
 import { workspaceHref } from "@/lib/workspace/deep-link";
 import {
   RESTART_AFTER_CARRIES,
+  isFormalityReason,
   type DailyStudyPlanItem,
   type ExamCountdown,
   type RunSummary,
@@ -75,7 +76,7 @@ export function itemTitle(item: DailyStudyPlanItem, T: TodayCopy): string {
 export function kindLabel(item: DailyStudyPlanItem, T: TodayCopy): string {
   switch (item.kind) {
     case "deadline":
-      return T.kindDeadline;
+      return isFormalityReason(item.reason.code) ? T.kindFormality : T.kindDeadline;
     case "exam":
       return T.kindExam;
     case "flashcards":
@@ -121,6 +122,14 @@ export function itemReason(item: DailyStudyPlanItem, T: TodayCopy, locale: strin
       return plural(locale, T.reasonNewCards, reason.count ?? item.dueCount ?? 0);
     case "open_task":
       return fmt(T.reasonOpenTask, { page: item.section || item.workspaceName });
+    case "formality_overdue":
+      return fmt(T.reasonFormalityOverdue, { date });
+    case "formality_today":
+      return T.reasonFormalityToday;
+    case "formality_tomorrow":
+      return T.reasonFormalityTomorrow;
+    case "formality_soon":
+      return plural(locale, T.reasonFormalitySoon, days);
   }
 }
 
@@ -135,8 +144,9 @@ export function itemNotes(item: DailyStudyPlanItem, T: TodayCopy, locale: string
     notes.push(plural(locale, T.cardsReadyPart, ready, { planned: formatNumber(planned, locale) }));
   }
   if (item.carry && !item.completed) {
+    // A formality is never shrunk to a restart: it already takes minutes.
     notes.push(
-      item.carry.count >= RESTART_AFTER_CARRIES && item.mode !== "study"
+      item.carry.count >= RESTART_AFTER_CARRIES && item.mode !== "study" && !isFormalityReason(item.reason.code)
         ? fmt(T.restartSmall, { time: formatDuration(item.minutes, T) })
         : fmt(T.movedFrom, { day: formatWeekday(item.carry.from, locale) }),
     );

@@ -31,7 +31,14 @@ export function DailyAgentBootstrap({
     started.current = true;
     const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
     startTransition(async () => {
-      await ensureDailyStudyPlanAction(timeZone);
+      try {
+        await ensureDailyStudyPlanAction(timeZone);
+      } catch {
+        // Offline, or the app was updated meanwhile. An automatic run fails
+        // quietly (the server does the same): thrown inside this transition
+        // it would replace the page with the error screen.
+        return;
+      }
       router.refresh();
     });
   }, [enabled, planLocalDate, router]);

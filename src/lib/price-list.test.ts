@@ -20,6 +20,10 @@ import {
   PRO_FALLBACK_MONTHLY_USD,
   PRO_MONTHLY_CREDITS,
   publicQuotes,
+  REFERRAL_CREDITS,
+  REFERRAL_MAX_FRIEND_GRANTS_PER_DAY,
+  REFERRAL_MAX_PER_DAY,
+  REFERRAL_MAX_REWARDS,
   studyKitPartQuote,
   studyKitQuote,
   TRIAL_CREDITS,
@@ -41,6 +45,18 @@ describe("the owner's decisions", () => {
 
   it("publishes the action prices: build 30, message 3, study-kit part 10, render 2", () => {
     expect(ACTION_PRICES).toEqual({ build: 30, message: 3, studyKitPart: 10, render: 2 });
+  });
+
+  it("an invite gives 100 credits to each side, for at most 20 friends and 5 a day", () => {
+    expect({ REFERRAL_CREDITS, REFERRAL_MAX_REWARDS, REFERRAL_MAX_PER_DAY }).toEqual({
+      REFERRAL_CREDITS: 100,
+      REFERRAL_MAX_REWARDS: 20,
+      REFERRAL_MAX_PER_DAY: 5,
+    });
+    // The daily cap never exceeds the total one.
+    expect(REFERRAL_MAX_PER_DAY).toBeLessThanOrEqual(REFERRAL_MAX_REWARDS);
+    // Across everyone, at most 200 friend bonuses a day (then they wait).
+    expect(REFERRAL_MAX_FRIEND_GRANTS_PER_DAY).toBe(200);
   });
 
   it("keeps Pro's higher limits and per-message ceiling", () => {
@@ -157,8 +173,15 @@ describe("a price list built from other numbers follows them", () => {
       ...DEFAULT_PRICE_LIST,
       trialCredits: 123,
       actions: { build: 41, message: 7, studyKitPart: 13, render: 5 },
+      referral: { credits: 77, maxRewards: 9, maxPerDay: 2, maxFriendGrantsPerDay: 31 },
     });
     expect(other.TRIAL_CREDITS).toBe(123);
+    expect([
+      other.REFERRAL_CREDITS,
+      other.REFERRAL_MAX_REWARDS,
+      other.REFERRAL_MAX_PER_DAY,
+      other.REFERRAL_MAX_FRIEND_GRANTS_PER_DAY,
+    ]).toEqual([77, 9, 2, 31]);
     expect(other.buildQuote(HAIKU).list).toBe(41);
     expect(other.messageQuote(HAIKU, "free").list).toBe(7);
     expect(other.studyKitQuote(2, HAIKU).list).toBe(26);
@@ -179,6 +202,8 @@ describe("README", () => {
     expect(section).toContain(`${n(CREDIT_PACK_SIZE)} credits for $${CREDIT_PACK_PRICE_USD}`);
     expect(section).toContain(`up to ${FREE_FAILURES_PER_DAY} a day`);
     expect(section).toContain(`cost more than ${ACTION_PRICES.message}`);
+    expect(section).toContain(`both get ${n(REFERRAL_CREDITS)} credits`);
+    expect(section).toContain(`for up to ${REFERRAL_MAX_REWARDS} friends, ${REFERRAL_MAX_PER_DAY} in any 24 hours`);
     // Handwriting recognition: no credits, a daily cap.
     expect(USAGE_LIMITS.handwriting.windowMs).toBe(24 * 60 * 60 * 1000);
     expect(section).toContain(

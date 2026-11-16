@@ -64,7 +64,8 @@ describe("every database model is covered by export and erasure", () => {
     for (const [, list] of calls.byModel) {
       for (const { args } of list) {
         const where = (args as { where?: Record<string, unknown> }).where ?? {};
-        expect(where.userId ?? where.ownerId).toBe("user_1");
+        // An invite is the student's as the inviter or as the invited friend.
+        expect(where.userId ?? where.ownerId ?? where.referrerId ?? where.refereeId).toBe("user_1");
       }
     }
   });
@@ -79,11 +80,47 @@ describe("every database model is covered by export and erasure", () => {
     expect(missing).toEqual([]);
     for (const [, list] of calls.byModel) {
       for (const { method, args } of list) {
-        if (method !== "deleteMany") continue;
+        if (method !== "deleteMany" && method !== "updateMany") continue;
         const where = (args as { where: Record<string, unknown> }).where;
-        expect(where.userId ?? where.ownerId).toBe("user_1");
+        // A row owned through its parent (a share report through its share) is scoped by the parent's owner.
+        const parent = where.share as { userId?: unknown } | undefined;
+        // A row with two parties (an invite: inviter OR friend) is scoped on every branch.
+        const either = where.OR as Record<string, unknown>[] | undefined;
+        if (either) {
+          expect(either.length).toBeGreaterThan(0);
+          for (const branch of either) expect(branch.referrerId ?? branch.refereeId).toBe("user_1");
+          continue;
+        }
+        // An invite the user made goes (referrerId); one they came through is anonymised (refereeId).
+        expect(where.userId ?? where.ownerId ?? where.referrerId ?? where.refereeId ?? parent?.userId).toBe("user_1");
       }
     }
+  });
+
+  it("an invite the user came through is anonymised, never kept naming them", async () => {
+    await eraseUserData("user_1");
+    const referral = calls.byModel.get("referral") ?? [];
+    expect(referral).toContainEqual({ method: "deleteMany", args: { where: { referrerId: "user_1" } } });
+    expect(referral).toContainEqual({
+      method: "updateMany",
+      args: { where: { refereeId: "user_1" }, data: { refereeId: null } },
+    });
+    // The mailbox register holds no user id, so there is nothing of theirs to erase.
+    expect(ERASURE_KEPT_MODELS).toContain("ReferralMailbox");
+    expect(calls.byModel.get("referralMailbox")).toBeUndefined();
+  });
+
+  it("withdrawal and cancellation notices are exported, and kept unlinked (legal records) on erasure", async () => {
+    await buildUserDataExport("user_1");
+    expect(calls.byModel.get("contractNotice")).toContainEqual(
+      expect.objectContaining({ method: "findMany", args: expect.objectContaining({ where: { userId: "user_1" } }) }),
+    );
+    calls.byModel.clear();
+    await eraseUserData("user_1");
+    expect(ERASURE_KEPT_MODELS).toContain("ContractNotice");
+    expect(calls.byModel.get("contractNotice")).toEqual([
+      { method: "updateMany", args: { where: { userId: "user_1" }, data: { userId: null } } },
+    ]);
   });
 
   it("agent chat messages are read a page at a time, like the other large collections", async () => {

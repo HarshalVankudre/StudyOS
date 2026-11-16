@@ -10,6 +10,7 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Check, ChevronDown, Languages } from "lucide-react";
+import { toast } from "sonner";
 import { LOCALES, type Locale } from "@/lib/i18n/config";
 import { setLocale } from "@/lib/i18n/actions";
 import { useI18n } from "@/lib/i18n/client";
@@ -17,10 +18,16 @@ import { useI18n } from "@/lib/i18n/client";
 export function LanguageSwitcher({
   /** On phones show only the languages icon (the name from `sm` up). */
   compact = false,
+  /** Never show the name: for narrow places such as the workspace sidebar. */
+  iconOnly = false,
+  /** Where the list opens: "above" for a trigger at the bottom of the screen. */
+  menu = "below",
   /** Tune contrast for dark vs light surfaces. */
   tone = "light",
 }: {
   compact?: boolean;
+  iconOnly?: boolean;
+  menu?: "below" | "above";
   tone?: "light" | "dark";
 }) {
   const router = useRouter();
@@ -52,7 +59,15 @@ export function LanguageSwitcher({
     setOpen(false);
     if (code === locale) return;
     startTransition(async () => {
-      await setLocale(code);
+      try {
+        await setLocale(code);
+      } catch {
+        // Offline, or the app was updated meanwhile: the language stays as it
+        // is. Thrown inside this transition it would replace the page with the
+        // error screen. (The toast shows on pages that have a toaster.)
+        toast.error(dict.safety.actionFailed);
+        return;
+      }
       router.refresh();
     });
   };
@@ -71,31 +86,37 @@ export function LanguageSwitcher({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={`${dict.language.choose}: ${current.nativeName}`}
-        className={`flex min-h-9 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-sm transition disabled:opacity-50 ${triggerTone}`}
+        className={`flex min-h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border text-sm transition disabled:opacity-50 ${
+          iconOnly ? "w-9 justify-center" : "px-3 py-1.5"
+        } ${triggerTone}`}
       >
         <Languages className="h-4 w-4 shrink-0" aria-hidden />
         {/* The language's own name, never a flag (Windows shows flags as "GB"). */}
         <span
           lang={current.code}
           dir="auto"
-          className={compact ? "hidden max-w-[7rem] truncate font-medium sm:inline" : "font-medium"}
+          className={
+            iconOnly ? "hidden" : compact ? "hidden max-w-[7rem] truncate font-medium sm:inline" : "font-medium"
+          }
           data-testid="language-current"
         >
           {current.nativeName}
         </span>
-        <ChevronDown
-          className={`h-3.5 w-3.5 transition-transform ${open ? "rotate-180" : ""}`}
-          aria-hidden
-        />
+        {!iconOnly && (
+          <ChevronDown
+            className={`h-3.5 w-3.5 transition-transform ${open ? "rotate-180" : ""}`}
+            aria-hidden
+          />
+        )}
       </button>
 
       {open && (
         <ul
           role="listbox"
           aria-label={dict.language.label}
-          className={`absolute z-50 mt-2 max-h-80 w-48 overflow-y-auto rounded-xl border border-ink/10 bg-card p-1 shadow-[0_24px_60px_-28px_rgba(26,23,18,0.45)] ${
-            dir === "rtl" ? "left-0" : "right-0"
-          }`}
+          className={`absolute z-50 max-h-80 w-48 overflow-y-auto rounded-2xl border border-ink/10 bg-card p-1 shadow-pop ${
+            menu === "above" ? "bottom-full mb-2" : "mt-2"
+          } ${dir === "rtl" ? "left-0" : "right-0"}`}
         >
           {LOCALES.map((l) => {
             const active = l.code === locale;

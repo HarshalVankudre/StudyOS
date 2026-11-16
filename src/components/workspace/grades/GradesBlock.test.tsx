@@ -626,3 +626,240 @@ describe("GradesBlock: grading categories", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// Module grades (German grades typed per module, lib/grades/modules.ts)
+// ---------------------------------------------------------------------------
+
+const M = G.modules;
+const E = en.tools.gradeCalculator.ects;
+
+/** One module per row: Modul, LP, Note (German grade), a status. */
+function modules(withLp = true): Database {
+  return {
+    id: "db-m",
+    name: "Module",
+    properties: [
+      { id: "m-name", name: "Modul", type: "text" },
+      ...(withLp ? [{ id: "m-lp", name: "LP", type: "number" as const }] : []),
+      { id: "m-note", name: "Note", type: "number" },
+      {
+        id: "m-status",
+        name: "Status",
+        type: "status",
+        options: [
+          { id: "st-todo", label: "Not started" },
+          { id: "st-done", label: "Done", color: "green" },
+        ],
+      },
+    ],
+    rows: [
+      { id: "r1", cells: { "m-name": "Analysis", "m-lp": 9, "m-note": 1.3, "m-status": "st-done" } },
+      { id: "r2", cells: { "m-name": "Programmierung", "m-lp": 6, "m-note": null, "m-status": "st-todo" } },
+      { id: "r3", cells: { "m-name": "Statistik", "m-lp": 6, "m-note": 5, "m-status": "st-done" } },
+    ],
+    views: [{ id: "v", name: "All", type: "table" }],
+  };
+}
+const moduleSetup = { databaseId: "db-m", scale: "de_grade" as const, entry: "grade" as const, columns: { score: "m-note", credits: "m-lp" } };
+const moduleLine = (name: string) => {
+  const el = screen.getAllByTestId("grades-module").find((li) => within(li).queryByText(name));
+  if (!el) throw new Error(`no module ${name}`);
+  return within(el);
+};
+
+describe("GradesBlock: module grades", () => {
+  it("shows the Notenschnitt of the passed modules, LP earned and open, and the counts", () => {
+    setStore(moduleSetup, modules());
+    render(<Harness />);
+    expect(screen.getByTestId("grades-overall")).toHaveTextContent("1.3");
+    expect(screen.getByTestId("grades-unrounded")).toHaveTextContent(fmt(E.unrounded, { value: "1.30" }));
+    expect(screen.getByTestId("grades-ects")).toHaveTextContent(fmt(E.ectsDone, { earned: "9", open: "6" }));
+    expect(screen.getByTestId("grades-counts")).toHaveTextContent(fmt(M.counts, { passed: 1, failed: 1, open: 1 }));
+    expect(moduleLine("Statistik").getByText(E.failedTag)).toBeInTheDocument();
+    expect(moduleLine("Analysis").queryByText(E.failedTag)).toBeNull();
+    expect(moduleLine("Analysis").getByText(`9 ${E.ectsColumn}`)).toBeInTheDocument();
+    expect(screen.getByTestId("grades-rule")).toHaveTextContent(E.rule);
+    // No percentages, weights or categories in this mode.
+    expect(screen.queryByText(/%/)).toBeNull();
+    expect(screen.queryByRole("button", { name: G.categories.add })).toBeNull();
+  });
+
+  it("typing 1,7 saves 1.7, marks the module done and updates the average", async () => {
+    const user = userEvent.setup();
+    setStore(moduleSetup, modules());
+    render(<Harness />);
+    const box = screen.getByLabelText(fmt(M.gradeAria, { module: "Programmierung" }));
+    expect(box).toHaveAttribute("inputmode", "decimal");
+    await user.type(box, "1,7{Enter}");
+    expect(row("r2").cells).toMatchObject({ "m-note": 1.7, "m-status": "st-done" });
+    // (1,3 · 9 + 1,7 · 6) / 15 = 1,46: shown 1,4, cut and not rounded.
+    expect(screen.getByTestId("grades-overall")).toHaveTextContent("1.4");
+    expect(screen.getByTestId("grades-unrounded")).toHaveTextContent(fmt(E.unrounded, { value: "1.46" }));
+  });
+
+  it("reads 1.7 and 2 too, and an emptied box opens the module again", async () => {
+    const user = userEvent.setup();
+    setStore(moduleSetup, modules());
+    render(<Harness />);
+    await user.type(screen.getByLabelText(fmt(M.gradeAria, { module: "Programmierung" })), "2{Enter}");
+    expect(row("r2").cells["m-note"]).toBe(2);
+    const analysis = screen.getByLabelText(fmt(M.gradeAria, { module: "Analysis" }));
+    expect(analysis).toHaveValue("1.3");
+    await user.clear(analysis);
+    await user.type(analysis, "1.7{Enter}");
+    expect(row("r1").cells["m-note"]).toBe(1.7);
+    await user.clear(analysis);
+    await user.tab();
+    expect(row("r1").cells["m-note"]).toBeNull();
+  });
+
+  it("refuses 87 with the German-grade message and keeps what was stored", async () => {
+    const user = userEvent.setup();
+    setStore(moduleSetup, modules());
+    render(<Harness />);
+    const box = screen.getByLabelText(fmt(M.gradeAria, { module: "Programmierung" }));
+    await user.type(box, "87{Enter}");
+    expect(row("r2").cells["m-note"]).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent(fmt(E.invalidGrade, { text: "87" }));
+    expect(box).toHaveValue("");
+  });
+
+  it("flags a number in the list that is not a grade and leaves it out", () => {
+    const db = modules();
+    db.rows[1].cells["m-note"] = 87;
+    setStore(moduleSetup, db);
+    render(<Harness />);
+    expect(moduleLine("Programmierung").getByText(fmt(E.invalidGrade, { text: "87" }))).toBeInTheDocument();
+    expect(screen.getByTestId("grades-overall")).toHaveTextContent("1.3");
+  });
+
+  it("a target average answers what the open modules need, and saves the target", async () => {
+    const user = userEvent.setup();
+    setStore(moduleSetup, modules());
+    render(<Harness />);
+    expect(screen.getByTestId("grades-outlook")).toHaveTextContent(E.outlook.pick);
+    await user.selectOptions(screen.getByLabelText(E.targetLabel), "1.5");
+    expect(block().targetGrade).toBe(1.5);
+    // 2,0 in Programmierung gives (11,7 + 12) / 15 = 1,58 -> 1,5; 2,1 would give 1,62.
+    expect(screen.getByTestId("grades-needed")).toHaveTextContent("2.0");
+    expect(screen.getByTestId("grades-outlook")).toHaveTextContent(
+      fmt(E.outlook.needed, { target: "1.5", grade: "2.0", open: "6" }),
+    );
+    await user.selectOptions(screen.getByLabelText(E.targetLabel), "");
+    expect(block().targetGrade).toBeUndefined();
+  });
+
+  it("says when the target is secured, out of reach or final", () => {
+    setStore({ ...moduleSetup, targetGrade: 4 }, modules());
+    const { unmount } = render(<Harness />);
+    expect(screen.getByTestId("grades-outlook")).toHaveTextContent(fmt(E.outlook.secured, { target: "4.0" }));
+    unmount();
+
+    setStore({ ...moduleSetup, targetGrade: 1 }, modules());
+    const second = render(<Harness />);
+    // Even 1,0 in Programmierung: (11,7 + 6) / 15 = 1,18 -> 1,1.
+    expect(screen.getByTestId("grades-outlook")).toHaveTextContent(
+      fmt(E.outlook.unreachable, { target: "1.0", best: "1.1" }),
+    );
+    second.unmount();
+
+    const done = modules();
+    done.rows[1].cells["m-note"] = 1.3;
+    setStore({ ...moduleSetup, targetGrade: 1.5 }, done);
+    render(<Harness />);
+    expect(screen.getByTestId("grades-outlook")).toHaveTextContent(
+      fmt(E.outlook.met, { average: "1.3", target: "1.5" }),
+    );
+  });
+
+  it("asks for the LP when a module has none", () => {
+    const db = modules();
+    db.rows[1].cells["m-lp"] = null;
+    setStore({ ...moduleSetup, targetGrade: 2 }, db);
+    render(<Harness />);
+    expect(moduleLine("Programmierung").getByText(M.noCredits)).toBeInTheDocument();
+    expect(screen.getByTestId("grades-outlook")).toHaveTextContent(fmt(E.outlook.missingEcts, { count: 1 }));
+  });
+
+  it("what-if: an assumed grade for an open module changes the average and is never saved", async () => {
+    const user = userEvent.setup();
+    setStore(moduleSetup, modules());
+    render(<Harness />);
+    await user.click(screen.getByRole("button", { name: G.whatIf }));
+    expect(screen.getByText(M.whatIfOn)).toBeInTheDocument();
+    await user.type(screen.getByLabelText(fmt(M.whatIfAria, { module: "Programmierung" })), "1,0");
+    // (1,3 · 9 + 1,0 · 6) / 15 = 1,18 -> 1,1.
+    expect(screen.getByTestId("grades-overall")).toHaveTextContent("1.1");
+    expect(moduleLine("Programmierung").getByText(G.whatIfBadge)).toBeInTheDocument();
+    expect(row("r2").cells["m-note"]).toBeNull();
+    await user.click(screen.getByRole("button", { name: G.clearWhatIf }));
+    expect(screen.getByTestId("grades-overall")).toHaveTextContent("1.3");
+  });
+
+  it("settings offer the choice of entry with German grades and hide thresholds and the percentage target", async () => {
+    const user = userEvent.setup();
+    setStore(moduleSetup, modules());
+    render(<Harness />);
+    await user.click(screen.getByRole("button", { name: G.settings }));
+    expect(screen.getByLabelText(M.entryGrade)).toBeChecked();
+    expect(screen.queryByText(G.thresholds)).toBeNull();
+    expect(screen.queryByText(G.defaultTarget)).toBeNull();
+    await user.click(screen.getByLabelText(M.entryPercent));
+    expect(block().entry).toBe("percent");
+    expect(screen.getByText(G.thresholds)).toBeInTheDocument();
+  });
+
+  it("setup asks for the grade and LP columns only, and adds a missing LP column", async () => {
+    const user = userEvent.setup();
+    setStore({ scale: "de_grade", entry: "grade" }, modules(false));
+    render(<Harness />);
+    expect(screen.getByText(M.setupIntro)).toBeInTheDocument();
+    expect(screen.getByLabelText(M.entryGrade)).toBeChecked();
+    expect(screen.getByLabelText(E.gradeColumn)).toHaveValue("m-note");
+    expect(screen.queryByLabelText(G.columns.weight)).toBeNull();
+    expect(screen.queryByLabelText(G.columns.maxScore)).toBeNull();
+    expect(screen.getByText(M.missingCredits)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: M.addCreditsColumn }));
+    const added = h.store.workspace.databases[0].properties.at(-1)!;
+    expect(added).toMatchObject({ name: E.ectsColumn, type: "number" });
+    expect(screen.getByLabelText(M.creditsColumn)).toHaveValue(added.id);
+
+    await user.click(screen.getByRole("button", { name: G.saveSetup }));
+    expect(block()).toMatchObject({ databaseId: "db-m", columns: { score: "m-note", credits: added.id } });
+    expect(screen.getAllByTestId("grades-module")).toHaveLength(3);
+  });
+
+  it("setup on German grades can switch back to percentages", async () => {
+    const user = userEvent.setup();
+    setStore({ scale: "de_grade", entry: "grade" }, modules());
+    render(<Harness />);
+    await user.click(screen.getByLabelText(M.entryPercent));
+    expect(block().entry).toBe("percent");
+    expect(screen.getByLabelText(G.columns.weight)).toBeInTheDocument();
+  });
+});
+
+describe("GradesBlock: an old German block that holds grades as percentages", () => {
+  it("offers to read them as module grades, and switches only when asked", async () => {
+    const user = userEvent.setup();
+    const db = modules();
+    setStore({ databaseId: "db-m", scale: "de_grade", columns: { score: "m-note" } }, db);
+    render(<Harness />);
+    expect(screen.getByText(M.looksLikeGrades)).toBeInTheDocument();
+    expect(block().entry).toBeUndefined();
+    await user.click(screen.getByRole("button", { name: M.readAsGrades }));
+    expect(block().entry).toBe("grade");
+    expect(screen.queryByText(M.looksLikeGrades)).toBeNull();
+    expect(screen.getByTestId("grades-overall")).toHaveTextContent("1.3");
+  });
+
+  it("stays quiet when a score is a real percentage", () => {
+    const db = modules();
+    db.rows[1].cells["m-note"] = 87;
+    setStore({ databaseId: "db-m", scale: "de_grade", columns: { score: "m-note" } }, db);
+    render(<Harness />);
+    expect(screen.queryByText(M.looksLikeGrades)).toBeNull();
+  });
+});

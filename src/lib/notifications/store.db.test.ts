@@ -12,6 +12,9 @@
 import { afterAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/ops/report-error", () => ({ reportError: () => undefined }));
+// The store reads the weekly recap through lib/study/insights-store, which
+// also serves signed-in pages; no session is involved here.
+vi.mock("@clerk/nextjs/server", () => ({ auth: async () => ({ userId: null }) }));
 vi.mock("@/lib/notifications/config", () => ({
   pushConfigured: () => true,
   vapidPublicKey: () => "BKey",
@@ -69,6 +72,28 @@ describe.skipIf(!enabled)("notifications store on Postgres", () => {
     expect(await store.countMessages(userId, "2026-11-12")).toBe(1);
     await store.finish(results.find(Boolean)!, "skipped", false, new Date());
     expect(await store.countMessages(userId, "2026-11-12")).toBe(0);
+  });
+
+  it("returns the weekly recap choice with a claimed student, and counts recent recaps", async () => {
+    const prisma = await db();
+    const { prismaNotificationStore: store } = await import("./store");
+    const userId = user("weekly");
+    await prisma.notificationPreference.create({
+      data: { userId, weeklyEnabled: true, weeklyDay: 3, weeklyMinute: 450, nextCheckAt: new Date(0) },
+    });
+    const now = new Date();
+    const claimed = (await store.claimDueUsers(now, 500, new Date(now.getTime() + 60_000))).find((u) => u.userId === userId);
+    expect(claimed?.prefs).toMatchObject({ weeklyEnabled: true, weeklyDay: 3, weeklyMinute: 450 });
+    await store.release(userId, null);
+
+    const id = await store.claim({ userId, dedupeKey: "weekly:2026-11-15", kind: "weekly", localDate: "2026-11-15", message: true });
+    expect(id).toBeTruthy();
+    await store.finish(id!, "sent", true, new Date());
+    expect(await store.countShownSince(userId, "weekly", "2026-11-10")).toBe(1);
+    expect(await store.countShownSince(userId, "weekly", "2026-11-16")).toBe(0);
+    expect(await store.countShownSince(userId, "daily", "2026-11-10")).toBe(0);
+    // A student without study rows has an empty week.
+    expect(await store.weekTotals(userId, "2026-11-15")).toEqual({ focusMinutes: 0, cards: 0, quizAnswers: 0, activeDays: 0 });
   });
 
   it("dispatches end to end over Postgres without repeats when runs overlap", async () => {
@@ -131,5 +156,24 @@ describe.skipIf(!enabled)("notifications store on Postgres", () => {
     const rows = await prisma.pushSubscription.findMany({ where: { userId: { in: [first, second] } } });
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ userId: first, p256dh: "p" });
+  });
+
+  it("a refresh keeps a known device current but never adds one", async () => {
+    const prisma = await db();
+    const service = await import("./service");
+    const userId = user("refresh");
+    const oldEndpoint = `https://fcm.googleapis.com/fcm/send/${run}-old`;
+    const newEndpoint = `https://fcm.googleapis.com/fcm/send/${run}-new`;
+    const sub = (endpoint: string) => ({ ok: true as const, endpoint, p256dh: "p", auth: "a" });
+    // Turned off everywhere: the browser's leftover subscription stays off.
+    expect(await service.addPushSubscription(userId, sub(oldEndpoint), { label: "Chrome" }, { refreshOnly: true })).toBe("unknown");
+    expect(await prisma.pushSubscription.count({ where: { userId } })).toBe(0);
+    expect(await service.addPushSubscription(userId, sub(oldEndpoint), { label: "Chrome" })).toBe("added");
+    // A new server key: the record follows the browser's new endpoint.
+    expect(
+      await service.addPushSubscription(userId, sub(newEndpoint), { label: "Chrome" }, { refreshOnly: true, replaces: oldEndpoint }),
+    ).toBe("added");
+    const rows = await prisma.pushSubscription.findMany({ where: { userId } });
+    expect(rows.map((r) => r.endpoint)).toEqual([newEndpoint]);
   });
 });

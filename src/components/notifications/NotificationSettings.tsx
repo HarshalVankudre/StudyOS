@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
-import { Bell, BellOff, Send, Smartphone } from "lucide-react";
+import { Bell, BellOff, Mail, Send, Smartphone } from "lucide-react";
 import { useI18n } from "@/lib/i18n/client";
 import { fmt } from "@/lib/i18n/interpolate";
 import {
@@ -13,8 +13,9 @@ import {
   type NotificationPreferences,
 } from "@/lib/notifications/preferences";
 import { afterQuietHours } from "@/lib/notifications/schedule";
-import type { NotificationSettingsView } from "@/lib/notifications/service";
+import type { EmailSettingsView, NotificationSettingsView } from "@/lib/notifications/service";
 import { cn } from "@/lib/utils";
+import { sendTestEmail, setEmailEnabled } from "./email-client";
 import { PermissionExplainer } from "./PermissionExplainer";
 import { Switch } from "./Switch";
 import {
@@ -43,15 +44,33 @@ export function formatClock(minute: number, locale: string): string {
   });
 }
 
+/** A weekday (0 = Sunday … 6 = Saturday) by name in the student's language. */
+export function weekdayName(day: number, locale: string): string {
+  // 15 November 2026 is a Sunday.
+  const date = new Date(Date.UTC(2026, 10, 15 + day));
+  try {
+    return new Intl.DateTimeFormat(locale, { weekday: "long", timeZone: "UTC" }).format(date);
+  } catch {
+    return new Intl.DateTimeFormat("en", { weekday: "long", timeZone: "UTC" }).format(date);
+  }
+}
+
+/** The recap day picker's order: the week from Monday. */
+const WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0] as const;
+
 /**
  * The notifications section of the settings page: turn notifications on or
  * off for this device (with an explanation before the browser asks), send a
- * test, and choose what arrives and when. Hidden entirely by the page when
- * push is not configured.
+ * test, turn reminders by email on or off, and choose what arrives and when
+ * (one set of choices for both channels). Hidden entirely by the page when
+ * neither push nor email is configured; each part hides itself when its own
+ * channel is not.
  */
 export function NotificationSettings({ initial }: { initial: NotificationSettingsView }) {
   const { dict, locale } = useI18n();
   const N = dict.notifications;
+  const [email, setEmail] = useState<EmailSettingsView | null>(initial.email);
+  const emailOn = Boolean(email?.enabled && !email.bounced);
   // Browser facts, read after hydration (null / "default" on the server).
   const support = useSyncExternalStore<PushSupport | null>(noop, pushSupport, () => null);
   const browserPerm = useSyncExternalStore<PermissionState>(noop, permission, () => "default");
@@ -117,29 +136,34 @@ export function NotificationSettings({ initial }: { initial: NotificationSetting
 
   return (
     <div>
-      <DeviceStatus
-        N={N}
-        support={support}
-        perm={perm}
-        hereOn={hereOn}
-        others={others}
-        busy={busy}
-        explaining={explaining}
-        cap={initial.dailyCap}
-        onStart={() => {
-          setStatus(null);
-          setExplaining(true);
-        }}
-        onContinue={turnOn}
-        onCancel={() => setExplaining(false)}
-        onOff={() => turnOff(false)}
-        onOffAll={() => turnOff(true)}
-        onTest={test}
-      />
-      <p role="status" aria-live="polite" className="mt-3 min-h-5 text-sm text-ink-soft">
-        {status}
-      </p>
-      {devices > 0 && (
+      {initial.publicKey && (
+        <>
+          <DeviceStatus
+            N={N}
+            support={support}
+            perm={perm}
+            hereOn={hereOn}
+            others={others}
+            busy={busy}
+            explaining={explaining}
+            cap={initial.dailyCap}
+            onStart={() => {
+              setStatus(null);
+              setExplaining(true);
+            }}
+            onContinue={turnOn}
+            onCancel={() => setExplaining(false)}
+            onOff={() => turnOff(false)}
+            onOffAll={() => turnOff(true)}
+            onTest={test}
+          />
+          <p role="status" aria-live="polite" className="mt-3 min-h-5 text-sm text-ink-soft">
+            {status}
+          </p>
+        </>
+      )}
+      {email && <EmailRow N={N} email={email} also={devices > 0} onChange={setEmail} />}
+      {(devices > 0 || emailOn) && (
         <PreferencesForm
           N={N}
           locale={locale}
@@ -285,6 +309,100 @@ function DeviceStatus({
   );
 }
 
+/**
+ * "Also send reminders by email to <address>": a channel switch, saved at
+ * once like turning a device on. Only a verified primary address can be
+ * turned on; turning off always works. The test email sits under it.
+ */
+function EmailRow({
+  N,
+  email,
+  also,
+  onChange,
+}: {
+  N: Copy;
+  email: EmailSettingsView;
+  /** A device is on too ("Also send ..."). */
+  also: boolean;
+  onChange: (next: EmailSettingsView) => void;
+}) {
+  const { locale } = useI18n();
+  const id = useId();
+  const hintId = useId();
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+  const { address } = email;
+  const on = email.enabled && !email.bounced;
+  const canTurnOn = Boolean(address) && email.verified;
+
+  const label = address ? fmt(also ? N.emailLabelAlso : N.emailLabel, { address }) : N.emailTitle;
+  let hint = N.emailHint;
+  if (email.bounced && address) hint = fmt(N.emailBounced, { address });
+  else if (!on && email.unavailable) hint = N.emailUnavailable;
+  else if (!on && !address) hint = N.emailNoAddress;
+  else if (!on && !email.verified && address) hint = fmt(N.emailUnverified, { address });
+
+  const toggle = async (next: boolean) => {
+    setBusy(true);
+    setStatus(null);
+    const result = await setEmailEnabled(next, { timeZone: browserTimeZone(), locale });
+    setBusy(false);
+    if (result.ok) {
+      onChange(result.email);
+      setStatus(next ? N.emailOn : N.emailOff);
+    } else if (result.reason === "no_address") {
+      onChange({ ...email, address: null, verified: false, unavailable: false });
+    } else if (result.reason === "unverified") {
+      onChange({ ...email, verified: false, unavailable: false });
+    } else {
+      setStatus(result.reason === "unavailable" ? N.emailUnavailable : N.failed);
+    }
+  };
+
+  const test = async () => {
+    setBusy(true);
+    setStatus(null);
+    const result = await sendTestEmail();
+    setBusy(false);
+    setStatus(
+      result === "sent"
+        ? fmt(N.testEmailSent, { address: address ?? "" })
+        : result === "limited"
+          ? N.testLimited
+          : N.testEmailFailed,
+    );
+  };
+
+  return (
+    <div className="mt-4 border-t border-ink/10 pt-1">
+      <Row
+        id={id}
+        hintId={hintId}
+        label={label}
+        hint={hint}
+        checked={on}
+        disabled={busy || (!on && !canTurnOn)}
+        onChange={(v) => void toggle(v)}
+      >
+        {on && (
+          <button
+            type="button"
+            onClick={test}
+            disabled={busy}
+            className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-ink/15 bg-card px-4 text-sm font-semibold text-ink transition hover:border-ink/40 disabled:opacity-50"
+          >
+            <Mail className="h-4 w-4" aria-hidden />
+            {N.sendTestEmail}
+          </button>
+        )}
+      </Row>
+      <p role="status" aria-live="polite" className="min-h-5 text-sm text-ink-soft">
+        {status}
+      </p>
+    </div>
+  );
+}
+
 function Notice({ title, body }: { title: string; body: string }) {
   return (
     <div className="rounded-md border border-line-strong bg-surface p-4">
@@ -309,6 +427,9 @@ function PreferencesForm({
 }) {
   const [prefs, setPrefs] = useState(initial);
   const [saved, setSaved] = useState(initial);
+  // Read after hydration: the server's zone is not the student's, and
+  // rendering it would differ from the browser's first render.
+  const deviceZone = useSyncExternalStore(noop, browserTimeZone, () => undefined);
   const [state, setState] = useState<"idle" | "saving" | "saved" | "failed">("idle");
   const ids = {
     daily: useId(),
@@ -317,6 +438,8 @@ function PreferencesForm({
     deadlineHint: useId(),
     streak: useId(),
     streakHint: useId(),
+    weekly: useId(),
+    weeklyHint: useId(),
     quiet: useId(),
     quietHint: useId(),
   };
@@ -391,6 +514,28 @@ function PreferencesForm({
 
       <Row id={ids.streak} hintId={ids.streakHint} label={N.streakLabel} hint={N.streakHint} checked={prefs.streakEnabled} onChange={(v) => set({ streakEnabled: v })} />
 
+      <Row
+        id={ids.weekly}
+        hintId={ids.weeklyHint}
+        label={N.weeklyLabel}
+        hint={fmt(N.weeklyHint, {
+          day: weekdayName(prefs.weeklyDay, locale),
+          time: formatClock(prefs.weeklyMinute, locale),
+        })}
+        checked={prefs.weeklyEnabled}
+        onChange={(v) => set({ weeklyEnabled: v })}
+      >
+        {prefs.weeklyEnabled && (
+          <>
+            <div className="flex flex-wrap gap-3">
+              <WeekdayField label={N.weeklyDayLabel} locale={locale} day={prefs.weeklyDay} onChange={(d) => set({ weeklyDay: d })} />
+              <TimeField label={N.timeLabel} minute={prefs.weeklyMinute} onChange={(m) => set({ weeklyMinute: m })} />
+            </div>
+            <Note text={quietNote(prefs.weeklyMinute)} />
+          </>
+        )}
+      </Row>
+
       <Row id={ids.quiet} hintId={ids.quietHint} label={N.quietLabel} hint={N.quietHint} checked={prefs.quietEnabled} onChange={(v) => set({ quietEnabled: v })}>
         {prefs.quietEnabled && (
           <div className="flex flex-wrap gap-3">
@@ -401,7 +546,7 @@ function PreferencesForm({
       </Row>
 
       <p className="mt-4 text-xs leading-5 text-ink-soft">
-        {fmt(N.timeZoneNote, { zone: browserTimeZone() ?? prefs.timeZone })} {fmt(N.capNote, { cap })}
+        {fmt(N.timeZoneNote, { zone: deviceZone ?? prefs.timeZone })} {fmt(N.capNote, { cap })}
       </p>
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <button
@@ -425,6 +570,7 @@ function Row({
   label,
   hint,
   checked,
+  disabled,
   onChange,
   children,
 }: {
@@ -433,6 +579,7 @@ function Row({
   label: string;
   hint: string;
   checked: boolean;
+  disabled?: boolean;
   onChange: (next: boolean) => void;
   children?: React.ReactNode;
 }) {
@@ -440,14 +587,14 @@ function Row({
     <div className="mt-4 border-b border-ink/5 pb-4 last-of-type:border-b-0">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <p id={id} className="text-sm font-semibold text-ink">
+          <p id={id} className="break-words text-sm font-semibold text-ink">
             {label}
           </p>
           <p id={hintId} className="mt-0.5 text-sm leading-6 text-ink-soft">
             {hint}
           </p>
         </div>
-        <Switch checked={checked} onChange={onChange} labelledBy={id} describedBy={hintId} />
+        <Switch checked={checked} onChange={onChange} labelledBy={id} describedBy={hintId} disabled={disabled} />
       </div>
       {children && <div className="mt-3">{children}</div>}
     </div>
@@ -472,6 +619,39 @@ function TimeField({ label, minute, onChange }: { label: string; minute: number;
         }}
         className="min-h-11 rounded-lg border border-ink/15 bg-paper px-3 text-sm text-ink outline-none focus:border-ink/40"
       />
+    </div>
+  );
+}
+
+function WeekdayField({
+  label,
+  locale,
+  day,
+  onChange,
+}: {
+  label: string;
+  locale: string;
+  day: number;
+  onChange: (day: number) => void;
+}) {
+  const id = useId();
+  return (
+    <div className="flex items-center gap-2">
+      <label htmlFor={id} className="text-sm text-ink-soft">
+        {label}
+      </label>
+      <select
+        id={id}
+        value={day}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="min-h-11 rounded-lg border border-ink/15 bg-paper px-3 text-sm text-ink outline-none focus:border-ink/40"
+      >
+        {WEEKDAY_ORDER.map((d) => (
+          <option key={d} value={d}>
+            {weekdayName(d, locale)}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }
@@ -511,7 +691,7 @@ function LeadPicker({
               className={cn(
                 "min-h-10 rounded-full border px-3.5 text-sm transition",
                 on
-                  ? "border-lime bg-lime-faint font-semibold text-ink"
+                  ? "border-lime-deep bg-lime-faint font-semibold text-ink"
                   : "border-line-strong bg-surface text-ink-soft hover:bg-hover hover:text-ink",
               )}
             >

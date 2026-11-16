@@ -396,7 +396,7 @@ function SessionSummary({
       </p>
       <button
         onClick={onClose}
-        className="mt-1 min-h-12 rounded-lg bg-lime px-6 py-3 text-sm font-semibold text-lime-on transition hover:bg-lime-deep"
+        className="mt-1 min-h-12 rounded-lg bg-lime px-6 py-3 text-sm font-semibold text-lime-on transition hover:bg-lime-hover"
       >
         {S.finish}
       </button>

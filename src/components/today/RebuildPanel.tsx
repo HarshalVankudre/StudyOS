@@ -66,8 +66,8 @@ export function RebuildPanel({
                   className={cn(
                     "min-h-10 rounded-full border px-3.5 text-sm transition",
                     selected
-                      ? "border-lime bg-lime-faint font-semibold text-ink"
-                      : "border-line-strong bg-surface text-ink-soft hover:bg-hover hover:text-ink",
+                      ? "border-transparent bg-lime font-semibold text-lime-on"
+                      : "border-line-strong text-ink-soft hover:bg-hover hover:text-ink",
                   )}
                 >
                   {choice.label}
@@ -84,7 +84,7 @@ export function RebuildPanel({
                 setOpen(false);
               })
             }
-            className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md bg-ink px-5 text-sm font-semibold text-paper shadow-card transition hover:opacity-90 disabled:opacity-60 sm:w-auto"
+            className="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-full bg-lime px-6 text-sm font-semibold text-lime-on transition hover:bg-lime-hover disabled:opacity-60 sm:w-auto"
           >
             {pending && (
               <span

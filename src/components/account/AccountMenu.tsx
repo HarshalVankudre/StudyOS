@@ -5,6 +5,7 @@ import { useClerk, useUser } from "@clerk/nextjs";
 import { useSignOutWithCleanup } from "@/components/account/SignOutButton";
 import { useEffect, useRef, useState } from "react";
 import { getAccountSummaryAction } from "@/app/app/account-actions";
+import { emit, OPEN_FEEDBACK_EVENT } from "@/components/command/events";
 import { useI18n } from "@/lib/i18n/client";
 import { balanceReadStarted, reportCreditsBalance, useLiveBalance } from "@/lib/credits-bus";
 
@@ -13,6 +14,8 @@ interface AccountSummary {
   credits: number;
   /** Payments are switched on (absent from older servers: treated as on). */
   billing?: boolean;
+  /** The signed-in user may open the operator console (decided on the server). */
+  admin?: boolean;
 }
 
 /**
@@ -141,6 +144,24 @@ export function AccountMenu({
           href="/app/settings"
           onNavigate={() => setOpen(false)}
         />
+        {/* Opens the one dialog FeedbackHost keeps in the /app layout. */}
+        <MenuButton
+          icon="✉"
+          label={dict.feedback.open}
+          onClick={() => {
+            setOpen(false);
+            emit(OPEN_FEEDBACK_EVENT);
+          }}
+        />
+        {/* Owner-only, English-only tool: shown when the server says so. */}
+        {summary?.admin === true && (
+          <MenuLink
+            icon="▤"
+            label="Operator console"
+            href="/app/admin"
+            onNavigate={() => setOpen(false)}
+          />
+        )}
       </div>
 
       <div className="border-t border-ink/10 py-1">

@@ -1,8 +1,10 @@
 import { retryOrphanedAssetDeletes } from "@/lib/account/erase-user-data";
 import { retryOrphanedNotebookFiles } from "@/lib/notebooks/server/store";
+import { reseedNotificationSchedules } from "@/lib/notifications/service";
 import { reportError } from "@/lib/ops/report-error";
 import { runRetention } from "@/lib/ops/retention";
-import { bearerToken, secretsMatch } from "@/lib/ops/secret";
+import { bearerToken, maintenanceSecret, secretsMatch } from "@/lib/ops/secret";
+import { retryPendingReferralRewards } from "@/lib/referral/reward";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,7 +16,7 @@ export const dynamic = "force-dynamic";
  * 401 on a wrong or missing secret.
  */
 export async function POST(req: Request) {
-  const expected = process.env.MAINTENANCE_SECRET;
+  const expected = maintenanceSecret();
   if (!expected) return new Response("Not found", { status: 404 });
 
   const presented = bearerToken(req);
@@ -26,6 +28,18 @@ export async function POST(req: Request) {
     const result = await runRetention();
     // Files of deleted accounts that could not be removed at deletion time.
     const orphanedAssets = await retryOrphanedAssetDeletes().catch((error) => {
+      reportError(error, { source: "api", route: "/api/ops/maintenance", method: "POST" });
+      return null;
+    });
+    // Invite rewards that had to wait (unverified email, Clerk or the
+    // database unreachable at the friend's first charged build).
+    const referralRewards = await retryPendingReferralRewards().catch((error) => {
+      reportError(error, { source: "api", route: "/api/ops/maintenance", method: "POST" });
+      return null;
+    });
+    // Students with a device or email on who fell off the notifications
+    // schedule (a channel briefly not configured, a failed release).
+    const notificationSchedules = await reseedNotificationSchedules().catch((error) => {
       reportError(error, { source: "api", route: "/api/ops/maintenance", method: "POST" });
       return null;
     });
@@ -42,10 +56,12 @@ export async function POST(req: Request) {
         message: "[StudyOS] retention run",
         result,
         orphanedAssets,
+        referralRewards,
+        notificationSchedules,
         orphanedNotebookFiles,
       }),
     );
-    return Response.json({ ok: true, result, orphanedAssets, orphanedNotebookFiles });
+    return Response.json({ ok: true, result, orphanedAssets, referralRewards, notificationSchedules, orphanedNotebookFiles });
   } catch (error) {
     reportError(error, { source: "api", route: "/api/ops/maintenance", method: "POST" });
     return Response.json({ ok: false }, { status: 500 });

@@ -6,7 +6,11 @@
 
 /** Lowercase and strip diacritics ("Économie" → "economie"). Length-preserving per char where possible. */
 export function fold(text: string): string {
-  return text.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  // Recomposed after the accents are stripped: decomposition alone split
+  // Japanese voiced kana (が → か + ゙) and Hangul into several characters, so
+  // folded text no longer lined up with the original and every snippet fell
+  // back to the start; it also made "か" match "が", a different sound.
+  return text.normalize("NFKD").replace(/[̀-ͯ]/g, "").normalize("NFC").toLowerCase();
 }
 
 /** Split a query into folded words (empty words dropped). */

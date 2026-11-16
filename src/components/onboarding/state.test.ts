@@ -1,5 +1,9 @@
+import { act, render, screen } from "@testing-library/react";
+import { createElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { installHintMode } from "./InstallHint";
+import { I18nProvider } from "@/lib/i18n/client";
+import { en } from "@/lib/i18n/dictionaries/en";
+import { InstallHint, installHintMode } from "./InstallHint";
 
 const mocks = vi.hoisted(() => ({
   findMany: vi.fn(),
@@ -101,5 +105,46 @@ describe("installHintMode", () => {
     expect(installHintMode({ ...env, standalone: true })).toBeNull();
     expect(installHintMode({ ...env, dismissed: true })).toBeNull();
     expect(installHintMode({ ...env, canPrompt: false })).toBeNull();
+  });
+});
+
+describe("InstallHint on an Android phone", () => {
+  it("keeps the install offer that arrived before the delayed check", async () => {
+    vi.useFakeTimers();
+    const matchMedia = window.matchMedia;
+    // A phone (coarse pointer, narrow), not the installed app.
+    window.matchMedia = ((query: string) => ({ matches: query.includes("pointer: coarse") })) as unknown as typeof window.matchMedia;
+    // Plain in-memory storage (Node's experimental one is not usable here).
+    const memory = () => {
+      const data = new Map<string, string>();
+      return {
+        getItem: (k: string) => data.get(k) ?? null,
+        setItem: (k: string, v: string) => void data.set(k, v),
+        removeItem: (k: string) => void data.delete(k),
+        clear: () => data.clear(),
+      };
+    };
+    vi.stubGlobal("localStorage", memory());
+    vi.stubGlobal("sessionStorage", memory());
+    // Second visit: the hint only shows from then on.
+    localStorage.setItem("studyos:visits", "1");
+    try {
+      // No JSX in a .ts file, and the provider's props type requires `children`.
+      // eslint-disable-next-line react/no-children-prop
+      render(createElement(I18nProvider, { locale: "en", dictionary: en, children: createElement(InstallHint) }));
+      const offer = Object.assign(new Event("beforeinstallprompt", { cancelable: true }), {
+        prompt: async () => {},
+        userChoice: Promise.resolve({ outcome: "dismissed" as const }),
+      });
+      act(() => void window.dispatchEvent(offer));
+      expect(screen.getByRole("button", { name: en.install.install })).toBeInTheDocument();
+      // The 1.5 s check for iPhones runs later and must not hide it.
+      act(() => void vi.advanceTimersByTime(2_000));
+      expect(screen.getByRole("button", { name: en.install.install })).toBeInTheDocument();
+    } finally {
+      window.matchMedia = matchMedia;
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
   });
 });

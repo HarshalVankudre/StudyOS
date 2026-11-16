@@ -38,6 +38,8 @@ export interface DeadlineReminder {
   dueDate: string;
   daysLeft: number;
   exam: boolean;
+  /** An administrative deadline (registration, re-registration, fee): a window that closes, not work. */
+  formality?: boolean;
   effortMinutes: number | null;
   target: WorkspaceLinkTarget;
 }
@@ -93,6 +95,9 @@ export function dailyPlanMessage(
 
 function deadlineTitle(r: DeadlineReminder, N: Dictionary["notifications"], locale: Locale): string {
   const vars = { title: r.title, count: r.daysLeft, day: shortDay(r.dueDate, locale) };
+  if (r.formality) {
+    return r.daysLeft === 1 ? fmt(N.msgFormalityTomorrow, vars) : plural(locale, N.msgFormalityIn, r.daysLeft, vars);
+  }
   if (r.exam) return r.daysLeft === 1 ? fmt(N.msgExamTomorrow, vars) : plural(locale, N.msgExamIn, r.daysLeft, vars);
   return r.daysLeft === 1 ? fmt(N.msgDueTomorrow, vars) : plural(locale, N.msgDueIn, r.daysLeft, vars);
 }
@@ -101,9 +106,11 @@ export function deadlineMessage(r: DeadlineReminder, dict: Dictionary, locale: L
   const N = dict.notifications;
   const parts = [
     r.context,
-    !r.exam && r.effortMinutes ? fmt(N.msgEffort, { time: formatDuration(r.effortMinutes, dict.today) }) : "",
+    !r.exam && !r.formality && r.effortMinutes
+      ? fmt(N.msgEffort, { time: formatDuration(r.effortMinutes, dict.today) })
+      : "",
   ].filter(Boolean);
-  const nudge = r.exam ? N.msgExamNudge : N.msgDeadlineNudge;
+  const nudge = r.formality ? N.msgFormalityNudge : r.exam ? N.msgExamNudge : N.msgDeadlineNudge;
   const body = parts.length > 0 ? `${parts.join(" · ")}. ${nudge}` : nudge;
   return message("deadline", locale, deadlineTitle(r, N, locale), body, workspaceHref(r.target), `deadline-${tagHash(r.key)}`);
 }
@@ -136,9 +143,65 @@ export function streakMessage(current: number, dict: Dictionary, locale: Locale)
   return message("streak", locale, fmt(N.msgStreakTitle, { count: current }), N.msgStreakBody, "/app", "streak");
 }
 
+/**
+ * The week's numbers the recap is built from: the insights page's totals for
+ * the last 7 local days, today included (lib/study/insights).
+ */
+export interface WeeklyRecap {
+  focusMinutes: number;
+  cards: number;
+  quizAnswers: number;
+  activeDays: number;
+}
+
+/** Where the recap opens: the insights page on the same 7 days. */
+export const WEEKLY_RECAP_URL = "/app/insights?period=7d";
+
+/**
+ * The weekly recap, or null after a week with no study at all (a recap of
+ * nothing would only be guilt). Leads with the strongest number (focus time
+ * when there was any, else cards, else quiz answers) in the title; the body
+ * adds the next one and the active days.
+ */
+export function weeklyRecapMessage(
+  week: WeeklyRecap,
+  localDate: string,
+  dict: Dictionary,
+  locale: Locale,
+): NotificationMessage | null {
+  const n = (value: number) => (Number.isFinite(value) && value > 0 ? Math.round(value) : 0);
+  const focus = n(week.focusMinutes);
+  const cards = n(week.cards);
+  const quiz = n(week.quizAnswers);
+  const days = n(week.activeDays);
+  if (days === 0 || focus + cards + quiz === 0) return null;
+  const N = dict.notifications;
+  const parts = [
+    focus > 0 ? fmt(N.msgWeeklyFocus, { time: formatDuration(focus, dict.today) }) : "",
+    cards > 0 ? plural(locale, N.msgWeeklyCards, cards) : "",
+    quiz > 0 ? plural(locale, N.msgWeeklyQuiz, quiz) : "",
+  ].filter(Boolean);
+  const [lead, next] = parts;
+  const details = [next, plural(locale, N.msgWeeklyDays, days)].filter(Boolean).join(" · ");
+  return message(
+    "weekly",
+    locale,
+    fmt(N.msgWeeklyTitle, { lead }),
+    fmt(N.msgWeeklyBody, { details }),
+    WEEKLY_RECAP_URL,
+    `weekly-${localDate}`,
+  );
+}
+
 export function testMessage(dict: Dictionary, locale: Locale): NotificationMessage {
   const N = dict.notifications;
   return message("test", locale, N.msgTestTitle, N.msgTestBody, "/app/settings#notifications", "test");
+}
+
+/** "Send a test email": the same shape, worded for an inbox. */
+export function testEmailMessage(dict: Dictionary, locale: Locale): NotificationMessage {
+  const E = dict.email;
+  return message("test", locale, E.testTitle, E.testBody, "/app/settings#notifications", "test-email");
 }
 
 /**

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const m = vi.hoisted(() => {
   const fn = () => vi.fn();
@@ -22,9 +22,16 @@ const m = vi.hoisted(() => {
     studyMaterial: { findMany: fn(), deleteMany: fn() },
     agentChatMessage: { findMany: fn(), deleteMany: fn() },
     studyDay: { findMany: fn(), deleteMany: fn() },
+    focusSession: { findMany: fn(), deleteMany: fn() },
     notificationPreference: { findUnique: fn(), deleteMany: fn() },
     pushSubscription: { findMany: fn(), deleteMany: fn() },
     notificationLog: { findMany: fn(), deleteMany: fn() },
+    feedback: { findMany: fn(), deleteMany: fn() },
+    pageShare: { findMany: fn(), deleteMany: fn() },
+    shareReport: { deleteMany: fn() },
+    referralCode: { findUnique: fn(), deleteMany: fn() },
+    referral: { findMany: fn(), findUnique: fn(), deleteMany: fn(), updateMany: fn() },
+    contractNotice: { findMany: fn(), updateMany: fn() },
     notebook: { findMany: fn(), deleteMany: fn() },
     notebookFolder: { findMany: fn(), deleteMany: fn() },
     notebookPage: { findMany: fn(), deleteMany: fn() },
@@ -45,6 +52,7 @@ import {
   allowDataExport,
   buildUserDataExport,
   EXPORT_CHAT_BATCH,
+  EXPORT_EXCLUDED_MODELS,
   EXPORT_LIMIT,
   EXPORT_WORKSPACE_BATCH,
   streamUserDataExport,
@@ -72,6 +80,9 @@ beforeEach(() => {
   m.subscription.findUnique.mockResolvedValue({ status: "active", currentPeriodEnd: null, stripeCustomerId: "cus_secret", stripeSubscriptionId: "sub_1", updatedAt: new Date(0) });
   m.asset.findMany.mockResolvedValue([]);
   m.studyDay.findMany.mockResolvedValue([{ workspaceId: "w1", localDate: "2026-11-11", reviews: 12 }]);
+  m.focusSession.findMany.mockResolvedValue([
+    { workspaceId: "w1", itemKey: "deadline:w1:db:essay", label: "History essay · Fall", localDate: "2026-11-11", startedAt: new Date(0), seconds: 1500, completed: true, createdAt: new Date(0) },
+  ]);
   m.calendarToken.findUnique.mockResolvedValue({ createdAt: new Date(0) });
   m.studyMaterial.findMany.mockResolvedValue([
     { id: "mat1", workspaceId: "w1", title: "Lecture 3", kind: "pdf", pages: '["Page one text"]', createdAt: new Date(0) },
@@ -85,7 +96,9 @@ beforeEach(() => {
   m.notificationPreference.findUnique.mockResolvedValue({
     timeZone: "Europe/Berlin", locale: "de", dailyEnabled: true, dailyMinute: 480, deadlineEnabled: true,
     deadlineMinute: 1080, deadlineLeads: "[7,2,1]", examLeads: "[14,7,2,1]", streakEnabled: false,
-    quietEnabled: true, quietStart: 1320, quietEnd: 420, createdAt: new Date(0), updatedAt: new Date(0),
+    weeklyEnabled: true, weeklyDay: 0, weeklyMinute: 1080,
+    quietEnabled: true, quietStart: 1320, quietEnd: 420,
+    emailEnabled: true, emailBouncedAt: null, createdAt: new Date(0), updatedAt: new Date(0),
   });
   m.pushSubscription.findMany.mockResolvedValue([{ label: "iPhone", lastSuccessAt: null, createdAt: new Date(0) }]);
   m.notificationLog.findMany.mockResolvedValue([
@@ -101,6 +114,88 @@ beforeEach(() => {
   m.calendarFeed.findMany.mockResolvedValue([
     { workspaceId: "w1", databaseId: "d1", label: "canvas.uni.edu", platform: "canvas", settings: '{"series":[]}', lastSyncedAt: null, lastSummary: null, createdAt: new Date(0) },
   ]);
+  m.feedback.findMany.mockResolvedValue([
+    { kind: "idea", message: "Dark mode for flashcards", pagePath: "/app/w1", locale: "en", contactOk: true, status: "new", createdAt: new Date(0) },
+  ]);
+  m.pageShare.findMany.mockResolvedValue([
+    { workspaceId: "w1", pageId: "p1", createdAt: new Date(0), revokedAt: null, viewCount: 7, lastViewedAt: new Date(0) },
+  ]);
+  m.referralCode.findUnique.mockResolvedValue({ code: "K7MPQ2XR", createdAt: new Date(0) });
+  m.contractNotice.findMany.mockResolvedValue([]);
+  m.referral.findMany.mockResolvedValue([
+    { createdAt: new Date(1000), rewardedAt: new Date(2000) },
+    { createdAt: new Date(3000), rewardedAt: null },
+  ]);
+  m.referral.findUnique.mockResolvedValue({ status: "rewarded", createdAt: new Date(0), rewardedAt: new Date(500) });
+});
+
+it("exports the student's invite link, the friends they invited by date only, and whether they were invited", async () => {
+  const data = await buildUserDataExport("user_1");
+  expect(data.referrals).toEqual({
+    inviteCode: { code: "K7MPQ2XR", createdAt: new Date(0).toISOString() },
+    friendsInvited: 2,
+    invited: [
+      { joinedAt: new Date(1000).toISOString(), rewardedAt: new Date(2000).toISOString() },
+      { joinedAt: new Date(3000).toISOString(), rewardedAt: null },
+    ],
+    invitedBy: { status: "rewarded", invitedAt: new Date(0).toISOString(), rewardedAt: new Date(500).toISOString() },
+  });
+  // Never the other side's identity: no user ids, no inviter's code. Only
+  // friends who joined (pending or rewarded), never refused attempts.
+  const made = m.referral.findMany.mock.calls[0][0];
+  expect(made.where).toEqual({ referrerId: "user_1", status: { in: ["pending", "rewarded"] } });
+  expect(made.select).toEqual({ createdAt: true, rewardedAt: true });
+  const by = m.referral.findUnique.mock.calls[0][0];
+  expect(by.where).toEqual({ refereeId: "user_1" });
+  // Nor why an invite was refused (a fraud check's verdict).
+  for (const field of ["referrerId", "refereeId", "code", "rejectReason"]) expect(by.select).not.toHaveProperty(field);
+  expect(m.referralCode.findUnique.mock.calls[0][0].where).toEqual({ userId: "user_1" });
+});
+
+it("says only “not eligible” about a refused invite the student came through", async () => {
+  m.referral.findUnique.mockResolvedValue({ status: "rejected", createdAt: new Date(0), rewardedAt: null });
+  const data = await buildUserDataExport("user_1");
+  expect(data.referrals.invitedBy).toEqual({ status: "not_eligible", invitedAt: new Date(0).toISOString(), rewardedAt: null });
+  expect(JSON.stringify(data.referrals)).not.toMatch(/same_email|mailbox_reused|reject/);
+});
+
+it("exports no invites for a student who has none", async () => {
+  m.referralCode.findUnique.mockResolvedValue(null);
+  m.referral.findMany.mockResolvedValue([]);
+  m.referral.findUnique.mockResolvedValue(null);
+  const data = await buildUserDataExport("user_1");
+  expect(data.referrals).toEqual({ inviteCode: null, friendsInvited: 0, invited: [], invitedBy: null });
+});
+
+it("exports the pages the student shared, scoped to them, never the link's token", async () => {
+  const data = await buildUserDataExport("user_1");
+  expect(data.sharedPages).toEqual([
+    expect.objectContaining({ workspaceId: "w1", pageId: "p1", revokedAt: null, viewCount: 7 }),
+  ]);
+  const query = m.pageShare.findMany.mock.calls[0][0];
+  expect(query.where).toEqual({ userId: "user_1" });
+  expect(query.select).not.toHaveProperty("token");
+  // Reports other people sent about the page are not part of the student's export.
+  expect(EXPORT_EXCLUDED_MODELS).toContain("ShareReport");
+});
+
+it("exports the student's focus sessions with their study records, scoped to them", async () => {
+  const data = await buildUserDataExport("user_1");
+  expect(data.study.focusSessions).toEqual([
+    expect.objectContaining({ label: "History essay · Fall", localDate: "2026-11-11", seconds: 1500, completed: true }),
+  ]);
+  const query = m.focusSession.findMany.mock.calls[0][0];
+  expect(query.where).toEqual({ userId: "user_1" });
+  // The browser's idempotency id is internal: not part of the export.
+  expect(query.select).not.toHaveProperty("clientId");
+});
+
+it("exports the feedback the student sent, scoped to them", async () => {
+  const data = await buildUserDataExport("user_1");
+  expect(data.feedback).toEqual([
+    expect.objectContaining({ kind: "idea", message: "Dark mode for flashcards", pagePath: "/app/w1", status: "new" }),
+  ]);
+  expect(m.feedback.findMany.mock.calls[0][0].where).toEqual({ userId: "user_1" });
 });
 
 describe("buildUserDataExport", () => {
@@ -211,16 +306,57 @@ it("exports notification choices, devices and the sent-log, never a push endpoin
     expect(model.mock.calls[0][0].where).toEqual({ userId: "user_1" });
   }
   expect(m.notificationPreference.findUnique.mock.calls[0][0].where).toEqual({ userId: "user_1" });
+  // The weekly recap choice is the student's data too.
+  expect(m.notificationPreference.findUnique.mock.calls[0][0].select).toMatchObject({
+    weeklyEnabled: true,
+    weeklyDay: true,
+    weeklyMinute: true,
+  });
+  expect(data.notifications.preferences).toEqual(
+    expect.objectContaining({ weeklyEnabled: true, weeklyDay: 0, weeklyMinute: 1080 }),
+  );
+  // The email switch and a recorded rejection too; the address is never stored, so never exported from here.
+  expect(m.notificationPreference.findUnique.mock.calls[0][0].select).toMatchObject({ emailEnabled: true, emailBouncedAt: true });
+  expect(data.notifications.preferences).toEqual(expect.objectContaining({ emailEnabled: true, emailBouncedAt: null }));
+  expect(Object.keys(m.notificationPreference.findUnique.mock.calls[0][0].select).some((k) => /address/i.test(k))).toBe(false);
 });
 
 describe("allowDataExport", () => {
+  // The claim runs in an interactive transaction holding an advisory lock.
+  const order: string[] = [];
+  beforeEach(() => {
+    order.length = 0;
+    const tx = {
+      $queryRaw: vi.fn(async () => {
+        order.push("lock");
+        return [];
+      }),
+      usageEvent: m.usageEvent,
+    };
+    m.$transaction.mockImplementation(async (fn: (t: unknown) => unknown) => fn(tx));
+    m.usageEvent.count.mockImplementation(async () => {
+      order.push("count");
+      return 0;
+    });
+  });
+  afterEach(() => {
+    m.$transaction.mockReset();
+    m.usageEvent.count.mockReset();
+  });
+
   it("records an export under the limit and refuses past it", async () => {
-    m.usageEvent.count.mockResolvedValue(0);
     m.usageEvent.create.mockResolvedValue({});
     expect(await allowDataExport("user_1")).toBe(true);
     expect(m.usageEvent.create).toHaveBeenCalledWith({ data: { userId: "user_1", kind: "data_export" } });
     m.usageEvent.count.mockResolvedValue(EXPORT_LIMIT.max);
     expect(await allowDataExport("user_1")).toBe(false);
+  });
+
+  it("counts only after taking the user's lock, inside one transaction", async () => {
+    m.usageEvent.create.mockResolvedValue({});
+    await allowDataExport("user_1");
+    expect(m.$transaction).toHaveBeenCalledWith(expect.any(Function), expect.anything());
+    expect(order).toEqual(["lock", "count"]);
   });
 });
 
@@ -317,7 +453,17 @@ describe("eraseUserData", () => {
     expect(m.storeDelete).toHaveBeenCalledTimes(2);
     expect(m.$transaction).toHaveBeenCalledTimes(1);
     // Every user-owned model (schema-coverage.test.ts checks none is missing).
-    expect(m.$transaction.mock.calls[0][0]).toHaveLength(24);
+    expect(m.$transaction.mock.calls[0][0]).toHaveLength(32);
+    // Withdrawal and cancellation notices are legal records: kept, unlinked from the account.
+    expect(m.contractNotice.updateMany).toHaveBeenCalledWith({ where: { userId: "user_1" }, data: { userId: null } });
+    // The invite link and the invites the student made go; the invite they
+    // came through is anonymised (kept for the operator's evidence).
+    expect(m.referralCode.deleteMany).toHaveBeenCalledWith({ where: { userId: "user_1" } });
+    expect(m.referral.deleteMany).toHaveBeenCalledWith({ where: { referrerId: "user_1" } });
+    expect(m.referral.updateMany).toHaveBeenCalledWith({ where: { refereeId: "user_1" }, data: { refereeId: null } });
+    // Shared page links, and the reports about them, go with the account.
+    expect(m.pageShare.deleteMany).toHaveBeenCalledWith({ where: { userId: "user_1" } });
+    expect(m.shareReport.deleteMany).toHaveBeenCalledWith({ where: { share: { userId: "user_1" } } });
     // Credits reserved by requests in flight go with the account.
     expect(m.creditHold.deleteMany).toHaveBeenCalledWith({ where: { userId: "user_1" } });
     expect(m.agentChatMessage.deleteMany).toHaveBeenCalledWith({ where: { userId: "user_1" } });
@@ -326,7 +472,9 @@ describe("eraseUserData", () => {
     expect(m.pushSubscription.deleteMany).toHaveBeenCalledWith({ where: { userId: "user_1" } });
     expect(m.notificationPreference.deleteMany).toHaveBeenCalledWith({ where: { userId: "user_1" } });
     expect(m.notificationLog.deleteMany).toHaveBeenCalledWith({ where: { userId: "user_1" } });
+    expect(m.feedback.deleteMany).toHaveBeenCalledWith({ where: { userId: "user_1" } });
     expect(m.studyDay.deleteMany).toHaveBeenCalledWith({ where: { userId: "user_1" } });
+    expect(m.focusSession.deleteMany).toHaveBeenCalledWith({ where: { userId: "user_1" } });
     expect(m.workspace.deleteMany).toHaveBeenCalledWith({ where: { ownerId: "user_1" } });
     expect(m.subscription.deleteMany).toHaveBeenCalledWith({ where: { userId: "user_1" } });
   });

@@ -14,6 +14,7 @@ vi.mock("next/headers", () => ({
 }));
 
 import { getLocale } from "./server";
+import { isLocale } from "./config";
 
 describe("getLocale", () => {
   const saved = process.env.STUDYOS_GEO_COUNTRY;
@@ -46,6 +47,17 @@ describe("getLocale", () => {
   });
 
   it("falls back to English", async () => {
+    expect(await getLocale()).toBe("en");
+  });
+
+  // Review round 4: `in` accepted Object.prototype keys, so a cookie or an
+  // Accept-Language tag "constructor" became the locale and crashed the render.
+  it("never takes an object prototype key as a locale", async () => {
+    for (const key of ["constructor", "toString", "__proto__", "hasOwnProperty"]) {
+      expect(isLocale(key), key).toBe(false);
+    }
+    request.cookie = "constructor";
+    request.headers = new Headers({ "accept-language": "toString, valueOf;q=0.5" });
     expect(await getLocale()).toBe("en");
   });
 });

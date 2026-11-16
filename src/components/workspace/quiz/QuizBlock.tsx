@@ -52,7 +52,7 @@ export function QuizBlock({ pageId, block }: { pageId: string; block: QuizBlockD
   const secondary =
     "flex min-h-11 items-center gap-1.5 rounded-lg border border-line-strong bg-card px-3 text-sm font-semibold text-ink transition hover:bg-hover";
   const primary =
-    "flex min-h-11 items-center gap-1.5 rounded-lg bg-lime px-4 text-sm font-semibold text-lime-on transition hover:bg-lime-deep";
+    "flex min-h-11 items-center gap-1.5 rounded-lg bg-lime px-4 text-sm font-semibold text-lime-on transition hover:bg-lime-hover";
 
   return (
     <div className="my-4 overflow-hidden rounded-xl border border-line-strong bg-card shadow-card" data-testid="quiz-block">
@@ -146,7 +146,7 @@ export function QuizBlock({ pageId, block }: { pageId: string; block: QuizBlockD
 function Chip({ label, tone }: { label: string; tone?: "score" | "progress" }) {
   const cls =
     tone === "score"
-      ? "bg-lime-faint text-lime-deep ring-lime/30"
+      ? "bg-lime-faint text-lime-deep ring-lime-deep/30"
       : tone === "progress"
         ? "bg-amber-400/15 text-amber-300 ring-amber-500/40 [.light_&]:text-amber-700"
         : "bg-hover text-ink-soft ring-line-strong";

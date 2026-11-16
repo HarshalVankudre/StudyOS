@@ -18,7 +18,7 @@ export const PILL_CLASSES: Record<string, string> = {
   lime: "bg-lime-400/15 text-lime-300 ring-1 ring-inset ring-lime-400/30 [.light_&]:bg-lime-500/15 [.light_&]:text-lime-800",
   green: "bg-emerald-400/15 text-emerald-300 ring-1 ring-inset ring-emerald-400/30 [.light_&]:bg-emerald-500/10 [.light_&]:text-emerald-700",
   emerald: "bg-emerald-400/15 text-emerald-300 ring-1 ring-inset ring-emerald-400/30 [.light_&]:bg-emerald-500/10 [.light_&]:text-emerald-700",
-  teal: "bg-lime-faint text-lime ring-1 ring-inset ring-lime/30",
+  teal: "bg-lime-faint text-lime-deep ring-1 ring-inset ring-lime-deep/30",
   cyan: "bg-cyan-400/15 text-cyan-300 ring-1 ring-inset ring-cyan-400/30 [.light_&]:bg-cyan-500/10 [.light_&]:text-cyan-700",
   sky: "bg-sky-400/15 text-sky-300 ring-1 ring-inset ring-sky-400/30 [.light_&]:bg-sky-500/10 [.light_&]:text-sky-700",
   blue: "bg-blue-400/15 text-blue-300 ring-1 ring-inset ring-blue-400/30 [.light_&]:bg-blue-500/10 [.light_&]:text-blue-700",

@@ -25,7 +25,7 @@ export function CatchUpBanner({
   return (
     <section
       aria-label={T.welcomeTitle}
-      className="flex flex-col gap-3 rounded-xl border border-lime/40 bg-lime-faint p-3 text-start sm:p-4"
+      className="flex flex-col gap-3 rounded-xl border border-lime-deep/40 bg-lime-faint p-3 text-start sm:p-4"
     >
       <div className="flex items-start gap-3">
         <HeartHandshake className="mt-0.5 size-5 shrink-0 text-lime-deep" aria-hidden />
@@ -40,7 +40,7 @@ export function CatchUpBanner({
       <div className="flex flex-wrap gap-2">
         <button
           onClick={onSpread}
-          className="min-h-11 rounded-lg bg-lime px-4 text-sm font-semibold text-lime-on transition hover:bg-lime-deep"
+          className="min-h-11 rounded-lg bg-lime px-4 text-sm font-semibold text-lime-on transition hover:bg-lime-hover"
         >
           {T.spreadOut}
         </button>

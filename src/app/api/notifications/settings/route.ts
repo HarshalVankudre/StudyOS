@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import { pushConfigured } from "@/lib/notifications/config";
+import { notificationsConfigured } from "@/lib/notifications/config";
 import { noStore, readJsonBody, sameOrigin } from "@/lib/notifications/http";
 import { getNotificationSettings, saveNotificationPreferences } from "@/lib/notifications/service";
 import { reportError } from "@/lib/ops/report-error";
@@ -9,9 +9,11 @@ export const dynamic = "force-dynamic";
 
 /**
  * The signed-in student's notification settings:
- *   GET  -> { configured, publicKey, preferences, devices, agentEnabled, dailyCap }
+ *   GET  -> { configured, publicKey, preferences, devices, agentEnabled, dailyCap, email }
  *   PUT  { ...partial preferences } -> { preferences }
- * `configured: false` (no VAPID keys) tells the UI to hide every notification control.
+ * `configured: false` (neither VAPID keys nor SMTP) tells the UI to hide every
+ * notification control; `publicKey: null` hides the push part, `email: null`
+ * the email part. The choices apply to both channels.
  */
 export async function GET() {
   const { userId } = await auth();
@@ -28,7 +30,7 @@ export async function PUT(req: Request) {
   if (!sameOrigin(req)) return Response.json({ error: "forbidden" }, { status: 403 });
   const { userId } = await auth();
   if (!userId) return Response.json({ error: "unauthorized" }, { status: 401 });
-  if (!pushConfigured()) return Response.json({ error: "not_found" }, { status: 404 });
+  if (!notificationsConfigured()) return Response.json({ error: "not_found" }, { status: 404 });
   const body = await readJsonBody(req);
   if (!body) return Response.json({ error: "invalid" }, { status: 400 });
   try {

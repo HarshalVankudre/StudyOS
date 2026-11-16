@@ -84,6 +84,7 @@ import Home from "@/app/page";
 import TermsPage from "@/app/terms/page";
 import SettingsPage from "@/app/app/settings/page";
 import CreditsPage from "@/app/app/credits/page";
+import HelpArticlePage from "@/app/help/[slug]/page";
 import "@/lib/stripe";
 import { clearProPriceCache } from "@/lib/plan-pricing";
 
@@ -165,6 +166,31 @@ describe("pages follow the price list", () => {
     expect(page).toContain("313 trial credits, once");
     expect(page).toContain("Pro adds 1,234 credits for each paid month");
     for (const real of REAL) expect(page).not.toMatch(real);
+  });
+
+  test("help centre", async () => {
+    const article = async (slug: string) =>
+      text(render(await HelpArticlePage({ params: Promise.resolve({ slug }) })).container);
+
+    const plans = await article("plans-and-credits");
+    for (const expected of [
+      "Building a workspace costs 37 credits",
+      "An assistant message costs 4 credits",
+      "never more than 31 credits on Free or 107 on Pro",
+      "A study kit costs 11 credits for each part",
+      "up to 2 a day",
+      "New accounts get 313 credits once",
+      "Pro adds 1,234 credits for every paid month",
+      "A credit pack adds 1,111 credits once",
+    ]) {
+      expect(plans).toContain(expected);
+    }
+    for (const real of REAL) expect(plans).not.toMatch(real);
+
+    const start = await article("getting-started");
+    expect(start).toContain("A build costs 37 credits");
+    expect(start).toContain("New accounts get 313 trial credits once");
+    for (const real of REAL) expect(start).not.toMatch(real);
   });
 
   test("credits", async () => {

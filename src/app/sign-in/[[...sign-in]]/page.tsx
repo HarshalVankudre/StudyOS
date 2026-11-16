@@ -1,6 +1,7 @@
 import { SignIn } from "@clerk/nextjs";
 import Link from "next/link";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { BrandMark } from "@/components/BrandMark";
 
 export default function Page() {
   return (
@@ -9,8 +10,8 @@ export default function Page() {
         href="/"
         className="mb-8 flex items-center gap-1.5 font-display text-2xl font-extrabold tracking-tight text-ink"
       >
+        <BrandMark />
         StudyOS
-        <span className="mb-3 h-2 w-2 rounded-full bg-lime" aria-hidden />
       </Link>
       {/* After auth, students land in the app, not on the marketing page. A
           redirect_url from a protected page still wins (Clerk: force props,

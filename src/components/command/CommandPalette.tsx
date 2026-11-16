@@ -3,17 +3,22 @@
 import {
   ArrowLeft,
   BookOpen,
+  CalendarDays,
+  ChartColumn,
   Check,
   CircleHelp,
   Database,
   Download,
+  FileArchive,
   FileText,
   Folder,
+  GraduationCap,
   Keyboard,
   Languages,
   Layers,
   ListChecks,
   Loader2,
+  MessageSquare,
   Moon,
   NotebookPen,
   PenLine,
@@ -23,11 +28,13 @@ import {
   Sun,
   Sunrise,
   Text,
+  Timer,
   X,
 } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { useCallback, useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
+import { toast } from "sonner";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { setLocale } from "@/lib/i18n/actions";
 import { useI18n } from "@/lib/i18n/client";
@@ -39,14 +46,17 @@ import {
   emit,
   modKey,
   OPEN_EXPORT_EVENT,
+  OPEN_FEEDBACK_EVENT,
+  OPEN_NOTION_IMPORT_EVENT,
   OPEN_STUDY_HUB_EVENT,
   SHOW_GETTING_STARTED_EVENT,
+  START_FOCUS_EVENT,
 } from "./events";
 
 const DEBOUNCE_MS = 180;
 
 /** Top-level /app routes that are not a workspace id. */
-const APP_SECTIONS = new Set(["agents", "credits", "settings", "notebooks"]);
+const APP_SECTIONS = new Set(["admin", "agenda", "agents", "credits", "grades", "insights", "notebooks", "settings"]);
 
 /** The workspace id when the current route is /app/<id>, else null. */
 export function workspaceIdFromPath(pathname: string | null): string | null {
@@ -57,14 +67,21 @@ export function workspaceIdFromPath(pathname: string | null): string | null {
 
 type ActionId =
   | "newWorkspace"
+  | "notionImport"
   | "today"
+  | "agenda"
+  | "focus"
+  | "insights"
+  | "grades"
   | "settings"
   | "theme"
   | "language"
   | "studyHub"
   | "shortcuts"
   | "export"
-  | "gettingStarted";
+  | "gettingStarted"
+  | "help"
+  | "feedback";
 
 interface Item {
   id: string;
@@ -109,6 +126,13 @@ export function CommandPalette({
 }) {
   const { dict, t, locale, plural } = useI18n();
   const C = dict.command;
+  const feedbackLabel = dict.feedback.open;
+  const notionImportLabel = dict.notionImport.paletteAction;
+  const focusLabel = dict.focus.paletteAction;
+  const insightsLabel = dict.insights.paletteAction;
+  const gradesLabel = dict.gradesOverview.paletteAction;
+  const agendaLabel = dict.agenda.paletteAction;
+  const helpLabel = dict.help.paletteAction;
   const router = useRouter();
   const pathname = usePathname();
   const { resolvedTheme, setTheme } = useTheme();
@@ -167,7 +191,50 @@ export function CommandPalette({
     const dark = resolvedTheme !== "light";
     const list: { id: ActionId; label: string; icon: React.ReactNode; run: () => void; show: boolean }[] = [
       { id: "newWorkspace", label: C.actions.newWorkspace, icon: <Plus className="h-4 w-4" aria-hidden />, run: () => go("/generate"), show: true },
+      {
+        id: "notionImport",
+        label: notionImportLabel,
+        icon: <FileArchive className="h-4 w-4" aria-hidden />,
+        run: () => {
+          close();
+          // The dialog lives in the /app layout (NotionImportHost).
+          emit(OPEN_NOTION_IMPORT_EVENT);
+        },
+        show: true,
+      },
       { id: "today", label: C.actions.today, icon: <Sunrise className="h-4 w-4" aria-hidden />, run: () => go("/app"), show: true },
+      {
+        id: "agenda",
+        label: agendaLabel,
+        icon: <CalendarDays className="h-4 w-4" aria-hidden />,
+        run: () => go("/app/agenda"),
+        show: true,
+      },
+      {
+        id: "focus",
+        label: focusLabel,
+        icon: <Timer className="h-4 w-4" aria-hidden />,
+        run: () => {
+          close();
+          // The focus timer lives in the /app layout (FocusTimerProvider).
+          emit(START_FOCUS_EVENT);
+        },
+        show: true,
+      },
+      {
+        id: "insights",
+        label: insightsLabel,
+        icon: <ChartColumn className="h-4 w-4" aria-hidden />,
+        run: () => go("/app/insights"),
+        show: true,
+      },
+      {
+        id: "grades",
+        label: gradesLabel,
+        icon: <GraduationCap className="h-4 w-4" aria-hidden />,
+        run: () => go("/app/grades"),
+        show: true,
+      },
       {
         id: "studyHub",
         label: C.actions.studyHub,
@@ -230,9 +297,21 @@ export function CommandPalette({
         },
         show: inWorkspace,
       },
+      // The help centre is a public page (/help): answers without writing to anyone.
+      { id: "help", label: helpLabel, icon: <CircleHelp className="h-4 w-4" aria-hidden />, run: () => go("/help"), show: true },
+      {
+        id: "feedback",
+        label: feedbackLabel,
+        icon: <MessageSquare className="h-4 w-4" aria-hidden />,
+        run: () => {
+          close();
+          emit(OPEN_FEEDBACK_EVENT);
+        },
+        show: true,
+      },
     ];
     return list.filter((a) => a.show);
-  }, [C.actions, close, go, inWorkspace, locale, onShowShortcuts, resolvedTheme, setTheme]);
+  }, [agendaLabel, C.actions, close, feedbackLabel, focusLabel, go, gradesLabel, helpLabel, insightsLabel, inWorkspace, locale, notionImportLabel, onShowShortcuts, resolvedTheme, setTheme]);
 
   const items: Item[] = useMemo(() => {
     const q = fold(query.trim());
@@ -248,7 +327,14 @@ export function CommandPalette({
           close();
           if (l.code === locale) return;
           startTransition(async () => {
-            await setLocale(l.code as Locale);
+            try {
+              await setLocale(l.code as Locale);
+            } catch {
+              // Offline, or the app was updated meanwhile: thrown inside this
+              // transition it would replace the page with the error screen.
+              toast.error(dict.safety.actionFailed);
+              return;
+            }
             router.refresh();
           });
         },
@@ -286,7 +372,7 @@ export function CommandPalette({
         run: () => go(hit.href),
       };
     }
-  }, [actions, close, dict.editor.untitled, go, locale, mode, query, results, router]);
+  }, [actions, close, dict.editor.untitled, dict.safety.actionFailed, go, locale, mode, query, results, router]);
 
   // Keep the highlighted row valid and visible.
   const activeIndex = items.length === 0 ? -1 : Math.min(active, items.length - 1);
@@ -448,7 +534,7 @@ export function CommandPalette({
                       <span dir="auto" className="block truncate font-medium text-ink">{item.label}</span>
                       {item.detail && <span className="block truncate text-xs text-ink-faint">{item.detail}</span>}
                     </span>
-                    {item.selected && <Check className="h-4 w-4 shrink-0 text-lime" aria-hidden />}
+                    {item.selected && <Check className="h-4 w-4 shrink-0 text-lime-deep" aria-hidden />}
                   </div>
                 ))}
               </div>

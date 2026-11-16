@@ -16,7 +16,20 @@ interface Row {
   updatedAt: Date;
 }
 
-const db = vi.hoisted(() => ({ rows: [] as Row[] }));
+interface ShareRow {
+  id: string;
+  userId: string;
+  workspaceId: string;
+  pageId: string;
+  revokedAt: Date | null;
+}
+
+const db = vi.hoisted(() => ({
+  rows: [] as Row[],
+  deleted: new Set<string>(),
+  shares: [] as ShareRow[],
+  shareReads: 0,
+}));
 const mocks = vi.hoisted(() => ({ auth: vi.fn(), report: vi.fn() }));
 
 type Where = Record<string, unknown>;
@@ -77,6 +90,33 @@ vi.mock("@/lib/db", () => ({
         return { count: before - db.rows.length };
       }),
     },
+    deletedAccount: {
+      findUnique: vi.fn(async ({ where }: { where: { userId: string } }) =>
+        db.deleted.has(where.userId) ? { userId: where.userId } : null,
+      ),
+    },
+    pageShare: {
+      findMany: vi.fn(async ({ where }: { where: Partial<ShareRow> }) => {
+        db.shareReads += 1;
+        return db.shares
+          .filter((s) => s.workspaceId === where.workspaceId && s.userId === where.userId && s.revokedAt === null)
+          .map((s) => ({ id: s.id, pageId: s.pageId }));
+      }),
+      updateMany: vi.fn(
+        async ({ where, data }: { where: { id?: { in: string[] }; workspaceId?: string; userId?: string }; data: { revokedAt: Date } }) => {
+          const hits = db.shares.filter(
+            (s) =>
+              s.revokedAt === null &&
+              (!where.id || where.id.in.includes(s.id)) &&
+              (!where.workspaceId || s.workspaceId === where.workspaceId) &&
+              (!where.userId || s.userId === where.userId),
+          );
+          for (const s of hits) s.revokedAt = data.revokedAt;
+          return { count: hits.length };
+        },
+      ),
+    },
+    $transaction: vi.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
   },
 }));
 
@@ -90,6 +130,7 @@ import {
   listWorkspaces,
   parseStoredWorkspace,
   restoreWorkspace,
+  saveNewWorkspace,
   saveWorkspace,
   trashWorkspace,
   updateWorkspaceWith,
@@ -120,7 +161,58 @@ function seed(id: string, extra: Partial<Row> = {}) {
 
 beforeEach(() => {
   db.rows = [];
+  db.deleted.clear();
+  db.shares = [];
+  db.shareReads = 0;
   mocks.auth.mockResolvedValue({ userId: "user-1" });
+  mocks.report.mockReset();
+});
+
+const share = (id: string, workspaceId: string, pageId: string, userId = "user-1"): ShareRow => ({
+  id,
+  userId,
+  workspaceId,
+  pageId,
+  revokedAt: null,
+});
+const revoked = () => db.shares.filter((s) => s.revokedAt !== null).map((s) => s.id).sort();
+
+describe("share links follow the workspace", () => {
+  it("moving a workspace to the trash revokes its links; restoring does not bring them back", async () => {
+    seed("a");
+    seed("b");
+    db.shares = [share("s_a1", "a", "p1"), share("s_a2", "a", "p2"), share("s_b", "b", "p1")];
+    expect(await trashWorkspace("a")).toBe(true);
+    expect(revoked()).toEqual(["s_a1", "s_a2"]);
+    expect(await restoreWorkspace("a")).toBe(true);
+    expect(revoked()).toEqual(["s_a1", "s_a2"]);
+  });
+
+  it("a save that removes a shared page revokes that page's link only", async () => {
+    seed("a");
+    db.shares = [share("s_kept", "a", "p1"), share("s_gone", "a", "p_deleted")];
+    const doc = ws("a");
+    expect((await saveWorkspace("a", doc, 1)).status).toBe("saved");
+    expect(revoked()).toEqual(["s_gone"]);
+  });
+
+  it("costs one read of the workspace's active links per save, and nothing more without one", async () => {
+    seed("a");
+    expect((await saveWorkspace("a", ws("a"), 1)).status).toBe("saved");
+    expect(db.shareReads).toBe(1);
+    expect(revoked()).toEqual([]);
+  });
+
+  it("a refused save touches no link, and a failing link check does not fail the save", async () => {
+    seed("a");
+    db.shares = [share("s_gone", "a", "p_deleted")];
+    expect((await saveWorkspace("a", ws("a"), 5)).status).toBe("conflict");
+    expect(revoked()).toEqual([]);
+    const { prisma } = await import("@/lib/db");
+    vi.mocked(prisma.pageShare.findMany).mockRejectedValueOnce(new Error("db hiccup"));
+    expect((await saveWorkspace("a", ws("a"), 1)).status).toBe("saved");
+    expect(mocks.report).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("tolerant load", () => {
@@ -244,6 +336,19 @@ describe("duplicate", () => {
   it("does not duplicate a trashed workspace", async () => {
     seed("a", { deletedAt: new Date() });
     expect(await duplicateWorkspace("a", (n) => n)).toBeNull();
+  });
+});
+
+describe("saveNewWorkspace after account deletion", () => {
+  it("saves for a live account", async () => {
+    const id = await saveNewWorkspace(ws("x"));
+    expect(db.rows.map((r) => r.id)).toEqual([id]);
+  });
+
+  it("refuses once the account is tombstoned and writes nothing", async () => {
+    db.deleted.add("user-1");
+    await expect(saveNewWorkspace(ws("x"))).rejects.toThrow("Account was deleted");
+    expect(db.rows).toEqual([]);
   });
 });
 

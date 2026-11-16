@@ -74,7 +74,7 @@ export function ViewToolbar({
       aria-controls={`${baseId}-${key}`}
       aria-label={count ? `${label} (${count})` : label}
       className={`inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-sm transition ${
-        panel === key || count ? "bg-lime-faint text-lime" : "text-ink-soft hover:bg-hover hover:text-ink"
+        panel === key || count ? "bg-lime-faint text-lime-deep" : "text-ink-soft hover:bg-hover hover:text-ink"
       }`}
     >
       <Icon className="h-4 w-4" aria-hidden />

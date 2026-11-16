@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
 import { buildAppCsp, isValidBucketName } from "./src/lib/ops/csp";
+import { parseAppOrigin, websiteRedirects } from "./src/lib/ops/site-split";
 
 /**
  * Content-Security-Policy for app pages: see src/lib/ops/csp.ts for every
@@ -19,6 +20,11 @@ const APP_CSP = buildAppCsp({
   clerkPublishableKey: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
   clerkProxyUrl: process.env.NEXT_PUBLIC_CLERK_PROXY_URL,
 });
+
+// Set only on the website deployment (public pages on Vercel): where the app
+// itself lives. Every app-only path is then redirected there; see
+// src/lib/ops/site-split.ts. A malformed value fails the build.
+const APP_ORIGIN = parseAppOrigin(process.env.STUDYOS_APP_ORIGIN);
 
 // One id per build (a Docker build argument, the Cloud Build id). With it,
 // Next.js notices a browser tab that still runs the previous build and
@@ -62,12 +68,12 @@ const nextConfig: NextConfig = {
   // in standalone.
   serverExternalPackages: ["unpdf", "fflate"],
   experimental: {
-    // The proxy (src/proxy.ts) buffers request bodies and silently cuts them
-    // off at this size. The largest upload is a PDF imported into a notebook
-    // (MAX_PDF_BYTES, 30 MB, lib/notebooks/model.ts: under Cloud Run's 32 MiB
-    // HTTP/1 request cap) plus multipart overhead;
-    // syllabus and material uploads stay at 10 MB. Every route still reads
-    // its own body with its own, smaller cap (lib/import/upload-body.ts).
+    // The proxy buffers request bodies and silently cuts them off at this
+    // size (10 MB by default), so it must fit the largest upload: a PDF
+    // imported into a notebook, up to 30 MB plus multipart overhead
+    // (MAX_PDF_BYTES, lib/notebooks/model.ts), ahead of a Notion export
+    // (25 MB, /api/import/notion); the syllabus and material uploads stay at
+    // 10 MB. Every route still caps its own body (lib/import/upload-body.ts).
     proxyClientMaxBodySize: "31mb",
     serverActions: {
       // Autosave sends the whole workspace document. Workspaces may be up to
@@ -76,6 +82,9 @@ const nextConfig: NextConfig = {
       // 2 MB cap itself and the editor warns before sending anything larger.
       bodySizeLimit: "3mb",
     },
+  },
+  async redirects() {
+    return websiteRedirects(APP_ORIGIN);
   },
   async headers() {
     return [
@@ -97,7 +106,11 @@ const nextConfig: NextConfig = {
         ],
       },
       {
-        source: "/:path((?!embed(?:/|$)).*)",
+        // Not on /embed/* (its own nonce CSP) nor on a shared page's images
+        // (/s/<token>/asset/<id>: the route sends "sandbox; default-src
+        // 'none'", and Next.js drops a route's header when a config rule
+        // already set it).
+        source: "/:path((?!embed(?:/|$)|s/[^/]+/asset/).*)",
         headers: [{ key: "Content-Security-Policy", value: APP_CSP }],
       },
     ];

@@ -4,7 +4,8 @@
  * on a fake clock, and nothing depends on the server's time zone.
  *
  * A student has at most three moments a day (the daily plan, deadline
- * reminders, the streak check). Each is a local wall-clock time on a local
+ * reminders, the streak check), plus the weekly recap on one chosen weekday
+ * when they turned it on. Each is a local wall-clock time on a local
  * day, turned into an instant with the zone's rules for THAT day, so daylight
  * saving changes are handled: a time that does not exist (the hour skipped in
  * spring) moves forward by the gap, and a time that happens twice (the hour
@@ -13,16 +14,22 @@
  * Quiet hours: a moment that falls inside them waits until they end, if that
  * is still the same local day; otherwise it is skipped. The streak check never
  * waits (a "your streak is still open" at 7 the next morning would be wrong).
+ *
+ * Lateness: a moment is still sent up to GRACE_MS after it, except the weekly
+ * recap, which stays due until the end of its local day (a missed run sends
+ * it late the same evening). Nothing is ever sent after local midnight.
  */
 import { addDays, dayDiff } from "@/lib/workspace/view-logic";
 
-export const NOTIFICATION_KINDS = ["daily", "deadline", "streak"] as const;
+export const NOTIFICATION_KINDS = ["daily", "deadline", "streak", "weekly"] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 
 /** Local time of the streak check (20:00): late in the day, before most quiet hours. */
 export const STREAK_MINUTE = 20 * 60;
 /** A moment is still sent this long after it was due (a late or skipped tick). */
 export const GRACE_MS = 90 * 60 * 1000;
+/** The furthest ahead a next moment can be: the weekly recap, a week away. */
+const LOOKAHEAD_DAYS = 7;
 
 export interface ScheduleSettings {
   timeZone: string;
@@ -31,6 +38,10 @@ export interface ScheduleSettings {
   deadlineEnabled: boolean;
   deadlineMinute: number;
   streakEnabled: boolean;
+  weeklyEnabled: boolean;
+  /** 0 = Sunday … 6 = Saturday, in the student's zone. */
+  weeklyDay: number;
+  weeklyMinute: number;
   quietEnabled: boolean;
   quietStart: number;
   quietEnd: number;
@@ -148,7 +159,13 @@ export function afterQuietHours(
 
 // ---- Slots ------------------------------------------------------------------
 
-function slotMinute(kind: NotificationKind, s: ScheduleSettings): number | null {
+/** The weekday (0 = Sunday … 6 = Saturday) of a local YYYY-MM-DD day. */
+export function weekdayOf(localDate: string): number {
+  const [y, m, d] = localDate.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+}
+
+function slotMinute(kind: NotificationKind, s: ScheduleSettings, localDate: string): number | null {
   switch (kind) {
     case "daily":
       return s.dailyEnabled ? afterQuietHours(s.dailyMinute, s, true) : null;
@@ -156,7 +173,19 @@ function slotMinute(kind: NotificationKind, s: ScheduleSettings): number | null 
       return s.deadlineEnabled ? afterQuietHours(s.deadlineMinute, s, true) : null;
     case "streak":
       return s.streakEnabled ? afterQuietHours(STREAK_MINUTE, s, false) : null;
+    case "weekly":
+      return s.weeklyEnabled && weekdayOf(localDate) === s.weeklyDay
+        ? afterQuietHours(s.weeklyMinute, s, true)
+        : null;
   }
+}
+
+/** How long after its moment a kind is still sent (see "Lateness" above). */
+function stillDue(slot: Slot, t: number): boolean {
+  const late = t - slot.at.getTime();
+  if (late < 0) return false;
+  // The weekly recap: any time later the same local day (slots are of today).
+  return slot.kind === "weekly" || late <= GRACE_MS;
 }
 
 /** The moments of one local day, in time order. */
@@ -164,7 +193,7 @@ export function slotsForDay(localDate: string, settings: ScheduleSettings): Slot
   const tz = safeTimeZone(settings.timeZone);
   const out: Slot[] = [];
   for (const kind of NOTIFICATION_KINDS) {
-    const minute = slotMinute(kind, settings);
+    const minute = slotMinute(kind, settings, localDate);
     if (minute === null) continue;
     out.push({ kind, localDate, at: zonedInstant(localDate, minute, tz) });
   }
@@ -172,22 +201,22 @@ export function slotsForDay(localDate: string, settings: ScheduleSettings): Slot
 }
 
 /**
- * Today's moments due at `now`: passed, but by no more than the grace period.
- * A moment of yesterday is never sent after midnight (its content would be
- * about the wrong day).
+ * Today's moments due at `now`: passed, but by no more than the grace period
+ * (the weekly recap: by no more than the rest of the day). A moment of
+ * yesterday is never sent after midnight (its content would be about the
+ * wrong day).
  */
 export function dueSlots(settings: ScheduleSettings, now: Date): Slot[] {
   const today = localClock(now, safeTimeZone(settings.timeZone)).date;
   const t = now.getTime();
-  return slotsForDay(today, settings).filter(
-    (slot) => slot.at.getTime() <= t && t - slot.at.getTime() <= GRACE_MS,
-  );
+  return slotsForDay(today, settings).filter((slot) => stillDue(slot, t));
 }
 
 /** The first moment strictly after `now` (null when everything is off). */
 export function nextSlotAfter(settings: ScheduleSettings, now: Date): Date | null {
   const today = localClock(now, safeTimeZone(settings.timeZone)).date;
-  for (let i = 0; i <= 2; i++) {
+  // Today plus a full week: the weekly recap may be seven days away.
+  for (let i = 0; i <= LOOKAHEAD_DAYS; i++) {
     const next = slotsForDay(addDays(today, i), settings).find((slot) => slot.at.getTime() > now.getTime());
     if (next) return next.at;
   }

@@ -156,7 +156,7 @@ export function FlashcardsBlock({
           {stats.due > 0 ? (
             <button
               onClick={() => setSession("review")}
-              className="flex min-h-11 items-center gap-1.5 rounded-lg bg-lime px-4 text-sm font-semibold text-lime-on transition hover:bg-lime-deep"
+              className="flex min-h-11 items-center gap-1.5 rounded-lg bg-lime px-4 text-sm font-semibold text-lime-on transition hover:bg-lime-hover"
             >
               <Play className="size-4" aria-hidden />
               {t(S.studyDue, { count: stats.due })}
@@ -164,7 +164,7 @@ export function FlashcardsBlock({
           ) : studyable > 0 ? (
             <button
               onClick={() => setSession("practice")}
-              className="flex min-h-11 items-center gap-1.5 rounded-lg bg-lime px-4 text-sm font-semibold text-lime-on transition hover:bg-lime-deep"
+              className="flex min-h-11 items-center gap-1.5 rounded-lg bg-lime px-4 text-sm font-semibold text-lime-on transition hover:bg-lime-hover"
             >
               <Dumbbell className="size-4" aria-hidden />
               {T.practice}
@@ -172,7 +172,7 @@ export function FlashcardsBlock({
           ) : (
             <button
               onClick={startEditingWithCard}
-              className="flex min-h-11 items-center gap-1.5 rounded-lg bg-lime px-4 text-sm font-semibold text-lime-on transition hover:bg-lime-deep"
+              className="flex min-h-11 items-center gap-1.5 rounded-lg bg-lime px-4 text-sm font-semibold text-lime-on transition hover:bg-lime-hover"
             >
               <Plus className="size-4" aria-hidden />
               {T.addCard}
@@ -265,7 +265,7 @@ export function FlashcardsBlock({
 function Chip({ label, tone }: { label: string; tone?: "due" | "mature" }) {
   const cls =
     tone === "due"
-      ? "bg-lime-faint text-lime-deep ring-lime/30"
+      ? "bg-lime-faint text-lime-deep ring-lime-deep/30"
       : tone === "mature"
         ? "bg-emerald-400/10 text-emerald-600 ring-emerald-400/30 dark:text-emerald-300"
         : "bg-hover text-ink-soft ring-line-strong";

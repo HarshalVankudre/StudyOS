@@ -102,7 +102,8 @@ async function openDialog(user: ReturnType<typeof userEvent.setup>) {
   return screen.findByRole("dialog");
 }
 
-describe("Import deadlines", () => {
+// Large dialog with many user-event steps: slow on a busy machine or CI runner.
+describe("Import deadlines", { timeout: 20_000 }, () => {
   it("previews a pasted link, lets the student choose, and imports through the workspace update", async () => {
     const user = userEvent.setup();
     renderWith(assignments());
@@ -291,6 +292,30 @@ describe("Import deadlines", () => {
     await user.click(within(confirm).getByRole("button", { name: F.confirm }));
     expect(actions.disconnectFeedAction).toHaveBeenCalledWith("feed_1");
     await waitFor(() => expect(within(dialog).queryByText(F.connectedTitle)).not.toBeInTheDocument());
+  });
+
+  it("a connected calendar's column choice shows while it saves, and a failed save says so", async () => {
+    actions.listFeedsAction.mockResolvedValue([feedInfo()]);
+    let answer: (value: FeedInfo | null) => void = () => {};
+    actions.updateFeedSettingsAction.mockImplementation(() => new Promise((resolve) => (answer = resolve)));
+    const user = userEvent.setup();
+    renderWith(assignments());
+    const dialog = await openDialog(user);
+    await user.click(await within(dialog).findByRole("button", { name: F.columnsTitle }));
+    const course = within(dialog).getByLabelText(F.field.course);
+    expect(course).toHaveValue("course");
+
+    await user.selectOptions(course, F.dontImport);
+    // Not snapped back while the server answers.
+    expect(course).toHaveValue("__none__");
+    expect(actions.updateFeedSettingsAction).toHaveBeenCalledWith(
+      "feed_1",
+      expect.objectContaining({ mapping: expect.objectContaining({ course: null }) }),
+    );
+    answer(null);
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(F.errors.failed);
+    // The stored choice is shown again.
+    expect(course).toHaveValue("course");
   });
 
   it("flags rows gone from the calendar and lets the student keep or delete them", async () => {

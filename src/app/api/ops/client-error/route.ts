@@ -1,5 +1,5 @@
 import { isSameOriginRequest } from "@/lib/http/same-origin";
-import { clientAddress } from "@/lib/ops/client-ip";
+import { clientRateLimitKey } from "@/lib/ops/client-ip";
 import { reportError } from "@/lib/ops/report-error";
 import { createMemoryRateLimiter } from "@/lib/ops/memory-rate-limit";
 
@@ -24,9 +24,10 @@ const str = (v: unknown, max: number) =>
 export async function POST(req: Request) {
   if (!isSameOriginRequest(req)) return new Response(null, { status: 403 });
 
-  // The entry our own proxies appended (see lib/ops/client-ip); earlier
-  // entries are client-supplied and could be forged to dodge the limit.
-  const client = clientAddress(req.headers);
+  // The entry our own proxies appended, an IPv6 client by its /64 (see
+  // lib/ops/client-ip); earlier entries are client-supplied and could be
+  // forged to dodge the limit.
+  const client = clientRateLimitKey(req.headers);
   if (!perClient(client) || !instanceLimit("all")) {
     return new Response(null, { status: 429 });
   }

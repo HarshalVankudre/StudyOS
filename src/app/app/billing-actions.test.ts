@@ -6,6 +6,8 @@ const m = vi.hoisted(() => ({
   portalCreate: vi.fn(),
   subFindUnique: vi.fn(),
   pricing: vi.fn(),
+  packPricing: vi.fn(),
+  locale: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -28,7 +30,9 @@ vi.mock("@/lib/db", () => ({
   prisma: { subscription: { findUnique: m.subFindUnique } },
 }));
 // What the pricing page offers (from the Stripe Prices, lib/plan-pricing.ts).
-vi.mock("@/lib/plan-pricing", () => ({ getProPricing: m.pricing }));
+vi.mock("@/lib/plan-pricing", () => ({ getProPricing: m.pricing, getCreditPackPricing: m.packPricing }));
+// The student's app language (lib/i18n/server.ts reads the cookie and headers).
+vi.mock("@/lib/i18n/server", () => ({ getLocale: m.locale }));
 vi.mock("@/lib/stripe", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/stripe")>();
   return {
@@ -65,6 +69,9 @@ beforeEach(() => {
   m.pricing.mockImplementation(async () => ({
     offered: { month: true, year: Boolean(process.env.STRIPE_PRICE_PRO_ANNUAL) },
   }));
+  // No STRIPE_PRICE_CREDIT_PACK: the inline USD price.
+  m.packPricing.mockResolvedValue({ priceId: null, offered: true });
+  m.locale.mockResolvedValue("en");
   vi.spyOn(console, "error").mockImplementation(() => {});
   vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_x");
   vi.stubEnv("STRIPE_PRICE_PRO", "price_month");
@@ -87,7 +94,15 @@ describe("startCheckoutAction", () => {
       email: "a@b.c",
       priceId: "price_month",
       origin: "https://studyos.test",
+      locale: "en",
     });
+  });
+
+  it("opens Checkout in the student's app language", async () => {
+    m.locale.mockResolvedValue("de");
+    m.createProCheckout.mockResolvedValue({ url: "https://checkout.stripe.test/cs_de" });
+    await redirectOf(startCheckoutAction(form()));
+    expect(m.createProCheckout).toHaveBeenCalledWith(expect.objectContaining({ locale: "de" }));
   });
 
   it("uses the annual price when interval=year and it is configured", async () => {
@@ -142,6 +157,30 @@ describe("buyCreditsAction", () => {
   it("redirects to Stripe on success", async () => {
     m.createCreditPackCheckout.mockResolvedValue({ url: "https://checkout.stripe.test/cs_3" });
     expect(await redirectOf(buyCreditsAction())).toBe("https://checkout.stripe.test/cs_3");
+    // No Stripe pack price: the inline USD price, in the student's language.
+    expect(m.createCreditPackCheckout).toHaveBeenCalledWith({
+      userId: "user_1",
+      email: "a@b.c",
+      origin: "https://studyos.test",
+      priceId: null,
+      locale: "en",
+    });
+  });
+
+  it("charges the Stripe pack price the pages show, in the student's language", async () => {
+    m.packPricing.mockResolvedValue({ priceId: "price_pack_eur", offered: true });
+    m.locale.mockResolvedValue("fr");
+    m.createCreditPackCheckout.mockResolvedValue({ url: "https://checkout.stripe.test/cs_4" });
+    await redirectOf(buyCreditsAction());
+    expect(m.createCreditPackCheckout).toHaveBeenCalledWith(
+      expect.objectContaining({ priceId: "price_pack_eur", locale: "fr" }),
+    );
+  });
+
+  it("never falls back to another price when the configured Stripe pack price is not offered", async () => {
+    m.packPricing.mockResolvedValue({ priceId: null, offered: false });
+    expect(await redirectOf(buyCreditsAction())).toBe("/app/credits?billing=unavailable");
+    expect(m.createCreditPackCheckout).not.toHaveBeenCalled();
   });
 
   it("shows a friendly error when Stripe fails", async () => {

@@ -3,80 +3,94 @@
 
 @custom-variant dark (&:is(.dark *));
 
-:root {
-  /* StudyOS — dark, modern software-product identity. */
-  --bg: #0b0b0a;
-  --surface: #131312;
-  --surface-2: #17171599;
-  --text: #f4f3ef;
-  --text-soft: #a8a89e;
-  --text-faint: #898981;
-  --border-c: rgba(255, 255, 255, 0.08);
-  --border-strong-c: rgba(255, 255, 255, 0.14);
-  --hover-c: rgba(255, 255, 255, 0.05);
-
-  --accent: #2dd4bf;
-  --accent-on: #0b0b0a;
-  --accent-deep: #14b8a6;
-  --accent-faint: rgba(45, 212, 191, 0.16);
-  --accent-glow: rgba(45, 212, 191, 0.35);
-
-  --elev-1: 0 1px 1px rgba(0, 0, 0, 0.25);
-  --elev-2: 0 12px 32px -16px rgba(0, 0, 0, 0.6);
-  --elev-3: 0 24px 60px -30px rgba(0, 0, 0, 0.8), 0 0 60px -20px var(--accent-glow);
-
-  --paper: var(--bg);
-  --ink: var(--text);
-  --ink-soft: var(--text-soft);
-  --ink-faint: var(--text-faint);
-  --line: var(--border-c);
-  --line-strong: var(--border-strong-c);
-  --lime: var(--accent);
-  --lime-deep: var(--accent-deep);
-  --lime-on: var(--accent-on);
-  --lime-faint: var(--accent-faint);
-
-  --radius: 0.625rem;
-  --background: #0b0b0a;
-  --foreground: #f4f3ef;
-  --card: #171715;
-  --card-foreground: #f4f3ef;
-  --popover: #1c1c1a;
-  --popover-foreground: #f4f3ef;
-  --primary: #2dd4bf;
-  --primary-foreground: #0b0b0a;
-  --secondary: #131312;
-  --secondary-foreground: #f4f3ef;
-  --muted: #17171599;
-  --muted-foreground: #a8a89e;
-  --accent-bg: rgba(255, 255, 255, 0.06);
-  --accent-foreground: #f4f3ef;
-  --destructive: #f87171;
-  --border: rgba(255, 255, 255, 0.08);
-  --input: rgba(255, 255, 255, 0.14);
-  --ring: #2dd4bf;
+/* Anthropic Serif, Sans and Mono (variable fonts, one file per style). The
+   files sit in public/fonts/anthropic and are kept out of git and out of the
+   deployed image (.gitignore, .dockerignore, .gcloudignore): they are
+   Anthropic's own typefaces, so shipping them needs a licence. Where a file
+   is missing, the browser falls through to the next family in the stacks
+   below (Source Serif 4, Geist, Geist Mono). */
+@font-face {
+  font-family: "Anthropic Serif";
+  src: url("/fonts/anthropic/AnthropicSerif-Roman.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Anthropic Serif";
+  src: url("/fonts/anthropic/AnthropicSerif-Italic.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Anthropic Sans";
+  src: url("/fonts/anthropic/AnthropicSans-Roman.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Anthropic Sans";
+  src: url("/fonts/anthropic/AnthropicSans-Italic.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Anthropic Mono";
+  src: url("/fonts/anthropic/AnthropicMono-Roman.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Anthropic Mono";
+  src: url("/fonts/anthropic/AnthropicMono-Italic.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: italic;
+  font-display: swap;
 }
 
-.light {
-  --bg: #fafafa;
-  --surface: #ffffff;
-  --surface-2: #f4f4f5;
-  --text: #18181b;
-  --text-soft: #52525b;
-  --text-faint: #6b6b74; /* zinc-500 (#71717a) fell to 4.4:1 on --surface-2; this keeps 4.5:1 there as on the page and cards */
-  --border-c: rgba(24, 24, 27, 0.1);
-  --border-strong-c: rgba(24, 24, 27, 0.16);
-  --hover-c: rgba(24, 24, 27, 0.04);
+:root {
+  /* StudyOS: warm paper, ink and one bright accent.
+       Paper  #faf9f5   the page          Ink    #141413   text
+       Lime   #c8f24a   primary buttons, progress, "done"
+       Matcha #eaf9d6 · Cloud #e8f1ff · Heather #f1e9ff · Oat #f4ecd9
+                        soft fills for tags, notices and tinted cards
+     Headings are a bold serif, everything else a sans. Buttons and tags are
+     pills, cards have large soft corners and hairline borders, nothing glows.
+     Light is the default; the `.dark` class on <html> (next-themes) swaps in
+     the dark ramp below. */
+  --bg: #faf9f5;
+  --surface: #f6f4ee;
+  --surface-2: #f1efe7;
+  --text: #141413;
+  --text-soft: #4d4c48;
+  --text-faint: #6b6a64; /* keeps 4.5:1 on --surface-2 as well as on the page */
+  --border-c: #e7e4da;
+  --border-strong-c: #d6d3c8;
+  --hover-c: rgba(20, 20, 19, 0.05);
 
-  --accent: #0d9488;
-  --accent-on: #0b0b0a;
-  --accent-deep: #0f766e;
-  --accent-faint: rgba(13, 148, 136, 0.12);
-  --accent-glow: rgba(13, 148, 136, 0.25);
+  /* Lime is a fill: it always carries ink text, never the other way round.
+     --accent-deep is the accent for text, icons, outlines and focus rings,
+     where lime itself would be unreadable on paper. */
+  --accent: #c8f24a;
+  --accent-on: #141413;
+  --accent-hover: #b8e62e;
+  --accent-deep: #3f6212;
+  --accent-faint: #eaf9d6;
+  --accent-glow: transparent;
 
-  --elev-1: 0 1px 1px rgba(24, 24, 27, 0.04);
-  --elev-2: 0 4px 16px -8px rgba(24, 24, 27, 0.12);
-  --elev-3: 0 18px 48px -30px rgba(24, 24, 27, 0.26);
+  --tint-matcha: #eaf9d6;
+  --tint-cloud: #e8f1ff;
+  --tint-heather: #f1e9ff;
+  --tint-oat: #f4ecd9;
+
+  /* Flat by default. Only floating layers (menus, dialogs) get a soft shadow. */
+  --elev-1: none;
+  --elev-2: 0 1px 2px rgba(20, 20, 19, 0.04);
+  --elev-3: 0 18px 48px -24px rgba(20, 20, 19, 0.22);
 
   --paper: var(--bg);
   --ink: var(--text);
@@ -89,24 +103,73 @@
   --lime-on: var(--accent-on);
   --lime-faint: var(--accent-faint);
 
-  --background: #fafafa;
-  --foreground: #18181b;
-  --card: #ffffff;
-  --card-foreground: #18181b;
-  --popover: #ffffff;
-  --popover-foreground: #18181b;
-  --primary: #0d9488;
-  --primary-foreground: #0b0b0a;
-  --secondary: #f4f4f5;
-  --secondary-foreground: #18181b;
-  --muted: #f4f4f5;
-  --muted-foreground: #52525b;
-  --accent-bg: rgba(24, 24, 27, 0.05);
-  --accent-foreground: #18181b;
-  --destructive: #e11d48;
-  --border: rgba(24, 24, 27, 0.1);
-  --input: rgba(24, 24, 27, 0.16);
-  --ring: #0d9488;
+  --radius: 0.875rem;
+  --background: #faf9f5;
+  --foreground: #141413;
+  --card: #fdfdfb;
+  --card-foreground: #141413;
+  --popover: #fdfdfb;
+  --popover-foreground: #141413;
+  --primary: #c8f24a;
+  --primary-foreground: #141413;
+  --secondary: #f1efe7;
+  --secondary-foreground: #141413;
+  --muted: #f1efe7;
+  --muted-foreground: #6b6a64;
+  --accent-bg: rgba(20, 20, 19, 0.05);
+  --accent-foreground: #141413;
+  --destructive: #c4352b;
+  --border: #e7e4da;
+  --input: #d6d3c8;
+  --ring: #3f6212;
+}
+
+.dark {
+  --bg: #141413;
+  --surface: #1a1a18;
+  --surface-2: #20201e;
+  --text: #f5f4ee;
+  --text-soft: #b7b5ab;
+  --text-faint: #9a988f;
+  --border-c: rgba(250, 249, 245, 0.09);
+  --border-strong-c: rgba(250, 249, 245, 0.16);
+  --hover-c: rgba(250, 249, 245, 0.06);
+
+  /* On the dark page lime reads well as text too. */
+  --accent: #c8f24a;
+  --accent-on: #141413;
+  --accent-hover: #d6f772;
+  --accent-deep: #c8f24a;
+  --accent-faint: rgba(200, 242, 74, 0.14);
+  --accent-glow: transparent;
+
+  --tint-matcha: rgba(200, 242, 74, 0.13);
+  --tint-cloud: rgba(125, 170, 255, 0.16);
+  --tint-heather: rgba(180, 150, 255, 0.16);
+  --tint-oat: rgba(240, 214, 160, 0.13);
+
+  --elev-1: none;
+  --elev-2: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --elev-3: 0 24px 60px -30px rgba(0, 0, 0, 0.8);
+
+  --background: #141413;
+  --foreground: #f5f4ee;
+  --card: #1c1c1a;
+  --card-foreground: #f5f4ee;
+  --popover: #232321;
+  --popover-foreground: #f5f4ee;
+  --primary: #c8f24a;
+  --primary-foreground: #141413;
+  --secondary: #20201e;
+  --secondary-foreground: #f5f4ee;
+  --muted: #20201e;
+  --muted-foreground: #b7b5ab;
+  --accent-bg: rgba(250, 249, 245, 0.07);
+  --accent-foreground: #f5f4ee;
+  --destructive: #f87171;
+  --border: rgba(250, 249, 245, 0.09);
+  --input: rgba(250, 249, 245, 0.16);
+  --ring: #c8f24a;
 }
 
 @theme inline {
@@ -129,10 +192,13 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  /* Soft corners everywhere: 12 / 14 / 16 / 20 / 24 / 28 px. */
   --radius-sm: calc(var(--radius) - 2px);
   --radius-md: var(--radius);
   --radius-lg: calc(var(--radius) + 2px);
   --radius-xl: calc(var(--radius) + 6px);
+  --radius-2xl: calc(var(--radius) + 10px);
+  --radius-3xl: calc(var(--radius) + 14px);
 
   /* StudyOS brand utilities (the whole app relies on these) */
   --color-paper: var(--paper);
@@ -143,19 +209,32 @@
   --color-ink-faint: var(--ink-faint);
   --color-line: var(--line);
   --color-line-strong: var(--line-strong);
+  /* lime: the fill · lime-hover: its hover · lime-on: text on it
+     lime-deep: the accent as text, icon, outline · lime-faint: matcha fill */
   --color-lime: var(--lime);
+  --color-lime-hover: var(--accent-hover);
   --color-lime-deep: var(--lime-deep);
   --color-lime-on: var(--accent-on);
   --color-lime-faint: var(--accent-faint);
   --color-hover: var(--hover-c);
 
+  /* Soft fills for tags, notices and tinted cards (theme-aware) */
+  --color-matcha: var(--tint-matcha);
+  --color-cloud: var(--tint-cloud);
+  --color-heather: var(--tint-heather);
+  --color-oat: var(--tint-oat);
+
   /* dark-mode-aware elevation */
   --shadow-card: var(--elev-2);
   --shadow-pop: var(--elev-3);
 
-  --font-sans: var(--font-hanken);
-  --font-mono: var(--font-jetbrains);
-  --font-display: var(--font-newsreader);
+  /* Serif for headings (`font-display`), sans for everything else, mono for
+     code. The Anthropic families come first; the others are the fallbacks
+     loaded in app/layout.tsx. */
+  --font-sans: "Anthropic Sans", var(--font-geist), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-display: "Anthropic Serif", var(--font-source-serif), Georgia, "Times New Roman", serif;
+  --font-serif: "Anthropic Serif", var(--font-source-serif), Georgia, "Times New Roman", serif;
+  --font-mono: "Anthropic Mono", var(--font-geist-mono), ui-monospace, "SF Mono", Consolas, monospace;
 }
 
 @layer base {
@@ -169,7 +248,7 @@
     background: var(--accent);
     color: var(--accent-on);
   }
-  /* Thin, ink-tinted scrollbars to match the editorial chrome */
+  /* Thin, neutral scrollbars that stay out of the way */
   * {
     scrollbar-width: thin;
     scrollbar-color: var(--border-strong-c) transparent;
@@ -187,9 +266,82 @@
 }
 
 body {
-  font-family: var(--font-hanken), ui-sans-serif, system-ui, -apple-system,
-    sans-serif;
+  font-family: "Anthropic Sans", var(--font-geist), ui-sans-serif, system-ui,
+    -apple-system, sans-serif;
   transition: background 0.4s ease, color 0.4s ease;
+}
+
+/* Headings are the bold serif at its natural spacing: this face is already
+   compact, and tighter tracking makes words run together. Unlayered on
+   purpose, so it holds whichever weight or tracking utility sits next to
+   `font-display`. */
+.font-display {
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
+/* No typewriter-style labels. Screens across the app mark small labels as
+   `font-mono uppercase tracking-[...]`; they are set as plain sans text in
+   the case they were written in, so they read as quiet labels, not as
+   shouted captions. Code keeps the mono face (it is never uppercase). */
+.font-mono.uppercase {
+  font-family: var(--font-sans);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* The public pages (landing, pricing, legal) are laid out for a window about
+   1400px wide. On a larger display they would sit as a narrow column of small
+   type in the middle of an empty page, so the whole page is scaled up in
+   steps: every size, gap and border together, which keeps the proportions
+   the design was drawn with. The app's own screens are not scaled: a
+   workspace should use a big monitor for more content, not for bigger content. */
+@media (min-width: 1700px) {
+  .site-scale {
+    zoom: 1.12;
+  }
+}
+@media (min-width: 1900px) {
+  .site-scale {
+    zoom: 1.25;
+  }
+}
+@media (min-width: 2200px) {
+  .site-scale {
+    zoom: 1.4;
+  }
+}
+@media (min-width: 2500px) {
+  .site-scale {
+    zoom: 1.5;
+  }
+}
+@media (min-width: 3000px) {
+  .site-scale {
+    zoom: 1.8;
+  }
+}
+@media (min-width: 3600px) {
+  .site-scale {
+    zoom: 2.15;
+  }
+}
+@media print {
+  .site-scale {
+    zoom: 1;
+  }
+}
+
+/* Buttons are pills. Screens across the app write their buttons as
+   `inline-flex ... rounded-md|lg|xl`; this turns every one of them into a
+   pill without touching each screen. Cards and rows are not inline-flex, so
+   they keep their own corners. */
+:is(button, a):where([class*="inline-flex"]):is(
+    [class~="rounded-md"],
+    [class~="rounded-lg"],
+    [class~="rounded-xl"]
+  ) {
+  border-radius: 9999px;
 }
 
 :where(a, button, input, textarea, select, [tabindex]):focus-visible {
@@ -268,7 +420,7 @@ body {
 @media print {
   /* Light tokens on paper, whatever the screen theme. */
   :root,
-  .light {
+  .dark {
     --bg: #ffffff;
     --surface: #ffffff;
     --surface-2: #ffffff;
@@ -278,7 +430,9 @@ body {
     --border-c: rgba(0, 0, 0, 0.15);
     --border-strong-c: rgba(0, 0, 0, 0.25);
     --hover-c: transparent;
-    --accent: #0f766e;
+    --accent: #111111;
+    --accent-on: #ffffff;
+    --accent-deep: #333333;
     --accent-faint: transparent;
     --card: #ffffff;
     --background: #ffffff;

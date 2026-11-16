@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { auth } from "@clerk/nextjs/server";
 import Link from "next/link";
-import { Bot, NotebookPen } from "lucide-react";
 import { getDailyStudyAgentOverview } from "@/lib/agents/daily-study/store";
 import { isPro, reconcileCheckoutSession } from "@/lib/billing";
 import { getCreditBalance } from "@/lib/credits";
@@ -11,15 +10,24 @@ import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { AccountMenu } from "@/components/account/AccountMenu";
 import { CreditChip } from "@/components/account/CreditChip";
+import { LowCreditsNotice } from "@/components/account/LowCreditsNotice";
 import { Toaster } from "@/components/ui/sonner";
 import { TodayPlan } from "@/components/today/TodayPlan";
 import { SearchButton } from "@/components/command/SearchButton";
 import { loadDemoAction } from "./actions";
+import { getFocusSummary } from "./focus-actions";
 import { manageBillingAction } from "./billing-actions";
 import { isBillingConfigured } from "@/lib/stripe";
+import { isLowBalance } from "@/lib/credits-info";
+import { getProPricing } from "@/lib/plan-pricing";
+import { referralsEnabled } from "@/lib/referral/config";
 import { DeleteWorkspaceButton } from "./DeleteWorkspaceButton";
+import { LoadDemoButton } from "./LoadDemoButton";
+import { NotionImportButton } from "@/components/import/NotionImportButton";
 import { TrashList } from "./TrashList";
 import { DailyAgentBootstrap } from "./agents/DailyAgentBootstrap";
+import { BrandMark } from "@/components/BrandMark";
+import { AppNav } from "@/components/AppNav";
 
 export async function generateMetadata(): Promise<Metadata> {
   const { dict } = await getI18n();
@@ -39,21 +47,27 @@ export default async function AppHome({
   if (sp.session_id) await reconcileCheckoutSession(sp.session_id);
 
   const { userId } = await auth();
-  const [pro, workspaces, trash, credits, agent, { dict, t, locale, dir }] = await Promise.all([
+  const [pro, workspaces, trash, credits, agent, focus, { dict, t, locale, dir }] = await Promise.all([
     isPro(),
     listWorkspaces(),
     listTrashedWorkspaces(),
     userId ? getCreditBalance(userId) : Promise.resolve(0),
     getDailyStudyAgentOverview(),
+    // Focus minutes in the zone the daily plan uses (null if they cannot be read).
+    getFocusSummary(),
     getI18n(),
   ]);
   // Without payments switched on there is nothing to upgrade to yet.
   const billing = isBillingConfigured();
   const A = dict.app;
-  const Agent = dict.agentCenter;
   const promptExample = dict.generate.describe.placeholder;
   // A new student starts with the generator; everyone else starts with Today.
   const hasWorkspaces = workspaces.length > 0;
+  // A low balance gets a note with the ways to get more (packs and invites on
+  // the credits page, Pro for a Free student while it is on sale). Stripe's
+  // price is only looked up when the note can show.
+  const lowNote = isLowBalance(credits) && (billing || referralsEnabled());
+  const showPro = lowNote && billing && !pro && (await getProPricing().catch(() => null))?.offered.month === true;
 
   return (
     <main className="min-h-screen bg-paper text-ink antialiased">
@@ -63,15 +77,15 @@ export default async function AppHome({
         planLocalDate={agent.plan?.localDate ?? null}
         planningLabel={dict.today.planning}
       />
-      <header className="sticky top-0 z-40 border-b border-line bg-surface/95 backdrop-blur-md">
+      <header className="sticky top-0 z-40 border-b border-line bg-paper/90 backdrop-blur-md">
         <div className="mx-auto max-w-5xl px-4 py-3.5 sm:px-7">
           <div className="flex items-center justify-between gap-3">
             <Link
               href="/"
-              className="flex shrink-0 items-center gap-1.5 font-display text-lg font-extrabold tracking-tight"
+              className="flex shrink-0 items-center gap-2 font-display text-xl"
             >
+              <BrandMark />
               StudyOS
-              <span className="mb-2 h-1.5 w-1.5 rounded-full bg-lime" aria-hidden />
             </Link>
             <div className="flex min-w-0 items-center gap-2 sm:gap-2.5">
               <div className="hidden sm:block">
@@ -85,7 +99,7 @@ export default async function AppHome({
               </div>
               {pro ? (
                 <>
-                  <span className="hidden rounded-full bg-ink px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-paper md:inline-flex">
+                  <span className="hidden rounded-full bg-lime px-3 py-1 text-xs font-semibold text-lime-on md:inline-flex">
                     {A.pro}
                   </span>
                   <form action={manageBillingAction} className="hidden lg:block">
@@ -100,29 +114,15 @@ export default async function AppHome({
               ) : billing ? (
                 <Link
                   href="/pricing"
-                  className="hidden rounded-md border border-line-strong px-3.5 py-1.5 text-sm font-semibold text-ink transition hover:bg-hover md:inline-flex"
+                  className="hidden rounded-full border border-line-strong px-4 py-1.5 text-sm font-semibold text-ink transition hover:bg-hover md:inline-flex"
                 >
                   {A.upgrade}
                 </Link>
               ) : null}
-              <Link
-                href="/app/notebooks"
-                className="hidden items-center gap-1.5 rounded-md px-2.5 py-2 text-sm font-semibold text-ink-soft transition hover:bg-hover hover:text-ink md:inline-flex"
-              >
-                <NotebookPen className="h-4 w-4" aria-hidden />
-                {dict.notebooks.nav}
-              </Link>
-              <Link
-                href="/app/agents"
-                className="hidden items-center gap-1.5 rounded-md px-2.5 py-2 text-sm font-semibold text-ink-soft transition hover:bg-hover hover:text-ink lg:inline-flex"
-              >
-                <Bot className="h-4 w-4" aria-hidden />
-                {Agent.label}
-              </Link>
               <SearchButton />
               <Link
                 href="/generate"
-                className="whitespace-nowrap rounded-md bg-ink px-3 py-2 text-[13px] font-semibold text-paper shadow-card transition hover:opacity-90 sm:px-4 sm:text-sm"
+                className="whitespace-nowrap rounded-full px-4 py-2 text-[13px] font-semibold sm:px-5 sm:text-sm bg-lime text-lime-on transition hover:bg-lime-hover"
               >
                 {A.generate}
               </Link>
@@ -137,38 +137,32 @@ export default async function AppHome({
             <div className="sm:hidden">
               <CreditChip credits={credits} locale={locale} billing={billing} />
             </div>
-            <Link
-              href="/app/notebooks"
-              className="inline-flex items-center gap-1.5 rounded-md border border-line-strong px-3 py-1.5 text-xs font-semibold text-ink transition hover:bg-hover"
-            >
-              <NotebookPen className="h-3.5 w-3.5" aria-hidden />
-              {dict.notebooks.nav}
-            </Link>
             {pro ? (
-              <span className="ml-auto rounded-full bg-ink px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-paper">
+              <span className="ml-auto rounded-full bg-lime px-3 py-1 text-xs font-semibold text-lime-on">
                 {A.pro}
               </span>
             ) : billing ? (
               <Link
                 href="/pricing"
-                className="ml-auto rounded-md border border-line-strong px-3 py-1.5 text-xs font-semibold text-ink transition hover:bg-hover"
+                className="ml-auto rounded-full border border-line-strong px-3.5 py-1.5 text-xs font-semibold text-ink transition hover:bg-hover"
               >
                 {A.upgrade}
               </Link>
             ) : null}
           </div>
+          <AppNav className="mt-3" />
         </div>
       </header>
 
       <div className="mx-auto max-w-5xl px-4 py-8 sm:px-7 sm:py-12">
         {sp.upgraded === "1" && pro && (
-          <div className="mb-6 flex items-center gap-2 rounded-md border border-line-strong bg-lime-faint px-4 py-3 text-sm font-medium text-ink">
+          <div className="mb-6 flex items-center gap-2.5 rounded-2xl bg-matcha px-4 py-3 text-sm font-medium text-ink">
             <span className="h-1.5 w-1.5 rounded-full bg-lime" aria-hidden />
             {A.upgradedBanner}
           </div>
         )}
         {sp.credits && (
-          <div className="mb-6 flex items-center gap-2 rounded-md border border-line-strong bg-lime-faint px-4 py-3 text-sm font-medium text-ink">
+          <div className="mb-6 flex items-center gap-2.5 rounded-2xl bg-matcha px-4 py-3 text-sm font-medium text-ink">
             <span className="h-1.5 w-1.5 rounded-full bg-lime" aria-hidden />
             {t(dict.credits.addedBanner, {
               added: Number(sp.credits).toLocaleString(locale),
@@ -177,30 +171,25 @@ export default async function AppHome({
           </div>
         )}
 
+        {lowNote && <LowCreditsNotice credits={credits} showPro={showPro} />}
+
         {hasWorkspaces ? (
-          <TodayPlan plan={agent.plan} dailyMinutes={agent.config.dailyMinutes} />
+          <TodayPlan plan={agent.plan} dailyMinutes={agent.config.dailyMinutes} focus={focus} />
         ) : (
           <>
             {/* Generate prompt */}
-            <section className="overflow-hidden rounded-md border border-line-strong bg-card px-5 py-5 shadow-pop sm:px-7 sm:py-6">
-              <div className="flex items-center gap-3 font-mono text-[11px] uppercase tracking-[0.16em] text-ink-faint">
-                <span className="h-px w-6 bg-line-strong" aria-hidden />
-                {A.generate}
-              </div>
-              <h1 className="mt-3 font-display text-[1.7rem] font-bold leading-tight tracking-tight">
+            <section className="overflow-hidden rounded-3xl border border-line bg-card px-6 py-7 sm:px-9 sm:py-9">
+              <h1 className="font-display text-4xl leading-tight sm:text-5xl">
                 {dict.generate.describe.title}
               </h1>
               <Link
                 href="/generate"
-                className="group mt-4 flex max-w-xl items-center gap-2.5 rounded-md border border-line-strong bg-surface-2 py-2 pe-2 ps-4 transition hover:border-ink/30"
+                className="group mt-6 flex max-w-xl items-center gap-2.5 rounded-full border border-line-strong bg-paper py-1.5 pe-1.5 ps-5 transition hover:border-ink-faint"
               >
-                <span className="font-mono text-xs text-ink-faint rtl:-scale-x-100" aria-hidden>
-                  ›
-                </span>
-                <span className="min-w-0 flex-1 truncate text-sm text-ink-soft">
+                <span className="min-w-0 flex-1 truncate text-[15px] text-ink-faint">
                   {promptExample}
                 </span>
-                <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md bg-ink px-4 py-2.5 text-[13.5px] font-semibold text-paper transition group-hover:opacity-90">
+                <span className="inline-flex min-h-11 items-center gap-1.5 whitespace-nowrap rounded-full bg-lime px-5 text-sm font-semibold text-lime-on transition group-hover:bg-lime-hover">
                   {A.generate}
                   <span className="transition group-hover:translate-x-0.5 rtl:-scale-x-100 rtl:group-hover:-translate-x-0.5" aria-hidden>
                     →
@@ -213,37 +202,33 @@ export default async function AppHome({
 
         <div className="mb-5 mt-9 flex items-end justify-between sm:mt-11">
           <div>
-            <h2 className="font-display text-[1.4rem] font-bold tracking-tight">
+            <h2 className="font-display text-3xl">
               {A.title}
             </h2>
             <p className="mt-1 text-[13.5px] text-ink-soft">{A.subtitle}</p>
           </div>
-          <span className="hidden font-mono text-[11px] text-ink-faint sm:block">
+          <span className="hidden text-sm tabular-nums text-ink-faint sm:block">
             {t(A.total, { count: workspaces.length })}
           </span>
         </div>
 
         {workspaces.length === 0 ? (
-          <div className="rounded-md border border-dashed border-line-strong bg-surface-2 p-7 text-center sm:p-12">
-            <p className="font-display text-lg font-bold text-ink">
+          <div className="rounded-3xl bg-oat p-8 text-center sm:p-14">
+            <p className="font-display text-2xl text-ink">
               {A.emptyTitle}
             </p>
             <p className="mt-1 text-sm text-ink-soft">{A.emptySubtitle}</p>
             <div className="mt-6 flex flex-wrap justify-center gap-3">
               <Link
                 href="/generate"
-                className="rounded-md bg-ink px-5 py-2.5 text-sm font-semibold text-paper shadow-card transition hover:opacity-90"
+                className="rounded-full px-6 py-3 text-sm font-semibold bg-lime text-lime-on transition hover:bg-lime-hover"
               >
                 {A.emptyGenerate}
               </Link>
               <form action={loadDemoAction}>
-                <button
-                  type="submit"
-                  className="rounded-md border border-line-strong bg-card px-5 py-2.5 text-sm font-medium text-ink transition hover:bg-hover"
-                >
-                  {A.loadDemo}
-                </button>
+                <LoadDemoButton label={A.loadDemo} />
               </form>
+              <NotionImportButton label={dict.notionImport.homeButton} className="py-3" />
             </div>
           </div>
         ) : (
@@ -252,15 +237,15 @@ export default async function AppHome({
               <div key={w.id} className="group relative">
                 <Link
                   href={`/app/${w.id}`}
-                  className="flex min-h-[172px] flex-col rounded-md border border-line bg-card p-5 shadow-card transition hover:-translate-y-0.5 hover:border-lime/40 hover:shadow-pop"
+                  className="flex min-h-[180px] flex-col rounded-3xl border border-line bg-card p-6 transition hover:-translate-y-0.5 hover:border-line-strong"
                 >
-                  <span className="flex h-[42px] w-[42px] items-center justify-center rounded-md border border-line bg-surface-2 text-xl">
+                  <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-matcha text-2xl">
                     {w.icon ?? A.fallbackIcon}
                   </span>
-                  <div className="mt-4 pe-10 font-display text-[1.05rem] font-bold text-ink">
+                  <div className="mt-4 pe-10 font-display text-xl leading-snug text-ink">
                     <bdi>{w.name}</bdi>
                   </div>
-                  <div className="mt-auto border-t border-line pt-3.5 font-mono text-[11px] text-ink-faint">
+                  <div className="mt-auto pt-4 text-[13px] text-ink-faint">
                     {t(A.updatedAt, {
                       date: new Date(w.updatedAt).toLocaleDateString(locale, { dateStyle: "medium" }),
                     })}
@@ -271,7 +256,7 @@ export default async function AppHome({
             ))}
             <Link
               href="/generate"
-              className="flex min-h-[172px] flex-col items-center justify-center gap-2.5 rounded-md border border-dashed border-line-strong bg-transparent p-5 text-ink-soft transition hover:bg-hover"
+              className="flex min-h-[180px] flex-col items-center justify-center gap-2.5 rounded-3xl border border-dashed border-line-strong bg-transparent p-6 text-ink-soft transition hover:bg-hover"
             >
               <span className="flex h-9 w-9 items-center justify-center rounded-full border border-line-strong text-xl font-light">
                 +
@@ -284,16 +269,21 @@ export default async function AppHome({
         {hasWorkspaces && (
           <Link
             href="/generate"
-            className="group mt-6 flex items-center gap-2.5 rounded-md border border-line-strong bg-card py-2 pe-2 ps-4 shadow-card transition hover:border-ink/30"
+            className="group mt-6 flex items-center gap-2.5 rounded-full border border-line-strong bg-card py-1.5 pe-1.5 ps-5 transition hover:border-ink-faint"
           >
-            <span className="font-mono text-xs text-ink-faint rtl:-scale-x-100" aria-hidden>
-              ›
-            </span>
-            <span className="min-w-0 flex-1 truncate text-sm text-ink-soft">{promptExample}</span>
-            <span className="inline-flex min-h-10 items-center gap-1.5 whitespace-nowrap rounded-md bg-ink px-4 text-[13px] font-semibold text-paper transition group-hover:opacity-90">
+            <span className="min-w-0 flex-1 truncate text-[15px] text-ink-faint">{promptExample}</span>
+            <span className="inline-flex min-h-10 items-center gap-1.5 whitespace-nowrap rounded-full bg-lime px-5 text-sm font-semibold text-lime-on transition group-hover:bg-lime-hover">
               {A.generate}
             </span>
           </Link>
+        )}
+        {hasWorkspaces && (
+          <div className="mt-3 flex justify-end">
+            <NotionImportButton
+              label={dict.notionImport.homeButton}
+              className="min-h-10 border-transparent px-3 text-[13px] text-ink-soft hover:text-ink"
+            />
+          </div>
         )}
 
         <TrashList

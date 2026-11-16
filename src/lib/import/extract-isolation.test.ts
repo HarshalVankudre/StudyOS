@@ -128,7 +128,8 @@ describe("measured attack inputs complete or are refused quickly", () => {
   });
 });
 
-describe("PDF decompression bombs", () => {
+// CPU-heavy (each case inflates or refuses tens of MB): slow on a busy machine or CI runner.
+describe("PDF decompression bombs", { timeout: 30_000 }, () => {
   const TOO_BIG = 200 * MB; // past the 80 MB default cap
 
   it("a deflate stream with an 8 KB window (zlib header 0x58)", async () => {

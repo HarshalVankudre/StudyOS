@@ -8,7 +8,13 @@
  * allowlist of primitive fields, messages are scrubbed of credential shapes and
  * truncated, and Prisma error messages (which echo query arguments, i.e.
  * workspace JSON) are replaced by their error code.
+ *
+ * Each error is also counted for the operator console's "Errors" panel
+ * (lib/ops/error-events.ts): the scrubbed message and first stack frames,
+ * grouped by fingerprint, written to the database in the background. That
+ * never throws, never delays the caller and never comes back here.
  */
+import { ERROR_EVENT_LIMITS, recordErrorEvent, type ErrorEventInput } from "./error-events";
 
 export const REPORTED_ERROR_EVENT_TYPE =
   "type.googleapis.com/google.devtools.clouderrorreporting.v1beta1.ReportedErrorEvent";
@@ -136,11 +142,23 @@ export interface ReportedErrorEntry {
   time: string;
 }
 
+/** Stack frame lines: V8 ("    at fn (file:1:2)") and Firefox/Safari ("fn@url:1:2"). */
+const FRAME_LINE = /^\s*(?:at\s|[^\s@]*@\S+:\d+:\d+$)/;
+
 export function buildErrorEntry(
   error: unknown,
   context: ErrorContext = {},
   env: Record<string, string | undefined> = process.env,
 ): ReportedErrorEntry {
+  return buildReport(error, context, env).entry;
+}
+
+/** The log entry, and the same error as the console's errors panel counts it. */
+function buildReport(
+  error: unknown,
+  context: ErrorContext,
+  env: Record<string, string | undefined>,
+): { entry: ReportedErrorEntry; event: ErrorEventInput } {
   const info = describe(error);
   const labels = cleanContext(context);
   const headline = `${info.name}: ${scrub(info.message)}`;
@@ -178,14 +196,28 @@ export function buildErrorEntry(
       functionName: String(labels.source ?? "unknown"),
     };
   }
-  return entry;
+  const frames = (info.stack?.split("\n") ?? [])
+    .filter((line) => FRAME_LINE.test(line))
+    .slice(0, ERROR_EVENT_LIMITS.sampleFrames);
+  const event: ErrorEventInput = {
+    source: labels.source,
+    route: labels.route,
+    message: headline,
+    frames: frames.length ? scrub(frames.join("\n"), ERROR_EVENT_LIMITS.maxSample) : null,
+  };
+  return { entry, event };
 }
 
 /** Report a server-side error. Never throws. */
 export function reportError(error: unknown, context: ErrorContext = {}): void {
+  let event: ErrorEventInput | null = null;
   try {
-    console.error(JSON.stringify(buildErrorEntry(error, context)));
+    const report = buildReport(error, context, process.env);
+    console.error(JSON.stringify(report.entry));
+    event = report.event;
   } catch {
     console.error('{"severity":"ERROR","message":"reportError failed"}');
   }
+  // Counted for the console's errors panel; never throws (lib/ops/error-events).
+  if (event) recordErrorEvent(event);
 }

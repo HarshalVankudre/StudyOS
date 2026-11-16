@@ -11,7 +11,10 @@ const m = vi.hoisted(() => ({
   settings: vi.fn(),
 }));
 vi.mock("@clerk/nextjs/server", () => ({ auth: async () => ({ userId: m.userId }) }));
-vi.mock("@/lib/notifications/config", () => ({ pushConfigured: () => m.configured }));
+vi.mock("@/lib/notifications/config", () => ({
+  pushConfigured: () => m.configured,
+  notificationsConfigured: () => m.configured,
+}));
 vi.mock("@/lib/notifications/service", () => ({
   addPushSubscription: m.add,
   removePushSubscriptions: m.remove,
@@ -57,6 +60,7 @@ describe("POST /api/notifications/subscriptions", () => {
       "user_1",
       expect.objectContaining({ ok: true, endpoint: "https://fcm.googleapis.com/fcm/send/abc" }),
       { timeZone: "Europe/Berlin", locale: "de", label: "iPhone" },
+      {},
     );
     // The endpoint never goes back to the browser.
     expect(JSON.stringify(await res.json())).not.toContain("fcm.googleapis.com");
@@ -67,6 +71,19 @@ describe("POST /api/notifications/subscriptions", () => {
     const res = await subscriptions.POST(json("POST", { subscription: subscription() }));
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ error: "endpoint_taken" });
+  });
+
+  it("a refresh never adds a device: an unknown endpoint answers 404", async () => {
+    m.add.mockResolvedValueOnce("unknown");
+    const res = await subscriptions.POST(
+      json("POST", { subscription: subscription(), refresh: true, replaces: "https://fcm.googleapis.com/fcm/send/old" }),
+    );
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "not_registered" });
+    expect(m.add).toHaveBeenCalledWith("user_1", expect.objectContaining({ ok: true }), expect.any(Object), {
+      refreshOnly: true,
+      replaces: "https://fcm.googleapis.com/fcm/send/old",
+    });
   });
 
   it("refuses endpoints that are not a push service", async () => {
@@ -113,5 +130,15 @@ describe("/api/notifications/settings", () => {
   it("rejects an invalid update", async () => {
     m.save.mockResolvedValue({ ok: false });
     expect((await settings.PUT(json("PUT", { dailyMinute: 5000 }))).status).toBe(400);
+  });
+
+  it("passes the weekly recap choice to the service for the signed-in student only", async () => {
+    const body = { weeklyEnabled: true, weeklyDay: 3, weeklyMinute: 1080 };
+    expect((await settings.PUT(json("PUT", body))).status).toBe(200);
+    expect(m.save).toHaveBeenCalledWith("user_1", body);
+    m.save.mockResolvedValue({ ok: false });
+    expect((await settings.PUT(json("PUT", { weeklyDay: 9 }))).status).toBe(400);
+    m.userId = null;
+    expect((await settings.PUT(json("PUT", body))).status).toBe(401);
   });
 });

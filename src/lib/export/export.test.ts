@@ -342,10 +342,33 @@ describe("markdown citations and grades", () => {
       { databases: [] },
       { today: "2026-11-12" },
     );
-    expect(md).toContain("**A:** One step\n\n*Source: Lecture 7, p. 3 — “a \*concerted\* step”*");
+    // "\\*": the single-backslash form of this string was just "*", so the
+    // test passed on the very bug it was written to catch.
+    expect(md).toContain("**A:** One step\n\n*Source: Lecture 7, p. 3 — “a \\*concerted\\* step”*");
     expect(md).toContain("**A:** x\n");
     expect(md).not.toContain("**A:** x\n\n*Source");
     expect(md).toContain("1. Rate law?\n   **A:** k[RX][Nu]\n\n   *Source: p. 4*");
+  });
+
+  // Review round 4: the escape wrote each marker back unchanged, so a label
+  // with * or _ broke the italics around the citation.
+  it("escapes emphasis markers in a citation's label and quote", () => {
+    const md = pageToMarkdown(
+      {
+        id: "k",
+        title: "Kit",
+        blocks: [
+          {
+            id: "f",
+            type: "flashcards",
+            cards: [{ id: "c", front: "Q", back: "A", source: { materialId: "m", label: "notes_v2 *draft*", quote: "use `x`" } }],
+          },
+        ],
+      },
+      { databases: [] },
+      { today: "2026-11-12" },
+    );
+    expect(md).toContain(String.raw`*Source: notes\_v2 \*draft\* — “use \`x\`”*`);
   });
 
   it("writes the grades block as a summary per course, not the raw table", () => {

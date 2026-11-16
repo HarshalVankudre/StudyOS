@@ -62,7 +62,9 @@ const BY_CODE: Record<string, LocaleMeta> = Object.fromEntries(
 
 /** Type guard: is this arbitrary string one of our supported locales? */
 export function isLocale(value: unknown): value is Locale {
-  return typeof value === "string" && value in BY_CODE;
+  // Own keys only: `in` also accepted "constructor" or "toString" from a
+  // cookie or header, and the dictionary lookup then crashed the render.
+  return typeof value === "string" && Object.hasOwn(BY_CODE, value);
 }
 
 /** Full metadata for a locale (always defined for a valid `Locale`). */

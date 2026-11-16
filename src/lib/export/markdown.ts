@@ -4,7 +4,15 @@
  * blocks (database views, flashcards, quizzes, components, images) become
  * plain Markdown a student can read anywhere.
  */
-import { buildGradeReport, formatGrade, formatPercent, type UkClassLabels } from "@/lib/grades";
+import {
+  buildGradeReport,
+  buildModuleReport,
+  formatGrade,
+  formatPercent,
+  isGradeEntry,
+  type UkClassLabels,
+} from "@/lib/grades";
+import { formatGermanGrade } from "@/lib/grades/german";
 import { dayKeyOf, applyView } from "@/lib/workspace/view-logic";
 import type { Block, Database, GradesBlock, Page, SourceRef, Workspace } from "@/lib/workspace/types";
 import { cellText, visibleProperties } from "./cells";
@@ -33,6 +41,16 @@ export interface MarkdownLabels {
   gradeNotGraded: string;
   gradeNoCourse: string;
   gradeNoScores: string;
+  // Module grades (German grades entered per module).
+  /** "Grade average" (Notenschnitt). */
+  gradeAverage: string;
+  /** With {value}: the average before it is cut. */
+  gradeUnrounded: string;
+  gradeTargetAverage: string;
+  gradeModule: string;
+  gradeCredits: string;
+  gradeGrade: string;
+  gradeFailed: string;
 }
 
 export const ENGLISH_MARKDOWN_LABELS: MarkdownLabels = {
@@ -55,6 +73,13 @@ export const ENGLISH_MARKDOWN_LABELS: MarkdownLabels = {
   gradeNotGraded: "not graded yet",
   gradeNoCourse: "No course",
   gradeNoScores: "No scores yet.",
+  gradeAverage: "Grade average",
+  gradeUnrounded: "Unrounded: {value}",
+  gradeTargetAverage: "Target average",
+  gradeModule: "Module",
+  gradeCredits: "ECTS",
+  gradeGrade: "Grade",
+  gradeFailed: "Not passed",
 };
 
 export interface MarkdownOptions {
@@ -122,7 +147,9 @@ interface ResolvedOptions {
 
 /** One line of inline text with emphasis markers escaped, so it cannot break the italics around it. */
 function plainInline(text: string): string {
-  return text.replace(/\s*\n\s*/g, " ").replace(/([\*_`])/g, "\$1").trim();
+  // "\\$1": a single backslash before "$1" is only an escape of "$" in a JS
+  // string, and the markers went through unescaped.
+  return text.replace(/\s*\n\s*/g, " ").replace(/([\*_`])/g, "\\$1").trim();
 }
 
 /** "*Source: Lecture 7, p. 3 — “quoted passage”*", or "" when nothing is cited. */
@@ -143,6 +170,7 @@ export function sourceLine(source: SourceRef | undefined, L: MarkdownLabels): st
  * scores. Computed with the same math as the block on screen.
  */
 function gradesToMarkdown(block: GradesBlock, ws: Pick<Workspace, "databases">, o: ResolvedOptions): string {
+  if (isGradeEntry(block)) return moduleGradesToMarkdown(block, ws, o);
   const L = o.labels;
   // The report only reads the workspace's databases.
   const report = buildGradeReport(ws as Workspace, block, { ukLabels: o.ukLabels });
@@ -180,6 +208,48 @@ function gradesToMarkdown(block: GradesBlock, ws: Pick<Workspace, "databases">, 
     ];
     parts.push(lines.join("\n"));
   }
+  return parts.join("\n\n");
+}
+
+/**
+ * A grades block of module grades: the Notenschnitt (cut after the first
+ * decimal, the exact value beside it), the target average, then every module
+ * with its credits and grade. Never a percentage.
+ */
+function moduleGradesToMarkdown(block: GradesBlock, ws: Pick<Workspace, "databases">, o: ResolvedOptions): string {
+  const L = o.labels;
+  const report = buildModuleReport(ws as Workspace, block);
+  const title = block.title || report?.database.name || "";
+  if (!report) return title ? `**${title}**` : "";
+  const grade = (n: number, decimals = 1) => formatGermanGrade(n, o.locale, decimals);
+  const number = (n: number) => new Intl.NumberFormat(o.locale, { maximumFractionDigits: 2 }).format(n);
+  const { average, target, modules } = report;
+  const parts: string[] = [];
+  if (title) parts.push(`**${title}**`);
+  const facts = [
+    `${L.gradeAverage}: ${average.shown === null ? "—" : grade(average.shown)}`,
+    average.unrounded === null ? "" : L.gradeUnrounded.replace("{value}", grade(average.unrounded, 2)),
+    target !== null ? `${L.gradeTargetAverage}: ${grade(target)}` : "",
+  ].filter(Boolean);
+  parts.push(facts.join(" · "));
+  if (modules.length === 0) return parts.join("\n\n");
+  const lines = [
+    `| ${tableCell(L.gradeModule)} | ${tableCell(L.gradeCredits)} | ${tableCell(L.gradeGrade)} |`,
+    "| --- | --- | --- |",
+    ...modules.map((m) => {
+      const credits = m.credits === null ? "—" : number(m.credits);
+      const shown =
+        m.invalid !== null
+          ? number(m.invalid)
+          : m.grade === null
+            ? L.gradeNotGraded
+            : m.status === "failed"
+              ? `${grade(m.grade)} (${L.gradeFailed})`
+              : grade(m.grade);
+      return `| ${tableCell(m.name)} | ${credits} | ${tableCell(shown)} |`;
+    }),
+  ];
+  parts.push(lines.join("\n"));
   return parts.join("\n\n");
 }
 

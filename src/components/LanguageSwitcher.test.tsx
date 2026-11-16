@@ -1,11 +1,17 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { en } from "@/lib/i18n/dictionaries/en";
 import { LOCALES } from "@/lib/i18n/config";
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
-vi.mock("@/lib/i18n/actions", () => ({ setLocale: vi.fn().mockResolvedValue(undefined) }));
+const mocks = vi.hoisted(() => ({
+  refresh: vi.fn(),
+  setLocale: vi.fn().mockResolvedValue(undefined),
+  toastError: vi.fn(),
+}));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: mocks.refresh }) }));
+vi.mock("@/lib/i18n/actions", () => ({ setLocale: mocks.setLocale }));
+vi.mock("sonner", () => ({ toast: { error: mocks.toastError } }));
 vi.mock("@/lib/i18n/client", () => ({
   useI18n: () => ({ dict: en, locale: "de", dir: "ltr" }),
 }));
@@ -39,5 +45,16 @@ describe("LanguageSwitcher (QA round 3: no flags)", () => {
     expect(name).toHaveTextContent("Deutsch");
     expect(name.className).toContain("sm:inline");
     expect(screen.getByRole("button").textContent).not.toMatch(FLAG);
+  });
+
+  it("a language change that cannot reach the server says so and keeps the page", async () => {
+    const user = userEvent.setup();
+    mocks.setLocale.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    render(<LanguageSwitcher />);
+    await user.click(screen.getByRole("button", { name: `${en.language.choose}: Deutsch` }));
+    await user.click(within(screen.getByRole("listbox")).getByText("English"));
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith(en.safety.actionFailed));
+    expect(mocks.refresh).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByRole("button", { name: `${en.language.choose}: Deutsch` })).toBeEnabled());
   });
 });

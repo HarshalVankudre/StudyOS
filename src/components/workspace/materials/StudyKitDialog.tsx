@@ -432,7 +432,7 @@ export function StudyKitDialog({
                 type="button"
                 onClick={() => void start()}
                 disabled={!canStart}
-                className="min-h-11 rounded-lg bg-lime px-4 text-sm font-semibold text-lime-on transition hover:bg-lime-deep disabled:cursor-not-allowed disabled:opacity-40"
+                className="min-h-11 rounded-lg bg-lime px-4 text-sm font-semibold text-lime-on transition hover:bg-lime-hover disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {M.start}
               </button>
@@ -460,7 +460,7 @@ export function StudyKitDialog({
                 <button
                   type="button"
                   onClick={() => setPhase({ kind: "setup" })}
-                  className="min-h-11 rounded-lg bg-lime px-4 text-sm font-semibold text-lime-on transition hover:bg-lime-deep"
+                  className="min-h-11 rounded-lg bg-lime px-4 text-sm font-semibold text-lime-on transition hover:bg-lime-hover"
                 >
                   {M.retry}
                 </button>
@@ -471,7 +471,7 @@ export function StudyKitDialog({
             <button
               type="button"
               onClick={onClose}
-              className="min-h-11 rounded-lg bg-lime px-4 text-sm font-semibold text-lime-on transition hover:bg-lime-deep"
+              className="min-h-11 rounded-lg bg-lime px-4 text-sm font-semibold text-lime-on transition hover:bg-lime-hover"
             >
               {M.openPage}
             </button>
@@ -542,7 +542,7 @@ function KitOptions({
               key={key}
               className={cn(
                 "flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border px-3 text-sm text-ink transition",
-                outputs[key] ? "border-lime bg-lime-faint" : "border-line-strong bg-card hover:bg-hover",
+                outputs[key] ? "border-lime-deep bg-lime-faint" : "border-line-strong bg-card hover:bg-hover",
               )}
             >
               <input

@@ -116,8 +116,14 @@ async function register(
   subscription: PushSubscription,
   publicKey: string,
   locale: string,
+  refresh?: { replaces?: string },
 ): Promise<{ ok: boolean; devices?: number }> {
-  const body = (s: PushSubscription) => ({ subscription: s.toJSON(), timeZone: browserTimeZone(), locale });
+  const body = (s: PushSubscription) => ({
+    subscription: s.toJSON(),
+    timeZone: browserTimeZone(),
+    locale,
+    ...(refresh ? { refresh: true, ...(refresh.replaces ? { replaces: refresh.replaces } : {}) } : {}),
+  });
   const saved = await send("POST", body(subscription));
   if (saved.ok || !saved.taken) return saved;
   await subscription.unsubscribe().catch(() => false);
@@ -232,6 +238,10 @@ export async function disableEverywhere(): Promise<{ ok: boolean; devices?: numb
  * Keep the server's copy of this device current: browsers rotate
  * subscriptions, and the student may have moved time zone. Re-subscribes when
  * the server's key changed. Returns whether this device is on.
+ *
+ * Refresh only: a browser subscription the server has no record of (this
+ * device was turned off, here or with "Turn off on all devices" elsewhere)
+ * stays off. Only enablePush, the student's own choice, adds a device.
  */
 export async function syncPush(publicKey: string, locale: string): Promise<boolean> {
   if (permission() !== "granted") return false;
@@ -239,11 +249,13 @@ export async function syncPush(publicKey: string, locale: string): Promise<boole
   if (!subscription) return false;
   try {
     const reg = await registration();
+    let replaces: string | undefined;
     if (!sameKey(subscription, publicKey)) {
+      replaces = subscription.endpoint;
       await subscription.unsubscribe().catch(() => false);
       subscription = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(publicKey) });
     }
-    const saved = await register(reg, subscription, publicKey, locale);
+    const saved = await register(reg, subscription, publicKey, locale, { replaces });
     return saved.ok;
   } catch {
     return false;

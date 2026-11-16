@@ -394,6 +394,13 @@ describe("findDate", () => {
     expect(findDate("Exam 15.01.2027", TODAY)?.iso).toBe("2027-01-15");
     expect(findDate("Nothing here", TODAY)).toBeNull();
   });
+
+  // Review round 4: a leap day without a year was dropped when the current
+  // year has none, instead of trying the next year.
+  it("finds the next leap year for a Feb 29 written without a year", () => {
+    expect(findDate("Midterm Feb 29", "2027-12-15")?.iso).toBe("2028-02-29");
+    expect(findDate("Midterm Feb 30", "2027-12-15")).toBeNull();
+  });
 });
 
 describe("syllabusFactsBlock", () => {

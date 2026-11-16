@@ -1,5 +1,6 @@
 import { rejectCrossSite } from "@/lib/http/same-origin";
 import { auth } from "@clerk/nextjs/server";
+import { NextResponse } from "next/server";
 import { z } from "zod";
 import {
   GenerationCancelledError,
@@ -26,6 +27,7 @@ import { addUsage, withUsageMeter, type TokenUsage } from "@/lib/ai/usage-meter"
 import { getUserPlan } from "@/lib/billing";
 import {
   type CreditHold,
+  creditHoldCharge,
   getCreditBalance,
   releaseCreditHold,
   reserveCredits,
@@ -51,6 +53,9 @@ import { fmt } from "@/lib/i18n/interpolate";
 import { plural } from "@/lib/i18n/plural";
 import { saveNewWorkspace } from "@/lib/workspace/store";
 import { reportError } from "@/lib/ops/report-error";
+import { claimReferral } from "@/lib/referral/claim";
+import { referralCookieFromHeader, referralCookieOptions } from "@/lib/referral/cookie";
+import { qualifyReferral, rewardQualifiedReferral } from "@/lib/referral/reward";
 import type { Workspace } from "@/lib/workspace/types";
 
 export const runtime = "nodejs";
@@ -125,6 +130,14 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
+
+  // An invited friend whose first stop after sign-up is the generator (not
+  // /app, where the invite is usually recorded): record the invite now, so
+  // this very build can earn its reward (lib/referral/claim.ts). Idempotent;
+  // a failure never blocks the build. A spent cookie is cleared on the
+  // response below.
+  const invite = referralCookieFromHeader(request.headers.get("cookie"));
+  const inviteSpent = invite ? await claimReferral(userId, invite) : false;
 
   // Cancellation: the student's Cancel aborts the fetch (which disconnects
   // this request and cancels the response stream) and also calls the cancel
@@ -372,20 +385,45 @@ export async function POST(request: Request) {
         const workspaceId = await saveNewWorkspace(workspace);
         // Charge only now that the student has a workspace: the build's
         // price (its real cost when higher, never above cost.max).
-        const creditsCost = await settleCreditHold(
+        const report = (error: unknown) =>
+          reportError(error, { source: "api", route: "/api/generate", method: "POST", userId });
+        let creditsCost = await settleCreditHold(
           hold,
           chargeForCompleted(cost, usageToCredits(usage, model)),
         ).catch((error) => {
-          reportError(error, { source: "api", route: "/api/generate", method: "POST", userId });
-          return 0;
+          report(error);
+          return null;
         });
+        if (creditsCost === null) {
+          // The settle failed, normally after recording its charge on the
+          // hold: closing the hold now completes that charge (as the release
+          // in `finally` would), and the charge is read back, so a build
+          // that was in fact charged says so and still qualifies an invite.
+          const failedHold = hold;
+          await releaseCreditHold(failedHold).catch(() => false);
+          creditsCost = await creditHoldCharge(failedHold).catch(() => 0);
+        }
         recordFunnelEvent(userId, "generate_complete");
-        send({
+        // An invited friend's first charged build qualifies their invite
+        // (lib/referral/reward.ts; one cheap read for everyone else). A build
+        // that was charged nothing never qualifies.
+        const invited = creditsCost > 0 ? await qualifyReferral(userId).catch(() => false) : false;
+        // The workspace is saved and paid for: say so at once, even after a
+        // Cancel (sendFinal), so a stop that came too late never reads as
+        // "stopped". A balance that cannot be read now is left out, never
+        // turned into a reported failure.
+        sendFinal({
           type: "complete",
           workspaceId,
           credits: creditsCost,
-          balance: await getCreditBalance(userId),
+          balance: await getCreditBalance(userId).catch(() => undefined),
+          ...(invited ? { rewardPending: true } : {}),
         });
+        // Then the invite's reward, for them and whoever invited them: best
+        // effort and bounded in time, it never fails this build, and one that
+        // cannot finish now stays pending for a retry. The page re-reads the
+        // balance once the reward has had time to land (rewardPending).
+        if (invited) await rewardQualifiedReferral(userId).catch(report);
         finish();
       } catch (error) {
         if (error instanceof GenerationCancelledError || signal.aborted) {
@@ -432,13 +470,16 @@ export async function POST(request: Request) {
     },
   });
 
-  return new Response(stream, {
+  const response = new NextResponse(stream, {
     headers: {
       "Content-Type": "application/x-ndjson; charset=utf-8",
       "Cache-Control": "no-cache, no-transform",
       "X-Content-Type-Options": "nosniff",
     },
   });
+  // The invite cookie, once spent (recorded, or refused for good), goes.
+  if (inviteSpent) response.cookies.set({ ...referralCookieOptions(), value: "", maxAge: 0 });
+  return response;
 }
 
 /**

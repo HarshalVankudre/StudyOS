@@ -14,6 +14,9 @@
  *  - Deleting moves a workspace to the trash (`deletedAt`); it can be restored
  *    for TRASH_RETENTION_DAYS and is purged after that. Every reader excludes
  *    trashed workspaces.
+ *  - Public share links (lib/share) end with what they show: moving a
+ *    workspace to the trash revokes its links, and a save that removes a
+ *    shared page revokes that page's link. Restoring brings neither back.
  */
 import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/db";
@@ -87,10 +90,21 @@ export function parseStoredWorkspace(row: {
   return { ...result.workspace, id: row.id };
 }
 
-/** Persist a freshly generated workspace for the current user; returns its id. */
-export async function saveNewWorkspace(ws: Workspace): Promise<string> {
+/**
+ * Persist a freshly generated workspace for the current user; returns its id.
+ * `options.id` is a fresh id the caller drew itself (crypto.randomUUID), for a
+ * document that links to its own pages (/app/<id>?page=…, the Notion import);
+ * never an id taken from a request.
+ */
+export async function saveNewWorkspace(ws: Workspace, options: { id?: string } = {}): Promise<string> {
   const ownerId = await requireUserId();
-  const id = crypto.randomUUID();
+  // A request still running while the account is erased (a build takes
+  // minutes) must not write a new workspace after the erasure: nothing would
+  // ever remove it. The tombstone is written before anything is erased.
+  if (await prisma.deletedAccount.findUnique({ where: { userId: ownerId }, select: { userId: true } })) {
+    throw new Error("Account was deleted");
+  }
+  const id = options.id ?? crypto.randomUUID();
   const { workspace, data } = prepareWorkspaceForSave({ ...ws, id }, id);
   await prisma.workspace.create({
     data: {
@@ -203,7 +217,10 @@ export async function saveWorkspace(
       version: { increment: 1 },
     },
   });
-  if (updated.count === 1) return { status: "saved", version: baseVersion + 1 };
+  if (updated.count === 1) {
+    await revokeSharesOfRemovedPages(id, ownerId, workspace);
+    return { status: "saved", version: baseVersion + 1 };
+  }
 
   const current = await prisma.workspace.findFirst({
     where: { id, ownerId, ...NOT_TRASHED },
@@ -215,6 +232,32 @@ export async function saveWorkspace(
     version: current.version,
     saves: readSaveLog(current.saveIds, current.version),
   };
+}
+
+/**
+ * After a save: revoke the active share links of pages the saved document no
+ * longer holds, so a deleted page's link stops for good (bringing the page
+ * back does not revive it). One indexed read of the workspace's active links
+ * per save (almost always none), a write only when one lost its page. Best
+ * effort: the save has landed, and a link to a missing page serves nothing.
+ */
+async function revokeSharesOfRemovedPages(workspaceId: string, ownerId: string, ws: Workspace): Promise<void> {
+  try {
+    const shares = await prisma.pageShare.findMany({
+      where: { workspaceId, userId: ownerId, revokedAt: null },
+      select: { id: true, pageId: true },
+    });
+    if (shares.length === 0) return;
+    const pages = new Set(ws.pages.map((p) => p.id));
+    const gone = shares.filter((s) => !pages.has(s.pageId)).map((s) => s.id);
+    if (gone.length === 0) return;
+    await prisma.pageShare.updateMany({
+      where: { id: { in: gone }, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+  } catch (error) {
+    reportError(error, { source: "workspace-store", workspaceId });
+  }
 }
 
 export type UpdateWorkspaceResult<T> =
@@ -250,13 +293,24 @@ export async function updateWorkspaceWith<T>(
   return { status: "conflict" };
 }
 
-/** Move a workspace to the trash (restorable for TRASH_RETENTION_DAYS). */
+/**
+ * Move a workspace to the trash (restorable for TRASH_RETENTION_DAYS). Its
+ * public share links are revoked in the same transaction: restoring the
+ * workspace does not bring them back.
+ */
 export async function trashWorkspace(id: string): Promise<boolean> {
   const ownerId = await requireUserId();
-  const result = await prisma.workspace.updateMany({
-    where: { id, ownerId, ...NOT_TRASHED },
-    data: { deletedAt: new Date() },
-  });
+  const now = new Date();
+  const [result] = await prisma.$transaction([
+    prisma.workspace.updateMany({
+      where: { id, ownerId, ...NOT_TRASHED },
+      data: { deletedAt: now },
+    }),
+    prisma.pageShare.updateMany({
+      where: { workspaceId: id, userId: ownerId, revokedAt: null },
+      data: { revokedAt: now },
+    }),
+  ]);
   return result.count === 1;
 }
 

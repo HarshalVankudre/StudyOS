@@ -76,7 +76,7 @@ export function QuizHubSection({
                     mixed: true,
                   })
                 }
-                className="flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-lime px-4 text-sm font-semibold text-lime-on transition hover:bg-lime-deep"
+                className="flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-lime px-4 text-sm font-semibold text-lime-on transition hover:bg-lime-hover"
               >
                 <Target className="size-4" aria-hidden />
                 {Q.weakStart}
@@ -104,7 +104,7 @@ export function QuizHubSection({
 const ROW_BUTTON =
   "flex min-h-11 items-center gap-1.5 rounded-lg border border-line-strong bg-card px-3 text-sm font-semibold text-ink transition hover:bg-hover";
 const ROW_PRIMARY =
-  "flex min-h-11 items-center gap-1.5 rounded-lg bg-lime px-3 text-sm font-semibold text-lime-on transition hover:bg-lime-deep";
+  "flex min-h-11 items-center gap-1.5 rounded-lg bg-lime px-3 text-sm font-semibold text-lime-on transition hover:bg-lime-hover";
 
 /** One quiz in the hub: last score (or an exam in progress), practise, sit or resume the exam. */
 function QuizHubRow({

@@ -81,4 +81,12 @@ describe("app Content-Security-Policy", () => {
       expect(headers["x-frame-options"]).toBe("SAMEORIGIN");
     },
   );
+
+  it("leaves a shared page's images to the route's sandboxing CSP, but not the shared page itself", async () => {
+    const image = await headersFor("/s/AbCdEfGhIjKlMnOpQrStUvWxYz012345/asset/asset_1");
+    expect(image["content-security-policy"]).toBeUndefined();
+    expect(image["x-content-type-options"]).toBe("nosniff");
+    const page = await headersFor("/s/AbCdEfGhIjKlMnOpQrStUvWxYz012345");
+    expect(page["content-security-policy"]).toContain("frame-ancestors 'self'");
+  });
 });

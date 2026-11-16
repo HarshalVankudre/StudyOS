@@ -4,7 +4,9 @@ import type { AssetStore } from "./storage";
 import {
   type AllowedMime,
   assertAllowedArtifact,
+  AssetTooLargeError,
   extForMime,
+  MAX_ASSET_BYTES,
 } from "./mime";
 
 export type AssetHandle = { assetId: string; mime: string; filename: string };
@@ -19,6 +21,21 @@ export type CreateAssetInput = {
 };
 
 export type CreateAssetFn = (input: CreateAssetInput) => Promise<AssetHandle>;
+
+/**
+ * Image types an asset may be served as through the server (readImageForOwner):
+ * rendered by <img>, where even SVG runs no script. Anything else is refused.
+ */
+export const SERVABLE_IMAGE_MIME: ReadonlySet<string> = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "image/avif",
+  "image/svg+xml",
+]);
+
+export type AssetImage = { bytes: Uint8Array; mime: string };
 
 /** Short TTL for a read URL — long enough to render, short enough to not leak. */
 const SIGNED_URL_TTL_MS = 5 * 60 * 1000;
@@ -56,5 +73,30 @@ export function createAssetService(deps: { store: AssetStore; repo: AssetRepo })
     return store.signedReadUrl(row.storageKey, SIGNED_URL_TTL_MS);
   }
 
-  return { createAsset, signedUrlForAsset };
+  /**
+   * An image asset's bytes and type (from its row), read through the server
+   * so no storage URL (which names the owner) reaches the browser. Null when
+   * `ownerId` does not own it, it is not a servable image type, it is larger
+   * than `maxBytes` (by its row or its object) or its object is gone.
+   */
+  async function readImageForOwner(
+    assetId: string,
+    ownerId: string,
+    maxBytes: number = MAX_ASSET_BYTES,
+  ): Promise<AssetImage | null> {
+    const row = await repo.findById(assetId);
+    if (!row || row.ownerId !== ownerId) return null; // owner-scoped
+    const mime = row.mime.trim().toLowerCase();
+    if (!SERVABLE_IMAGE_MIME.has(mime)) return null;
+    if (row.sizeBytes > maxBytes) return null;
+    try {
+      const bytes = await store.read(row.storageKey, maxBytes);
+      return bytes ? { bytes, mime } : null;
+    } catch (error) {
+      if (error instanceof AssetTooLargeError) return null;
+      throw error;
+    }
+  }
+
+  return { createAsset, signedUrlForAsset, readImageForOwner };
 }

@@ -5,9 +5,10 @@
  */
 import type { DailyStudyPlanItem } from "@/lib/agents/daily-study/types";
 import type { Database, DatabaseRow, Workspace } from "@/lib/workspace/types";
-import type { NotificationMessage } from "./content";
+import type { NotificationMessage, WeeklyRecap } from "./content";
 import type { DueUser, LogClaim, LogStatus, NotificationChannel, NotificationStore } from "./dispatch";
 import { DEFAULT_PREFERENCES, type NotificationPreferences } from "./preferences";
+import type { NotificationKind } from "./schedule";
 
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
@@ -22,6 +23,10 @@ export class MemoryStore implements NotificationStore {
   workspaces = new Map<string, Workspace[]>();
   plans = new Map<string, DailyStudyPlanItem[] | null>();
   days = new Map<string, string[]>();
+  /** The week's totals per student (none: an empty week). */
+  weeks = new Map<string, WeeklyRecap>();
+  /** (userId, today) of every weekTotals read. */
+  weekReads: { userId: string; today: string }[] = [];
   /** Simulate a lease that expired while another run still works (worst case). */
   ignoreLeases = false;
   workspaceLoads = 0;
@@ -52,10 +57,30 @@ export class MemoryStore implements NotificationStore {
     if (u) Object.assign(u, { nextCheckAt, leaseUntil: null });
   }
 
+  async unlease(userIds: string[]) {
+    await tick();
+    for (const userId of userIds) {
+      const u = this.users.get(userId);
+      if (u) u.leaseUntil = null;
+    }
+  }
+
   async countMessages(userId: string, localDate: string) {
     await tick();
     return this.logs.filter(
       (l) => l.userId === userId && l.localDate === localDate && l.message && (l.status === "pending" || l.status === "sent"),
+    ).length;
+  }
+
+  async countShownSince(userId: string, kind: NotificationKind, fromLocalDate: string) {
+    await tick();
+    return this.logs.filter(
+      (l) =>
+        l.userId === userId &&
+        l.kind === kind &&
+        l.localDate >= fromLocalDate &&
+        l.message &&
+        (l.status === "pending" || l.status === "sent"),
     ).length;
   }
 
@@ -90,22 +115,40 @@ export class MemoryStore implements NotificationStore {
     await tick();
     return this.days.get(userId) ?? [];
   }
+
+  async weekTotals(userId: string, today: string): Promise<WeeklyRecap> {
+    await tick();
+    this.weekReads.push({ userId, today });
+    return this.weeks.get(userId) ?? { focusMinutes: 0, cards: 0, quizAnswers: 0, activeDays: 0 };
+  }
 }
 
 export class FakeChannel implements NotificationChannel {
-  readonly name = "fake";
   devices = new Map<string, number>();
   sent: { userId: string; message: NotificationMessage }[] = [];
+  /** Delivers to nobody (every device or address refused it). */
   failing = new Set<string>();
+  /** Throws while delivering (a bug, a database error). */
+  throwing = new Set<string>();
+  /** Turned on but not deliverable right now (see NotificationChannel.standby). */
+  waiting = new Map<string, "retry" | "wait">();
+
+  constructor(readonly name = "fake") {}
 
   async reachable(userId: string) {
     await tick();
     return (this.devices.get(userId) ?? 0) > 0;
   }
 
+  async standby(userId: string) {
+    await tick();
+    return this.waiting.get(userId) ?? null;
+  }
+
   async deliver(userId: string, message: NotificationMessage) {
     await tick();
     this.sent.push({ userId, message });
+    if (this.throwing.has(userId)) throw new Error(`${this.name} channel broke`);
     return { delivered: this.failing.has(userId) ? 0 : (this.devices.get(userId) ?? 0) };
   }
 }

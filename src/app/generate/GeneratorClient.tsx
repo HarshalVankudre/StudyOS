@@ -21,8 +21,9 @@ import {
   MAX_UPLOAD_BYTES,
 } from "@/lib/import/syllabus";
 import { useI18n } from "@/lib/i18n/client";
-import { refreshCreditsBalance, useLiveBalance } from "@/lib/credits-bus";
+import { emitCreditsBalance, refreshCreditsBalance, useLiveBalance } from "@/lib/credits-bus";
 import { planQuestionsAction } from "./actions";
+import { BrandMark } from "@/components/BrandMark";
 
 /**
  * What a build costs on the student's model, setup questions included
@@ -50,6 +51,12 @@ function browserTimeZone(): string | undefined {
  * "cancelled" event (which says what the stop cost) before it disconnects.
  */
 const CANCEL_LISTEN_MS = 6_000;
+
+/**
+ * After a build that qualified an invite, when to re-read the balance: once
+ * the server's reward attempt (at most 3 s, lib/referral/reward.ts) is done.
+ */
+const REWARD_REFRESH_MS = 4_000;
 
 /** What a stopped build cost; `credits: null` when the server could not say. */
 type CancelNotice = { credits: number | null };
@@ -308,6 +315,12 @@ export function GeneratorClient({
           } else if (event.type === "complete") {
             completed = true;
             setOverallProgress(100);
+            // The balance after the charge, for every surface that shows it;
+            // an invite reward landing right after is picked up by a re-read.
+            if (typeof event.balance === "number") emitCreditsBalance(event.balance);
+            if (event.rewardPending) {
+              window.setTimeout(() => void refreshCreditsBalance({ force: true }), REWARD_REFRESH_MS);
+            }
             router.push(`/app/${event.workspaceId}`);
           } else if (event.type === "cancelled") {
             // The server stopped the build and says what that cost.
@@ -332,7 +345,10 @@ export function GeneratorClient({
       if (!completed && !stopped && !cancelRequested.current) setFailure(dict.generate.errorBuild);
       if (!completed && !stopped && cancelRequested.current) setCancelNotice({ credits: null });
     } catch (cause) {
-      if (cancelRequested.current || controller.signal.aborted) {
+      if (completed) {
+        // Saved and paid for: a disconnect after that (a late Cancel, the
+        // page moving on) is never a stop or a failure.
+      } else if (cancelRequested.current || controller.signal.aborted) {
         // Disconnected before the server said what the stop cost.
         if (cancelRequested.current && !stopped) setCancelNotice({ credits: null });
       } else {
@@ -414,14 +430,17 @@ export function GeneratorClient({
         />
       )}
 
-      <header className="border-b border-ink/10">
+      {/* The page behind the full-screen overlays takes no focus or clicks
+          while they show: a Tab could otherwise reach "Back to workspaces"
+          and leave mid-build, which drops the build without the cancel flow. */}
+      <header className="border-b border-ink/10" inert={planning || building}>
         <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
           <Link
             href="/"
             className="flex items-center gap-1.5 font-display text-lg font-extrabold tracking-tight"
           >
+            <BrandMark />
             StudyOS
-            <span className="mb-2 h-1.5 w-1.5 rounded-full bg-lime" aria-hidden />
           </Link>
           <div className="flex items-center gap-3">
             <Link
@@ -435,7 +454,7 @@ export function GeneratorClient({
         </div>
       </header>
 
-      <div className="mx-auto flex max-w-2xl flex-col px-6 pb-24 pt-14 sm:pt-20">
+      <div className="mx-auto flex max-w-2xl flex-col px-6 pb-24 pt-14 sm:pt-20" inert={planning || building}>
         {outOfCredits && (
           <OutOfCreditsPanel minCredits={minCredits} billing={billing} />
         )}
@@ -677,7 +696,7 @@ function DescribeStage({
         {dict.generate.describe.subtitle}
       </p>
 
-      <div className="mt-8 rounded-xl border border-line bg-card shadow-card transition focus-within:border-lime/50">
+      <div className="mt-8 rounded-xl border border-line bg-card shadow-card transition focus-within:border-lime-deep/50">
         <textarea
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
@@ -723,7 +742,7 @@ function DescribeStage({
               key={ex.text}
               onClick={() => onExample(ex.text)}
               disabled={busy || blocked}
-              className="group flex items-center gap-2 rounded-lg border border-line bg-card px-3.5 py-2 text-start text-sm transition hover:border-lime/40 hover:text-ink disabled:opacity-50"
+              className="group flex items-center gap-2 rounded-lg border border-line bg-card px-3.5 py-2 text-start text-sm transition hover:border-lime-deep/40 hover:text-ink disabled:opacity-50"
             >
               <span>{ex.emoji}</span>
               <span className="text-ink-soft transition group-hover:text-ink">
@@ -839,7 +858,7 @@ export function SyllabusImport({
       <button
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex min-h-11 flex-wrap items-center gap-2 rounded-lg border border-line bg-card px-3.5 py-2 text-sm text-ink-soft transition hover:border-lime/40 hover:text-ink"
+        className="flex min-h-11 flex-wrap items-center gap-2 rounded-lg border border-line bg-card px-3.5 py-2 text-sm text-ink-soft transition hover:border-lime-deep/40 hover:text-ink"
       >
         <span>{S.toggle}</span>
         <span className="text-xs text-ink-soft/60">· {S.optional}</span>
@@ -860,7 +879,7 @@ export function SyllabusImport({
             aria-label={S.toggle}
             rows={5}
             disabled={disabled}
-            className="w-full resize-y rounded-lg border border-line bg-paper px-3 py-2 text-sm leading-relaxed text-ink placeholder:text-ink-soft/50 outline-none focus:border-lime/50 disabled:opacity-60"
+            className="w-full resize-y rounded-lg border border-line bg-paper px-3 py-2 text-sm leading-relaxed text-ink placeholder:text-ink-soft/50 outline-none focus:border-lime-deep/50 disabled:opacity-60"
           />
           <div className="mt-2 flex flex-wrap items-center gap-3">
             <input
@@ -1020,8 +1039,8 @@ function QuestionsStage({
                       aria-pressed={on}
                       className={`flex items-center gap-1.5 rounded-lg border px-3.5 py-1.5 text-sm transition disabled:opacity-60 ${
                         on
-                          ? "border-lime bg-lime font-medium text-lime-on"
-                          : "border-line bg-card text-ink-soft hover:border-lime/40 hover:text-ink"
+                          ? "border-lime-deep bg-lime font-medium text-lime-on"
+                          : "border-line bg-card text-ink-soft hover:border-lime-deep/40 hover:text-ink"
                       }`}
                     >
                       {o.emoji && <span>{o.emoji}</span>}
@@ -1035,8 +1054,8 @@ function QuestionsStage({
                   aria-pressed={customOpen}
                   className={`flex items-center gap-1.5 rounded-lg border px-3.5 py-1.5 text-sm transition disabled:opacity-60 ${
                     customOpen
-                      ? "border-lime bg-lime font-medium text-lime-on"
-                      : "border-line bg-card text-ink-soft hover:border-lime/40 hover:text-ink"
+                      ? "border-lime-deep bg-lime font-medium text-lime-on"
+                      : "border-line bg-card text-ink-soft hover:border-lime-deep/40 hover:text-ink"
                   }`}
                 >
                   <span>✍️</span>
@@ -1044,7 +1063,7 @@ function QuestionsStage({
                 </button>
               </div>
               {customOpen && (
-                <div className="mt-3 flex items-center gap-2 rounded-lg border border-line bg-white/[0.02] px-3 py-2 focus-within:border-lime/50">
+                <div className="mt-3 flex items-center gap-2 rounded-lg border border-line bg-white/[0.02] px-3 py-2 focus-within:border-lime-deep/50">
                   <span className="text-sm" aria-hidden>
                     ✎
                   </span>

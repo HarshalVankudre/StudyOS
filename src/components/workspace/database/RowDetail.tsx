@@ -61,7 +61,7 @@ export function RowDetail({
         className="top-auto bottom-0 left-0 max-h-[90dvh] w-full max-w-none translate-x-0 translate-y-0 gap-0 overflow-y-auto rounded-none rounded-t-xl border-line bg-card p-0 sm:top-[50%] sm:bottom-auto sm:left-[50%] sm:max-h-[85vh] sm:max-w-lg sm:translate-x-[-50%] sm:translate-y-[-50%] sm:rounded-lg"
       >
         <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-line bg-card px-4 py-2">
-          <DialogTitle className="min-w-0 flex-1 truncate font-mono text-[10px] font-normal uppercase tracking-wider text-ink-faint">
+          <DialogTitle className="min-w-0 flex-1 truncate text-[11.5px] font-normal text-ink-faint">
             {db.icon} {db.name} · {dict.dbViews.rowDetails}
           </DialogTitle>
           <button

@@ -761,7 +761,7 @@ export function AgentChat({
                         send(choice.value, choice.label, item.id)
                       }
                       disabled={busy}
-                      className="group flex min-h-11 items-center justify-between rounded-md border border-line-strong bg-card px-3 py-2 text-start text-sm text-ink transition hover:border-lime hover:bg-lime/10 disabled:opacity-50"
+                      className="group flex min-h-11 items-center justify-between rounded-md border border-line-strong bg-card px-3 py-2 text-start text-sm text-ink transition hover:border-lime-deep hover:bg-lime/10 disabled:opacity-50"
                     >
                       <span dir="auto">{choice.label}</span>
                       <span aria-hidden className="text-ink-soft transition group-hover:text-ink rtl:-scale-x-100">
@@ -780,8 +780,8 @@ export function AgentChat({
                     aria-expanded={Boolean(otherOpen[item.id])}
                     className={`group flex min-h-11 items-center justify-between rounded-md border px-3 py-2 text-start text-sm transition disabled:opacity-50 ${
                       otherOpen[item.id]
-                        ? "border-lime bg-lime text-lime-on"
-                        : "border-line-strong bg-card text-ink hover:border-lime hover:bg-lime/10"
+                        ? "border-lime-deep bg-lime text-lime-on"
+                        : "border-line-strong bg-card text-ink hover:border-lime-deep hover:bg-lime/10"
                     }`}
                   >
                     <span className="flex items-center gap-1.5">
@@ -829,7 +829,7 @@ export function AgentChat({
                           if (reply) send(reply, reply, item.id);
                         }}
                         disabled={busy || !otherReplies[item.id]?.trim()}
-                        className="min-h-9 rounded-md bg-lime px-2.5 py-1.5 text-xs font-semibold text-lime-on transition enabled:hover:bg-lime-deep disabled:opacity-40"
+                        className="min-h-9 rounded-md bg-lime px-2.5 py-1.5 text-xs font-semibold text-lime-on transition enabled:hover:bg-lime-hover disabled:opacity-40"
                       >
                         {dict.agentChat.send}
                       </button>
@@ -840,7 +840,7 @@ export function AgentChat({
 
               {item.changed && (
                 <div className="ms-1 flex flex-wrap items-center gap-1.5">
-                  <span className="inline-flex items-center gap-1 rounded-full bg-lime/35 px-2 py-0.5 text-[10px] font-semibold text-lime ring-1 ring-inset ring-lime/40">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-lime/35 px-2 py-0.5 text-[10px] font-semibold text-lime-deep ring-1 ring-inset ring-lime-deep/40">
                     ✓ {dict.agentChat.workspaceUpdated}
                   </span>
                   {item.affectedAreas?.slice(0, 3).map((area) => (
@@ -926,7 +926,7 @@ export function AgentChat({
             onClick={() => send(text)}
             disabled={busy || !text.trim()}
             aria-label={dict.agentChat.send}
-            className="grid h-11 w-11 shrink-0 place-items-center rounded-md bg-lime text-lime-on transition enabled:hover:bg-lime-deep disabled:opacity-40 sm:h-9 sm:w-9"
+            className="grid h-11 w-11 shrink-0 place-items-center rounded-md bg-lime text-lime-on transition enabled:hover:bg-lime-hover disabled:opacity-40 sm:h-9 sm:w-9"
           >
             ↑
           </button>

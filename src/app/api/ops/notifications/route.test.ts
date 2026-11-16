@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ dispatch: vi.fn(), channels: vi.fn() }));
 vi.mock("@/lib/notifications/dispatch", () => ({ runNotificationDispatch: mocks.dispatch }));
-vi.mock("@/lib/notifications/channels", () => ({ defaultChannels: mocks.channels }));
+vi.mock("@/lib/notifications/channels", () => ({ dispatchChannels: mocks.channels }));
 vi.mock("@/lib/notifications/store", () => ({ prismaNotificationStore: { kind: "prisma" } }));
 
 import { POST } from "./route";
@@ -30,6 +30,11 @@ describe("POST /api/ops/notifications", () => {
     expect((await POST(req())).status).toBe(401);
     expect((await POST(req("Bearer nope"))).status).toBe(401);
     expect(mocks.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("accepts a secret stored with a trailing newline", async () => {
+    process.env.MAINTENANCE_SECRET = "s3cret-value\n";
+    expect((await POST(req("Bearer s3cret-value"))).status).toBe(200);
   });
 
   it("does nothing when push is not configured", async () => {

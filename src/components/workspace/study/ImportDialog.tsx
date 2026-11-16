@@ -183,7 +183,7 @@ export function ImportDialog({
           <button
             onClick={doImport}
             disabled={newCount === 0}
-            className="min-h-11 rounded-lg bg-lime px-4 text-sm font-semibold text-lime-on transition hover:bg-lime-deep disabled:cursor-not-allowed disabled:opacity-40"
+            className="min-h-11 rounded-lg bg-lime px-4 text-sm font-semibold text-lime-on transition hover:bg-lime-hover disabled:cursor-not-allowed disabled:opacity-40"
           >
             {newCount > 0 ? plural(dict.counts.importCards, newCount) : T.nothingToImport}
           </button>

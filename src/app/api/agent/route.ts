@@ -379,10 +379,12 @@ export async function POST(request: Request) {
         // client can show both the per-turn cost and a live balance.
         const chargeTurn = async (): Promise<{
           creditsCost: number;
-          creditsBalance: number;
+          creditsBalance?: number;
         }> => {
           const creditsCost = await settle("completed");
-          return { creditsCost, creditsBalance: await getCreditBalance(userId) };
+          // The turn is applied and paid for: a balance that cannot be read now
+          // is left out, never turned into a reported failure.
+          return { creditsCost, creditsBalance: await getCreditBalance(userId).catch(() => undefined) };
         };
 
         // Finish a turn: charge, record, store the reply, emit the result.

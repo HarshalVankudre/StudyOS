@@ -96,6 +96,32 @@ describe("push-client", () => {
     expect(await syncPush(KEY, "en")).toBe(true);
     expect(old.unsubscribe).toHaveBeenCalled();
     expect(subscribe).toHaveBeenCalledTimes(1);
+    // The server moves the old endpoint's record to the new one.
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      subscription: { endpoint: "https://fcm.googleapis.com/fcm/send/new" },
+      refresh: true,
+      replaces: "https://fcm.googleapis.com/fcm/send/old",
+    });
+  });
+
+  it("a sync only refreshes: a device the server does not know stays off", async () => {
+    current = fakeSubscription("https://fcm.googleapis.com/fcm/send/kept", keyFromBase64(KEY));
+    (Notification as unknown as { permission: string }).permission = "granted";
+    // Turned off on every device from elsewhere: the server has no record.
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error: "not_registered" }), { status: 404 }));
+    expect(await syncPush(KEY, "en")).toBe(false);
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    const body = JSON.parse(String(init.body));
+    expect(body).toMatchObject({ subscription: { endpoint: "https://fcm.googleapis.com/fcm/send/kept" }, refresh: true });
+    expect(body.replaces).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("turning on is not a refresh", async () => {
+    await enablePush(KEY, "en");
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(String(init.body)).refresh).toBeUndefined();
   });
 
   it("turns off: unsubscribes in the browser and tells the server", async () => {

@@ -560,11 +560,19 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentRes
       convo.push({ role: "user", content: `Tool "${step.tool}" is not available for this task. Available: ${allowedTools.join(", ")}.` });
       continue;
     }
+    // A tool shares the model calls' deadline: its own timeout (a sandbox
+    // render allows minutes) must not carry the turn past the reserved save
+    // tail and the route's maxDuration. A tool that cannot start in time is
+    // not started at all, since a handler keeps running once it is called.
+    const toolTime = modelDeadline - now();
+    if (toolTime <= 0) { stopReason = "time"; break; }
+    const toolDeadline = new AbortController();
+    const toolTimer = setTimeout(() => toolDeadline.abort(new ModelDeadlineError()), toolTime);
     const ctx = {
       taskId,
       ownerId,
       workspaceJson: JSON.stringify(candidate),
-      signal: params.signal,
+      signal: params.signal ? AbortSignal.any([params.signal, toolDeadline.signal]) : toolDeadline.signal,
     };
     const def = toolRegistry.get(step.tool);
     try {
@@ -592,7 +600,11 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentRes
       // A cancelled task surfaces here as a tool abort — never feed it back as a
       // recoverable tool failure; let it end the loop.
       if (isTaskCancelledError(error, params.signal)) throw error;
+      // Cut off at the deadline: stop like a model call that ran out of time.
+      if (toolDeadline.signal.aborted) { stopReason = "time"; break; }
       convo.push({ role: "user", content: `Tool ${step.tool} failed: ${fence.wrap("tool_error", error instanceof Error ? error.message.slice(0, 2_000) : "error")}. Choose another action.` });
+    } finally {
+      clearTimeout(toolTimer);
     }
   }
 

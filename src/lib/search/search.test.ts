@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Workspace } from "@/lib/workspace/types";
 import { buildSearchEntries, entryHref, searchEntries, type SearchResults } from "./index";
-import { plainText, snippetAround } from "./text";
+import { fold, plainText, queryWords, snippetAround } from "./text";
 
 function ws(id: string, name: string, extra: Partial<Workspace> = {}): Workspace {
   return { id, name, icon: "🎓", pages: [], databases: [], ...extra };
@@ -172,5 +172,20 @@ describe("text helpers", () => {
     expect(s.startsWith("…")).toBe(true);
     expect(s.endsWith("…")).toBe(true);
     expect(s.length).toBeLessThanOrEqual(62);
+  });
+
+  // Review round 4: folding split voiced kana (が → か + ゙), so Japanese text
+  // never lined up and its snippets always showed the start, not the hit.
+  it("keeps Japanese text aligned: voiced kana stay one character and match exactly", () => {
+    const text = "データベースの設計について学ぶ";
+    expect(fold(text)).toHaveLength(text.length);
+    expect(fold("한국어")).toHaveLength(3);
+    expect(fold("Économie")).toBe("economie");
+    expect(fold("が").includes(fold("か"))).toBe(false);
+
+    const long = `${"データベースの設計について学ぶ。".repeat(8)}期末試験の範囲${"復習ノートを作る。".repeat(10)}`;
+    const s = snippetAround(long, queryWords("期末試験"), 60);
+    expect(s).toContain("期末試験");
+    expect(s.startsWith("…")).toBe(true);
   });
 });

@@ -54,7 +54,7 @@ export function ProPriceSwitch({
               <label
                 key={value}
                 className={cn(
-                  "flex min-h-10 cursor-pointer items-center gap-1.5 rounded-md px-3.5 font-medium transition has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-lime/60",
+                  "flex min-h-10 cursor-pointer items-center gap-1.5 rounded-md px-3.5 font-medium transition has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-lime-deep/60",
                   interval === value ? "bg-card text-ink shadow-card" : "text-ink-soft hover:text-ink",
                 )}
               >

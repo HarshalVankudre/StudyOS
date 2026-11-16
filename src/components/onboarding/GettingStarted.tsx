@@ -289,7 +289,7 @@ export function GettingStarted({
               strokeDasharray={`${(pct / 100) * 50.27} 50.27`}
             />
           </svg>
-          {allDone && <Check className="h-3 w-3 text-lime" />}
+          {allDone && <Check className="h-3 w-3 text-lime-deep" />}
         </span>
         <span className="hidden xl:inline">{G.button}</span>
         <span className="font-mono text-[11px] text-ink-faint" dir="ltr">
@@ -311,7 +311,7 @@ export function GettingStarted({
           className="z-50 w-[min(22rem,calc(100vw-1rem))] rounded-xl border border-line-strong bg-card p-4 text-ink shadow-pop outline-none"
         >
           <div className="flex items-start gap-2">
-            <ListChecks className="mt-0.5 h-5 w-5 shrink-0 text-lime" aria-hidden />
+            <ListChecks className="mt-0.5 h-5 w-5 shrink-0 text-lime-deep" aria-hidden />
             <div className="min-w-0 flex-1">
               <h2 className="font-display text-base font-bold leading-tight">{G.title}</h2>
               <p className="mt-0.5 text-xs text-ink-soft">{allDone ? G.allDone : G.subtitle}</p>
@@ -345,7 +345,7 @@ export function GettingStarted({
                   <span
                     className={cn(
                       "mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full border",
-                      isDone ? "border-lime bg-lime text-lime-on" : "border-line-strong",
+                      isDone ? "border-lime-deep bg-lime text-lime-on" : "border-line-strong",
                     )}
                   >
                     {isDone && <Check className="h-3 w-3" aria-hidden />}

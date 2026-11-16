@@ -51,7 +51,23 @@ interface ExportAction {
 export function ExportMenu({ workspace, page }: { workspace: Workspace; page: Page | undefined }) {
   const { dict, t, locale } = useI18n();
   const E = dict.exportMenu;
-  const mdOptions = () => ({ labels: E.labels, origin: origin(), locale, ukLabels: dict.grades.uk });
+  // Module grades are worded as the grade calculator words them.
+  const M = dict.tools.gradeCalculator.ects;
+  const mdOptions = () => ({
+    labels: {
+      ...E.labels,
+      gradeAverage: M.average,
+      gradeUnrounded: M.unrounded,
+      gradeTargetAverage: M.targetLabel,
+      gradeModule: M.moduleColumn,
+      gradeCredits: M.ectsColumn,
+      gradeGrade: M.gradeColumn,
+      gradeFailed: M.failedTag,
+    },
+    origin: origin(),
+    locale,
+    ukLabels: dict.grades.uk,
+  });
   const [sheetOpen, setSheetOpen] = useState(false);
 
   useEffect(() => {
@@ -128,7 +144,7 @@ export function ExportMenu({ workspace, page }: { workspace: Workspace; page: Pa
           <Download className="h-4 w-4" aria-hidden />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-64 border-line-strong bg-card text-ink">
-          <DropdownMenuLabel className="px-2.5 font-mono text-[11px] uppercase tracking-wide text-ink-faint">
+          <DropdownMenuLabel className="px-2.5 text-[11px] text-ink-faint">
             {E.menuLabel}
           </DropdownMenuLabel>
           {group("page").map((a) => (

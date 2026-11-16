@@ -4,8 +4,9 @@ import { auth, currentUser } from "@clerk/nextjs/server";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
+import { getLocale } from "@/lib/i18n/server";
 import { reportError } from "@/lib/ops/report-error";
-import { getProPricing } from "@/lib/plan-pricing";
+import { getCreditPackPricing, getProPricing } from "@/lib/plan-pricing";
 import {
   createCreditPackCheckout,
   createProCheckout,
@@ -66,6 +67,8 @@ export async function startCheckoutAction(formData?: FormData): Promise<void> {
       email: await primaryEmail(),
       priceId,
       origin: await originUrl(),
+      // Checkout (and its consent text) in the student's app language.
+      locale: await getLocale(),
     });
     target =
       "url" in result ? result.url : "/pricing?billing=already_subscribed";
@@ -78,13 +81,20 @@ export async function startCheckoutAction(formData?: FormData): Promise<void> {
 
 /**
  * Start a one-time Stripe Checkout to buy a credit pack and redirect to it.
- * Uses inline price_data so no pre-created Stripe price is required.
+ * It charges exactly what the pages show (lib/plan-pricing.ts
+ * getCreditPackPricing): the Stripe Price STRIPE_PRICE_CREDIT_PACK when it is
+ * set, else the price list's USD price as inline price_data (no pre-created
+ * Stripe price needed). A configured Stripe Price that cannot be read or is
+ * not a valid one-time price is never replaced by another price: the pack is
+ * then unavailable.
  */
 export async function buyCreditsAction(): Promise<void> {
   const { userId } = await auth();
   if (!userId) redirect("/sign-in");
 
   if (!isBillingConfigured()) redirect("/app/credits?billing=unavailable");
+  const pack = await getCreditPackPricing();
+  if (!pack.offered) redirect("/app/credits?billing=unavailable");
 
   let target: string;
   try {
@@ -92,6 +102,8 @@ export async function buyCreditsAction(): Promise<void> {
       userId,
       email: await primaryEmail(),
       origin: await originUrl(),
+      priceId: pack.priceId,
+      locale: await getLocale(),
     });
     target = url;
   } catch (err) {

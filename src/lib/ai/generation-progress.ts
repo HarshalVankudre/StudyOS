@@ -69,6 +69,12 @@ export type GenerationEvent =
       credits?: number;
       /** The user's credit balance after the charge. */
       balance?: number;
+      /**
+       * The build qualified an invite whose reward the server is trying now
+       * (lib/referral/reward.ts): the balance may grow in a moment, so the
+       * page re-reads it.
+       */
+      rewardPending?: boolean;
     }
   | {
       /**

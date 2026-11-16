@@ -25,7 +25,10 @@
  *    has an open dispute, resume when it is won, and stop for good when it is
  *    lost or refunded in full: recomputed from the recorded facts after every
  *    event (refreshAllowanceState), never written one event at a time;
- *  - a lost dispute cancels the user's subscription, whichever payment it was;
+ *  - a lost dispute of a subscription payment cancels the user's subscription
+ *    at once, whichever payment it was; one of a credit pack stops its
+ *    renewals instead (cancel at period end), so the Pro period already paid
+ *    for, with its monthly allowances, is kept;
  *  - nothing is granted to an account that has been deleted, and a deleted
  *    account's billing is canceled durably (retried until Stripe confirms).
  */
@@ -35,6 +38,9 @@ import { prisma } from "@/lib/db";
 import type { BillingIntent } from "@/generated/prisma";
 import { stripe, stripeId } from "@/lib/stripe";
 import type { Plan } from "@/lib/ai/plans";
+import { pricesTaxBehavior } from "@/lib/checkout-config";
+import { checkoutSessionExtras } from "@/lib/checkout-options";
+import type { Locale } from "@/lib/i18n/config";
 import { reportError } from "@/lib/ops/report-error";
 import {
   accrueProAllowance,
@@ -241,6 +247,8 @@ const REFUND_SUBSCRIPTION = "refund_subscription";
 const CANCEL_ACCOUNT_BILLING = "cancel_account_billing";
 /** Stop a user's billing after they won a chargeback against us (key: dispute id). */
 const CANCEL_LOST_DISPUTE = "cancel_lost_dispute";
+/** The reason of a CANCEL_LOST_DISPUTE job for a credit pack: renewals stop, the paid period stays. */
+const LOST_PACK_DISPUTE = "credit_pack";
 type RefundReason = "duplicate_subscription" | "deleted_account_subscription";
 
 async function findIntent(kind: string, key: string) {
@@ -408,16 +416,28 @@ async function subscriptionMustNotGrant(subscriptionId: string): Promise<boolean
 
 /**
  * A chargeback was lost (the customer took the money back): stop billing
- * them, whichever of their payments it was on (a renewal since then
- * changes nothing). Durable: recorded first, retried by later events and
- * the maintenance job until Stripe confirms.
+ * them. Durable: recorded first, retried by later events and the
+ * maintenance job until Stripe confirms.
+ *  - on a subscription payment (the default), whichever of them it was (a
+ *    renewal since then changes nothing): every subscription is canceled at
+ *    once and Pro ends now;
+ *  - on a credit pack (`creditPack`): nothing of the subscription was taken
+ *    back, so the period already paid for is kept (Pro, and an annual
+ *    period's monthly allowances, to its end); every subscription is set to
+ *    cancel at period end, so it never renews.
+ * The choice is recorded on the job (its reason), so a retry does the same.
  */
-export async function stopBillingAfterLostDispute(userId: string, disputeId: string): Promise<void> {
+export async function stopBillingAfterLostDispute(
+  userId: string,
+  disputeId: string,
+  opts: { creditPack?: boolean } = {},
+): Promise<void> {
   const row = await prisma.subscription.findUnique({ where: { userId } });
   const intent = await recordIntent({
     kind: CANCEL_LOST_DISPUTE,
     key: disputeId,
     userId,
+    reason: opts.creditPack ? LOST_PACK_DISPUTE : undefined,
     stripeCustomerId: row?.stripeCustomerId ?? null,
     stripeSubscriptionId: row?.stripeSubscriptionId ?? null,
   });
@@ -427,20 +447,101 @@ export async function stopBillingAfterLostDispute(userId: string, disputeId: str
 async function completeLostDisputeIntent(intent: BillingIntent): Promise<void> {
   await runIntent(intent, async () => {
     if (!intent.userId) return;
-    await cancelAllBillingForUser(intent.userId, {
-      customerId: intent.stripeCustomerId,
-      subscriptionId: intent.stripeSubscriptionId,
-    });
-    // Pro ends now, not when the deletion webhook arrives.
+    const keepPaidPeriod = intent.reason === LOST_PACK_DISPUTE;
+    const known = { customerId: intent.stripeCustomerId, subscriptionId: intent.stripeSubscriptionId };
+    if (keepPaidPeriod) await stopAllRenewalsForUser(intent.userId, known);
+    else await cancelAllBillingForUser(intent.userId, known);
+    // The row follows at once: Pro ends now after a canceled subscription,
+    // not when the deletion webhook arrives (a stopped renewal keeps it).
     const row = await prisma.subscription.findUnique({ where: { userId: intent.userId } });
     if (row?.stripeSubscriptionId) await syncSubscription(intent.userId, row.stripeSubscriptionId);
     await recordBillingEvent({
       userId: intent.userId,
       kind: "lost_dispute_cancel",
       stripeObjectId: intent.key,
-      detail: "subscriptions canceled after a lost dispute",
+      detail: keepPaidPeriod
+        ? "renewals stopped (cancel at period end) after a lost dispute on a credit pack"
+        : "subscriptions canceled after a lost dispute",
     });
   });
+}
+
+/**
+ * Make a subscription never bill again while keeping the period already
+ * paid: cancel at period end. One with no paid period to keep (past_due,
+ * unpaid, incomplete, paused: its next charge would retry an unpaid invoice)
+ * is canceled now. Done only when Stripe confirms, the subscription has
+ * ended or does not exist; anything else throws, so the caller retries.
+ */
+async function stopRenewal(id: string): Promise<void> {
+  const live = await retrieveSubscriptionOrNull(id);
+  if (!live || ENDED_STATUSES.has(live.status)) return;
+  if (!ACTIVE_STATUSES.has(live.status)) {
+    await cancelSubscription(id);
+    return;
+  }
+  const end = currentPeriodEnd(live);
+  if (live.cancel_at_period_end) return;
+  if (typeof live.cancel_at === "number" && end && live.cancel_at * 1000 <= end.getTime()) return;
+  try {
+    await stripe.subscriptions.update(id, { cancel_at_period_end: true });
+  } catch (err) {
+    if (isMissingResource(err)) return;
+    const again = await retrieveSubscriptionOrNull(id);
+    if (!again || ENDED_STATUSES.has(again.status) || again.cancel_at_period_end) return;
+    throw err;
+  }
+}
+
+/**
+ * Stop every subscription of a user that could still bill from renewing
+ * (stopRenewal; the same ones cancelAllBillingForUser finds), keeping each
+ * one's paid period, and expire open checkouts. Throws when Stripe fails.
+ */
+async function stopAllRenewalsForUser(
+  userId: string,
+  known: { customerId?: string | null; subscriptionId?: string | null },
+): Promise<void> {
+  const { customers, ids } = await billableSubscriptions(userId, known);
+  for (const id of ids) await stopRenewal(id);
+  await expireOpenCheckouts(customers);
+}
+
+/** What scheduleCancellationAtPeriodEnd did. */
+export type ScheduledCancellation =
+  | { outcome: "scheduled" | "already_scheduled"; subscriptionId: string; endsAt: Date | null }
+  | { outcome: "no_live_subscription" };
+
+/**
+ * A subscriber's own ordinary cancellation ("Cancel contracts here",
+ * lib/contract-notices): their tracked subscription stops renewing and ends
+ * with the period already paid (stopRenewal: cancel at period end; a repeat
+ * changes nothing). Only an active or trialing subscription is touched;
+ * anything else (none, ended, past_due, …) is left to the operator. The row
+ * then follows the live state (a failure there is reported, not thrown: the
+ * webhook brings it in line). Throws when Stripe fails, so the caller can
+ * keep the request open for the operator.
+ */
+export async function scheduleCancellationAtPeriodEnd(userId: string): Promise<ScheduledCancellation> {
+  const row = await prisma.subscription.findUnique({ where: { userId } });
+  const id = row?.stripeSubscriptionId;
+  if (!id) return { outcome: "no_live_subscription" };
+  const live = await retrieveSubscriptionOrNull(id);
+  if (!live || !ACTIVE_STATUSES.has(live.status)) return { outcome: "no_live_subscription" };
+  const periodEnd = currentPeriodEnd(live);
+  const cancelAt = fromUnix(live.cancel_at);
+  const already = live.cancel_at_period_end || Boolean(cancelAt && periodEnd && cancelAt <= periodEnd);
+  if (!already) await stopRenewal(id);
+  try {
+    await syncSubscription(userId, id);
+  } catch (err) {
+    reportError(err, { source: "billing", route: "scheduleCancellationAtPeriodEnd (sync)", userId });
+  }
+  return {
+    outcome: already ? "already_scheduled" : "scheduled",
+    subscriptionId: id,
+    endsAt: earliest(cancelAt, periodEnd),
+  };
 }
 
 // ---- Subscription state -----------------------------------------------------
@@ -1005,8 +1106,67 @@ export type PackInfo = {
   userId: string;
   credits: number;
   amountCents: number;
+  /** The currency of amountCents (lowercase), or null when the session does not say. */
+  currency: string | null;
   sessionId: string;
 };
+
+/**
+ * The credit pack a checkout session bought, as both the grant and the
+ * refund/dispute handlers see it (so they always agree):
+ *  - `credits`: what our own metadata says (set by createCreditPackCheckout);
+ *  - `amountCents` and `currency`: the session's total, tax included (Stripe
+ *    Tax, inclusive or exclusive), in the currency of its price (USD inline,
+ *    or the Stripe Price's). Stripe states the payment's refunds and disputes
+ *    in that same amount and currency (under Adaptive Pricing too: the
+ *    Session and PaymentIntent stay in the price's currency; the buyer's
+ *    local currency is only in presentment_details), so a refund's share of
+ *    the pack is refund / amountCents whatever the tax and currency. An
+ *    Adaptive Pricing session of an older API version (before 2025-03-31)
+ *    puts the buyer's currency at the top level and the price's currency in
+ *    currency_conversion: that one is taken when present, so the grant (the
+ *    webhook's payload, in the webhook's API version) and the reversals (the
+ *    session read back with this SDK's version) use the same basis.
+ * Neither the amount nor the currency gates the grant: tax makes the total
+ * differ from the list price, and only this server, holding the secret key,
+ * creates sessions that carry our metadata.
+ */
+export function packInfoFromSession(userId: string, session: Stripe.Checkout.Session): PackInfo {
+  const converted = session.currency_conversion;
+  const useConverted = Boolean(converted && converted.amount_total > 0 && converted.source_currency);
+  const amount = useConverted ? converted!.amount_total : session.amount_total;
+  const currency = useConverted ? converted!.source_currency : session.currency;
+  return {
+    userId,
+    credits: Number(session.metadata?.credits) || CREDIT_PACK_SIZE,
+    amountCents: amount || CREDIT_PACK_PRICE_USD * 100,
+    currency: amount ? (currency?.toLowerCase() ?? null) : "usd",
+    sessionId: session.id,
+  };
+}
+
+/** Share of the charged total at or above which a dispute counts as the whole pack (rounding, conversion). */
+export const WHOLE_PACK_DISPUTE_SHARE = 0.98;
+
+/** A dispute's currency, as its BillingEvent records it ("…; currency eur"), if it does. */
+function disputeCurrency(detail: string | null | undefined): string | null {
+  return /(?:^|;\s*)currency ([a-z]{3})\b/i.exec(detail ?? "")?.[1]?.toLowerCase() ?? null;
+}
+
+/**
+ * The money a dispute takes back, measured against the pack's total: the
+ * whole total when the dispute is in another currency than that total (its
+ * amount cannot be compared) or for at least WHOLE_PACK_DISPUTE_SHARE of it
+ * (a chargeback is for the whole payment; the rest is rounding or
+ * conversion), else its own amount.
+ */
+function disputedAmount(pack: PackInfo, ev: { amountCents: number | null; detail: string | null }): number {
+  const amount = ev.amountCents ?? 0;
+  const currency = disputeCurrency(ev.detail);
+  if (currency && pack.currency && currency !== pack.currency) return pack.amountCents;
+  if (amount >= pack.amountCents * WHOLE_PACK_DISPUTE_SHARE) return pack.amountCents;
+  return amount;
+}
 
 const reversalKey = (pi: string, suffix: string) => `pack_reversal:${pi}:${suffix}`;
 
@@ -1016,7 +1176,9 @@ const reversalKey = (pi: string, suffix: string) => `pack_reversal:${pi}:${suffi
  * run inside withUserCreditLock. Policy:
  *  - the share clawed back follows the TOTAL money returned (refunds that
  *    did not fail, plus disputes not closed in our favour), so a 50% refund
- *    and a lost dispute on the other 50% take the whole pack;
+ *    and a lost dispute on the other 50% take the whole pack; a dispute in
+ *    another currency than the pack's total, or of at least 98% of it,
+ *    counts as the whole total (disputedAmount);
  *  - each event takes only its own increment, limited to the balance: credits
  *    already spent are forgiven, never taken out of a later purchase;
  *  - a dispute closed in our favour (won, inquiry closed) or a refund that
@@ -1076,7 +1238,7 @@ export async function reconcilePackTx(
       refunded -= amount;
       await giveBack(reversalKey(pi, `refund:${ev.stripeObjectId}`), packEventKey(pi, ev));
     } else if (ev.kind === "dispute") {
-      disputed.set(ev.stripeObjectId, ev.amountCents ?? 0);
+      disputed.set(ev.stripeObjectId, disputedAmount(pack, ev));
       const take = target() - before;
       if (take > 0) {
         await debitCreditsTx(tx, pack.userId, take, "credit_reversal", packEventKey(pi, ev));
@@ -1148,12 +1310,7 @@ export async function grantCreditPack(
   }
   if (session.payment_status !== "paid") return "unpaid";
   const pi = stripeId(session.payment_intent);
-  const pack: PackInfo = {
-    userId,
-    credits: Number(session.metadata.credits) || CREDIT_PACK_SIZE,
-    amountCents: session.amount_total || CREDIT_PACK_PRICE_USD * 100,
-    sessionId: session.id,
-  };
+  const pack = packInfoFromSession(userId, session);
 
   const outcome = await withUserCreditLock(userId, async (tx): Promise<PackOutcome> => {
     const grant = await grantCreditsTx(tx, userId, pack.credits, "credit_purchase", `credit_purchase:${session.id}`);
@@ -1236,6 +1393,12 @@ export async function createProCheckout(opts: {
   email: string | null | undefined;
   priceId: string;
   origin: string;
+  /**
+   * The student's app language: Checkout's language and the language of the
+   * Terms consent text. Tax, invoices and consent follow the settings in
+   * lib/checkout-config.ts (applied by lib/checkout-options.ts).
+   */
+  locale?: Locale;
 }): Promise<ProCheckoutResult> {
   const { userId, priceId, origin } = opts;
   const row = await prisma.subscription.findUnique({ where: { userId } });
@@ -1280,6 +1443,7 @@ export async function createProCheckout(opts: {
     allow_promotion_codes: true,
     success_url: `${origin}/app?upgraded=1&session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${origin}/pricing`,
+    ...checkoutSessionExtras("pro", { origin, locale: opts.locale }),
   });
 
   await expireOlderSubscriptionCheckouts(customer, session).catch(
@@ -1318,6 +1482,14 @@ export async function createCreditPackCheckout(opts: {
   userId: string;
   email: string | null | undefined;
   origin: string;
+  /**
+   * The Stripe one-time Price to charge (STRIPE_PRICE_CREDIT_PACK, as
+   * lib/plan-pricing getCreditPackPricing validated and displayed it).
+   * Absent or null: CREDIT_PACK_PRICE_USD as an inline USD price.
+   */
+  priceId?: string | null;
+  /** The student's app language (see createProCheckout). */
+  locale?: Locale;
 }): Promise<{ url: string }> {
   const { userId, origin } = opts;
   const customer = await ensureStripeCustomer(userId, opts.email);
@@ -1326,27 +1498,38 @@ export async function createCreditPackCheckout(opts: {
     kind: "credits",
     credits: String(CREDIT_PACK_SIZE),
   };
-  const session = await stripe.checkout.sessions.create({
-    mode: "payment",
-    customer,
-    line_items: [
-      {
+  // With Stripe Tax on, the inline price says whether it includes tax.
+  const taxBehavior = pricesTaxBehavior();
+  const lineItem: Stripe.Checkout.SessionCreateParams.LineItem = opts.priceId
+    ? { price: opts.priceId, quantity: 1 }
+    : {
         price_data: {
           currency: "usd",
           product_data: {
             name: `${CREDIT_PACK_SIZE.toLocaleString("en-US")} StudyOS credits`,
           },
           unit_amount: CREDIT_PACK_PRICE_USD * 100,
+          ...(taxBehavior ? { tax_behavior: taxBehavior } : {}),
         },
         quantity: 1,
-      },
-    ],
+      };
+  // The settings' PaymentIntent fields (the consent confirmation on the
+  // receipt) are merged with ours, never spread over our metadata.
+  const { payment_intent_data: paymentExtras, ...extras } = checkoutSessionExtras("credits", {
+    origin,
+    locale: opts.locale,
+  });
+  const session = await stripe.checkout.sessions.create({
+    mode: "payment",
+    customer,
+    line_items: [lineItem],
     client_reference_id: userId,
     metadata,
     // Also on the PaymentIntent, so refunds/disputes are traceable to the pack.
-    payment_intent_data: { metadata },
+    payment_intent_data: { ...paymentExtras, metadata },
     success_url: `${origin}/app?credits=${CREDIT_PACK_SIZE}&session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${origin}/app/credits`,
+    ...extras,
   });
   if (!session.url) throw new Error("Stripe returned no checkout URL");
   return { url: session.url };
@@ -1471,6 +1654,20 @@ export async function cancelAllBillingForUser(
   userId: string,
   known: { customerId?: string | null; subscriptionId?: string | null } = {},
 ): Promise<void> {
+  const { customers, ids } = await billableSubscriptions(userId, known);
+  for (const id of ids) await cancelSubscription(id);
+  await expireOpenCheckouts(customers);
+}
+
+/**
+ * Every subscription of a user that could still bill (the tracked one, every
+ * one on their Stripe customers, and any other carrying their userId
+ * metadata), and those customers. Throws when Stripe cannot list them.
+ */
+async function billableSubscriptions(
+  userId: string,
+  known: { customerId?: string | null; subscriptionId?: string | null },
+): Promise<{ customers: Set<string>; ids: Set<string> }> {
   const row = await prisma.subscription.findUnique({ where: { userId } });
   const customers = new Set(
     [row?.stripeCustomerId, known.customerId].filter((c): c is string => Boolean(c)),
@@ -1500,9 +1697,11 @@ export async function cancelAllBillingForUser(
       // customers were reused.
     }
   }
+  return { customers, ids };
+}
 
-  for (const id of ids) await cancelSubscription(id);
-
+/** Expire the open checkouts of these customers (best effort). */
+async function expireOpenCheckouts(customers: Iterable<string>): Promise<void> {
   for (const customer of customers) {
     try {
       const open = await stripe.checkout.sessions.list({ customer, status: "open", limit: 100 });

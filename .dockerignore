@@ -12,3 +12,6 @@ Dockerfile
 .gcloudignore
 cloudbuild.yaml
 .claude
+
+# Anthropic's typefaces: local only, shipping them needs a licence (see globals.css)
+public/fonts/anthropic

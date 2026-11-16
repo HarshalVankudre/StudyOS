@@ -112,11 +112,23 @@ export function reconcileMapping(db: Database, saved: Partial<FeedMapping> | und
 // ---------------------------------------------------------------------------
 // Courses
 
+/**
+ * Words before a number that name a year, grade or term, not a subject:
+ * "Year 12 Biology" and "Year 12 Chemistry" are two courses, and reading
+ * "YEAR 12" as their code would merge them into one.
+ */
+const NOT_CODE_WORDS = new Set([
+  "year", "yr", "grade", "form", "level", "class", "term", "semester", "sem", "quarter",
+  "fall", "spring", "summer", "winter", "autumn", "week", "unit",
+]);
+
 /** "CS101-001-FA26" / "cs 101" / "MATH-2410H: Calculus" → "CS 101" / "MATH 2410H". */
 export function courseCode(text: string): string | null {
-  const m = /(?:^|[^A-Za-z])([A-Za-z]{2,6})[\s_.-]?(\d{2,4}[A-Za-z]?)(?![0-9])/.exec(text);
-  if (!m) return null;
-  return `${m[1].toUpperCase()} ${m[2].toUpperCase()}`;
+  for (const m of text.matchAll(/(?:^|[^A-Za-z])([A-Za-z]{2,6})[\s_.-]?(\d{2,4}[A-Za-z]?)(?![0-9])/g)) {
+    if (NOT_CODE_WORDS.has(m[1].toLowerCase())) continue;
+    return `${m[1].toUpperCase()} ${m[2].toUpperCase()}`;
+  }
+  return null;
 }
 
 export function normalizeLabel(text: string): string {

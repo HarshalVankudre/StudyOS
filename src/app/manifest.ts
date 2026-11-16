@@ -2,7 +2,7 @@ import type { MetadataRoute } from "next";
 
 /**
  * Web app manifest (Next.js serves it at /manifest.webmanifest and links it
- * from every page). Colours match the default dark theme in globals.css.
+ * from every page). Colours match the default light theme in globals.css.
  * Static on purpose: one manifest for every language and visitor.
  */
 export default function manifest(): MetadataRoute.Manifest {
@@ -15,8 +15,8 @@ export default function manifest(): MetadataRoute.Manifest {
     scope: "/",
     display: "standalone",
     orientation: "any",
-    background_color: "#0b0b0a",
-    theme_color: "#0b0b0a",
+    background_color: "#faf9f5",
+    theme_color: "#faf9f5",
     categories: ["education", "productivity"],
     icons: [
       { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },

@@ -4,6 +4,7 @@ import {
   MAX_ASSET_BYTES,
   assertAllowedArtifact,
   extForMime,
+  isUploadImageMime,
   mimeForOutputPath,
 } from "./mime";
 
@@ -14,6 +15,15 @@ describe("artifact mime + size boundary", () => {
     expect(mimeForOutputPath("out/page-1.png")).toBe("image/png");
     expect(mimeForOutputPath("out/diagram.SVG")).toBe("image/svg+xml");
     expect(mimeForOutputPath("out/report.pdf")).toBeNull();
+  });
+
+  it("stores uploaded photos, but sandbox outputs still resolve only to PNG and SVG", () => {
+    expect(extForMime("image/jpeg")).toBe("jpg");
+    expect(() => assertAllowedArtifact(new Uint8Array(10), "image/webp")).not.toThrow();
+    expect(mimeForOutputPath("out/photo.jpg")).toBeNull();
+    expect(mimeForOutputPath("out/anim.gif")).toBeNull();
+    expect(isUploadImageMime("image/jpeg")).toBe(true);
+    expect(isUploadImageMime("image/svg+xml")).toBe(false);
   });
 
   it("accepts a small png", () => {

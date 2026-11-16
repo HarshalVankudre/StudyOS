@@ -47,6 +47,7 @@ export function ConnectedFeeds({
   const [errors, setErrors] = useState<Record<string, FeedErrorCode>>({});
   const [confirming, setConfirming] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, FeedMapping>>({});
   const flagged = db.rows.filter((r) => r.source?.missingSince);
 
   const syncNow = async (feed: FeedInfo) => {
@@ -87,9 +88,24 @@ export function ConnectedFeeds({
     }
   };
 
+  // The choice shows at once, while it saves; a failed save goes back to the
+  // stored mapping and says so (it used to snap back without a word).
   const saveMapping = async (feed: FeedInfo, mapping: FeedMapping) => {
+    setDrafts((d) => ({ ...d, [feed.id]: mapping }));
+    setErrors((e) => {
+      const next = { ...e };
+      delete next[feed.id];
+      return next;
+    });
     const saved = await updateFeedSettingsAction(feed.id, { mapping: syncMapping(mapping) }).catch(() => null);
     if (saved) onFeedChange(saved);
+    else setErrors((e) => ({ ...e, [feed.id]: "failed" }));
+    setDrafts((d) => {
+      if (d[feed.id] !== mapping) return d;
+      const next = { ...d };
+      delete next[feed.id];
+      return next;
+    });
   };
 
   return (
@@ -176,7 +192,7 @@ export function ConnectedFeeds({
                       <MappingEditor
                         db={db}
                         allowNew={false}
-                        mapping={syncMapping(reconcileMapping(db, feed.mapping ?? undefined))}
+                        mapping={drafts[feed.id] ?? syncMapping(reconcileMapping(db, feed.mapping ?? undefined))}
                         onChange={(mapping) => void saveMapping(feed, mapping)}
                       />
                     </div>

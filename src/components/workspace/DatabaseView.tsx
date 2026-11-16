@@ -260,7 +260,7 @@ function DatabaseBody({
                 onClick={() => switchView(v.id)}
                 aria-pressed={active}
                 className={`inline-flex min-h-9 shrink-0 items-center gap-1.5 border-b-2 px-2 pb-2 pt-1 text-sm transition ${
-                  active ? "border-lime font-medium text-ink" : "border-transparent text-ink-faint hover:text-ink-soft"
+                  active ? "border-lime-deep font-medium text-ink" : "border-transparent text-ink-faint hover:text-ink-soft"
                 }`}
               >
                 <Icon className="h-3.5 w-3.5" aria-hidden />
