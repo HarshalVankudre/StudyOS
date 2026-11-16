@@ -1,6 +1,7 @@
 /**
  * Server-side text extraction for uploads (syllabus import, course
- * material): PDF, Word (.docx) and plain text / Markdown.
+ * material, PDFs imported into notebooks): PDF, Word (.docx) and plain
+ * text / Markdown.
  *
  * The upload is untrusted, so the parsing never runs in the server process.
  * Each extraction runs in a child Node process (extract-child.mjs running
@@ -45,6 +46,7 @@ import {
   docxXmlToText as docxXmlToTextCore,
   readZipEntry,
   type ExtractedPages,
+  type ExtractedPdfLayout,
   type ExtractedSource,
   type ExtractionOutcome,
   type ExtractionRequest,
@@ -56,6 +58,8 @@ export { ExtractError, detectSourceKind, readZipEntry };
 export type {
   ExtractErrorCode,
   ExtractedPages,
+  ExtractedPdfLayout,
+  PdfLayoutPage,
   ExtractedSource,
   SourceKind,
 } from "./extract-core.mjs";
@@ -121,6 +125,19 @@ export async function extractSourcePages(
   limits: ExtractLimits = {},
 ): Promise<ExtractedPages> {
   return (await runIsolated("pages", bytes, fileName, mimeType, limits)) as ExtractedPages;
+}
+
+/**
+ * Every page's size and text of a PDF imported as notebook pages (see
+ * extractPdfLayout in extract-core.mjs). Same isolation and pool as the other
+ * extractions. A PDF over `maxPdfPages` pages is refused (too_large, detail
+ * "too many pages"); a page without text is not an error.
+ */
+export async function extractPdfLayout(
+  bytes: Uint8Array,
+  limits: ExtractLimits & { maxPageChars?: number } = {},
+): Promise<ExtractedPdfLayout> {
+  return (await runIsolated("layout", bytes, "document.pdf", "application/pdf", limits)) as ExtractedPdfLayout;
 }
 
 /**
@@ -313,8 +330,8 @@ async function runIsolated(
   bytes: Uint8Array,
   fileName: string,
   mimeType: string,
-  limits: ExtractLimits,
-): Promise<ExtractedSource | ExtractedPages> {
+  limits: ExtractLimits & { maxPageChars?: number },
+): Promise<ExtractedSource | ExtractedPages | ExtractedPdfLayout> {
   // Cheap refusals before taking a slot or starting a process.
   if (bytes.byteLength === 0) throw new ExtractError("no_text", "empty file");
   if (bytes.byteLength > (limits.maxBytes ?? MAX_UPLOAD_BYTES)) throw new ExtractError("too_large");
@@ -337,6 +354,7 @@ async function runIsolated(
       maxChars: limits.maxChars ?? MAX_EXTRACTED_CHARS,
       maxPdfInflatedBytes: limits.maxPdfInflatedBytes ?? MAX_PDF_INFLATED_BYTES,
       maxDocxXmlBytes: MAX_DOCX_XML_BYTES,
+      ...(limits.maxPageChars !== undefined ? { maxPageChars: limits.maxPageChars } : {}),
       ...(config.skipPdfPrecheck ? { skipPdfPrecheck: true } : {}),
     };
     const outcome = await runChild(

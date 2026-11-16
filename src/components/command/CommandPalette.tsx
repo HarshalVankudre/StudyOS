@@ -15,6 +15,8 @@ import {
   ListChecks,
   Loader2,
   Moon,
+  NotebookPen,
+  PenLine,
   Plus,
   Search,
   Settings,
@@ -44,7 +46,7 @@ import {
 const DEBOUNCE_MS = 180;
 
 /** Top-level /app routes that are not a workspace id. */
-const APP_SECTIONS = new Set(["agents", "credits", "settings"]);
+const APP_SECTIONS = new Set(["agents", "credits", "settings", "notebooks"]);
 
 /** The workspace id when the current route is /app/<id>, else null. */
 export function workspaceIdFromPath(pathname: string | null): string | null {
@@ -82,14 +84,17 @@ const KIND_ICON: Record<SearchKind, React.ReactNode> = {
   block: <Text className="h-4 w-4" aria-hidden />,
   card: <Layers className="h-4 w-4" aria-hidden />,
   question: <CircleHelp className="h-4 w-4" aria-hidden />,
+  notebook: <NotebookPen className="h-4 w-4" aria-hidden />,
+  notebookPage: <PenLine className="h-4 w-4" aria-hidden />,
 };
 
 type Status = "loading" | "ready" | "error" | "limited";
 
 /**
- * ⌘/Ctrl+K palette: searches every workspace the student owns (on the
- * server) and offers quick actions. Results open the exact place through the
- * deep-link contract /app/<id>?page=…[&block=… | &db=…&row=…].
+ * ⌘/Ctrl+K palette: searches every workspace and handwritten notebook the
+ * student owns (on the server) and offers quick actions. Results open the
+ * exact place through the deep-link contract /app/<id>?page=…[&block=… |
+ * &db=…&row=…] or /app/notebooks/<id>?page=….
  */
 export function CommandPalette({
   open,

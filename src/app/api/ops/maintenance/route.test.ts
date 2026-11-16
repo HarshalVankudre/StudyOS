@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ runRetention: vi.fn(), retryAssets: vi.fn() }));
+const mocks = vi.hoisted(() => ({ runRetention: vi.fn(), retryAssets: vi.fn(), retryNotebookFiles: vi.fn() }));
 vi.mock("@/lib/ops/retention", () => ({ runRetention: mocks.runRetention }));
 vi.mock("@/lib/account/erase-user-data", () => ({ retryOrphanedAssetDeletes: mocks.retryAssets }));
+vi.mock("@/lib/notebooks/server/store", () => ({ retryOrphanedNotebookFiles: mocks.retryNotebookFiles }));
 
 import { POST } from "./route";
 import { secretsMatch } from "@/lib/ops/secret";
@@ -16,6 +17,7 @@ const req = (auth?: string) =>
 beforeEach(() => {
   mocks.runRetention.mockResolvedValue({ agentTasks: 0 });
   mocks.retryAssets.mockResolvedValue({ retried: 2, deleted: 1 });
+  mocks.retryNotebookFiles.mockResolvedValue({ retried: 1, deleted: 1 });
   vi.spyOn(console, "log").mockImplementation(() => {});
 });
 afterEach(() => {
@@ -45,6 +47,7 @@ describe("POST /api/ops/maintenance", () => {
       ok: true,
       result: { agentTasks: 0 },
       orphanedAssets: { retried: 2, deleted: 1 },
+      orphanedNotebookFiles: { retried: 1, deleted: 1 },
     });
   });
 

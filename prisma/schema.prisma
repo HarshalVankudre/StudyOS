@@ -524,3 +524,106 @@ model NotificationLog {
   @@index([userId, localDate])
   @@index([createdAt])
 }
+
+// ---- Handwritten notebooks (lib/notebooks) ------------------------------------
+//
+// GoodNotes-style notebooks: an ordered list of fixed-size pages, each with a
+// paper template (or a page of an imported PDF as its background) and ink
+// strokes. Every row carries `ownerId` and every read and write filters on it.
+// Ids are client-generated (lib/notebooks/model.ts ID_PATTERN) so a device
+// can create notebooks, pages and strokes offline and sync them later; the
+// server checks that an id it is given never collides with another owner's.
+
+// A folder on the notebooks shelf. Deleting a folder moves its notebooks to
+// the shelf's root; it never deletes a notebook.
+model NotebookFolder {
+  id        String   @id
+  ownerId   String
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ownerId])
+}
+
+// One notebook. `paper` is JSON (NotebookPaper: the template and size new
+// pages get). `workspaceId` is the course workspace the student linked (for
+// study kits made from the notes): a plain id, no foreign key, so trashing or
+// purging the workspace never touches the notebook (readers check that it is
+// still the student's live workspace). `version` is bumped by every change
+// to the pages or the ink (POST /api/notebooks/:id/ops), `pageCount` is kept
+// in the same statement. `deletedAt` = in the trash: invisible to every
+// reader except the trash list, restore and permanent delete; purged 30 days
+// after trashing (lib/ops/retention) with its pages and imported PDFs.
+model Notebook {
+  id          String         @id
+  ownerId     String
+  folderId    String?
+  workspaceId String?
+  title       String
+  cover       String
+  paper       String
+  pageCount   Int            @default(0)
+  version     Int            @default(1)
+  deletedAt   DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  pages       NotebookPage[]
+
+  @@index([ownerId, deletedAt])
+}
+
+// One page. `position` is a fractional order key (pages sort ascending).
+// `template` is JSON (PageTemplate). `pdfFileId`/`pdfPage` name the imported
+// PDF page drawn as the background (NotebookFile, 1-based page). `ink` is the
+// page's binary stroke blob (lib/notebooks/codec.ts, at most 6 MB), changed
+// only through ops; `inkVersion` is bumped on every ink change. `pdfText` is
+// the PDF page's text layer (from the import), `inkText` the handwriting as
+// last recognised (POST .../recognize) and `inkTextVersion` the `inkVersion`
+// it was recognised at (-1 = never), so the client knows which pages to send
+// again. Both texts feed search. Removed with its notebook (ON DELETE CASCADE).
+model NotebookPage {
+  id             String   @id
+  notebookId     String
+  ownerId        String
+  position       Float
+  template       String
+  width          Int
+  height         Int
+  pdfFileId      String?
+  pdfPage        Int?
+  ink            Bytes
+  inkVersion     Int      @default(0)
+  strokeCount    Int      @default(0)
+  pdfText        String   @default("")
+  inkText        String   @default("")
+  inkTextVersion Int      @default(-1)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  notebook       Notebook @relation(fields: [notebookId], references: [id], onDelete: Cascade)
+
+  @@index([notebookId, position])
+  @@index([ownerId])
+}
+
+// An imported PDF (its pages are notebook page backgrounds). The bytes live in
+// object storage (`storageKey`, when ASSETS_BUCKET is configured) or, without
+// a bucket, in `data`; lib/notebooks/server/file-store.ts hides the choice.
+// `notebookId` is the notebook it belongs to: permanently deleting that
+// notebook deletes the file unless a page of another of the owner's notebooks
+// still shows it. Capped per student (lib/notebooks/server/limits.ts).
+model NotebookFile {
+  id         String   @id
+  ownerId    String
+  notebookId String?
+  name       String
+  mime       String
+  sizeBytes  Int
+  sha256     String
+  pageCount  Int
+  storageKey String?
+  data       Bytes?
+  createdAt  DateTime @default(now())
+
+  @@index([ownerId])
+}

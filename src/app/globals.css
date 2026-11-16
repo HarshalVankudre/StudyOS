@@ -374,3 +374,20 @@ body {
     animation: none !important;
   }
 }
+
+/* ---- Notebooks ----------------------------------------------------------
+   The desk behind the pages (the ink engine reads --notebook-desk), and no
+   text selection, callouts or tap highlights anywhere on the writing stage:
+   on iPad a long press with the Pencil must draw, not open a menu. */
+.notebook-stage {
+  --notebook-desk: #262624;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: none;
+  overscroll-behavior: none;
+}
+.light .notebook-stage {
+  --notebook-desk: #e7e5e0;
+}

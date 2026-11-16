@@ -179,6 +179,11 @@ describe("README", () => {
     expect(section).toContain(`${n(CREDIT_PACK_SIZE)} credits for $${CREDIT_PACK_PRICE_USD}`);
     expect(section).toContain(`up to ${FREE_FAILURES_PER_DAY} a day`);
     expect(section).toContain(`cost more than ${ACTION_PRICES.message}`);
+    // Handwriting recognition: no credits, a daily cap.
+    expect(USAGE_LIMITS.handwriting.windowMs).toBe(24 * 60 * 60 * 1000);
+    expect(section).toContain(
+      `(${n(USAGE_LIMITS.handwriting.free)} pages a day on Free, ${n(USAGE_LIMITS.handwriting.pro)} on Pro)`,
+    );
   });
 
   it("its price table is the module's price list, row for row", () => {

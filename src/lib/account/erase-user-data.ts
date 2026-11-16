@@ -12,7 +12,11 @@
  * storage not configured) are KEPT, so the files are never orphaned: the
  * daily maintenance job (retryOrphanedAssetDeletes in lib/ops/retention)
  * retries them for every tombstoned account and removes each row once its
- * file is gone. The rows hold no content (key, type, size).
+ * file is gone. The rows hold no content (key, type, size). PDFs imported
+ * into notebooks are handled the same way: their stored objects are deleted
+ * best-effort, a NotebookFile row whose object could not be deleted is kept
+ * (name and size; the bytes are in object storage) and retried by
+ * retryOrphanedNotebookFiles (lib/notebooks/server/store.ts).
  *
  * Billing is NOT handled here. Callers must stop the Stripe subscription first
  * (see deleteAccountAction and the Clerk webhook), because this deletes the
@@ -22,6 +26,7 @@ import "server-only";
 
 import { prisma } from "@/lib/db";
 import { gcsAssetStore } from "@/lib/assets/storage";
+import { deletePdfObjects } from "@/lib/notebooks/server/file-store";
 import { reportError } from "@/lib/ops/report-error";
 
 /**
@@ -50,7 +55,10 @@ export async function deleteAssetFiles(
   return { deletedIds, failed: assets.length - deletedIds.length };
 }
 
-/** Erase the user's data; returns how many asset files are left for the retry job. */
+/**
+ * Erase the user's data; returns how many stored files (rendered assets and
+ * imported notebook PDFs) are left for the retry jobs.
+ */
 export async function eraseUserData(userId: string): Promise<{ assetsPending: number }> {
   // Asset bytes live in object storage; collect keys before rows disappear.
   const assets = await prisma.asset.findMany({
@@ -60,6 +68,23 @@ export async function eraseUserData(userId: string): Promise<{ assetsPending: nu
   const { deletedIds, failed } = await deleteAssetFiles(assets);
   if (failed > 0) {
     reportError(new Error(`${failed} asset file(s) could not be deleted; kept for retry`), {
+      source: "eraseUserData",
+      userId,
+    });
+  }
+
+  // Imported notebook PDFs: rows without a stored object (bytes in the row)
+  // and rows whose object is gone now are deleted; the rest stay for retry.
+  const pdfFiles = await prisma.notebookFile.findMany({
+    where: { ownerId: userId },
+    select: { id: true, storageKey: true },
+  });
+  const pdfKeys = pdfFiles.flatMap((f) => (f.storageKey ? [f.storageKey] : []));
+  const { deleted: pdfKeysGone, failed: pdfFailed } = await deletePdfObjects(pdfKeys);
+  const gone = new Set(pdfKeysGone);
+  const pdfFileIds = pdfFiles.filter((f) => !f.storageKey || gone.has(f.storageKey)).map((f) => f.id);
+  if (pdfFailed > 0) {
+    reportError(new Error(`${pdfFailed} notebook PDF file(s) could not be deleted; kept for retry`), {
       source: "eraseUserData",
       userId,
     });
@@ -89,9 +114,15 @@ export async function eraseUserData(userId: string): Promise<{ assetsPending: nu
     prisma.pushSubscription.deleteMany({ where: { userId } }),
     prisma.notificationPreference.deleteMany({ where: { userId } }),
     prisma.notificationLog.deleteMany({ where: { userId } }),
+    // Handwritten notebooks: pages (also removed by cascade), notebooks,
+    // folders, and imported PDF rows whose bytes are gone.
+    prisma.notebookPage.deleteMany({ where: { ownerId: userId } }),
+    prisma.notebook.deleteMany({ where: { ownerId: userId } }),
+    prisma.notebookFolder.deleteMany({ where: { ownerId: userId } }),
+    prisma.notebookFile.deleteMany({ where: { ownerId: userId, id: { in: pdfFileIds } } }),
     prisma.subscription.deleteMany({ where: { userId } }),
   ]);
-  return { assetsPending: failed };
+  return { assetsPending: failed + pdfFailed };
 }
 
 /** Asset files retried per maintenance run (keeps one run short). */

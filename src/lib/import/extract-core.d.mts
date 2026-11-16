@@ -47,6 +47,24 @@ export interface ExtractedPages {
   truncated: boolean;
 }
 
+/** One page of a PDF read in "layout" mode (notebook imports). */
+export interface PdfLayoutPage {
+  /** Size in PDF points (1/72 inch), as displayed (the page's rotation applied). */
+  width: number;
+  height: number;
+  /** Tidied text of the page, at most `maxPageChars` (empty for a scan). */
+  text: string;
+}
+
+export interface ExtractedPdfLayout {
+  kind: "pdf";
+  /** Pages in the document (every one is listed in `pages`). */
+  pageCount: number;
+  pages: PdfLayoutPage[];
+  /** True when some page's text was left out (total cap or time). */
+  textTruncated: boolean;
+}
+
 /** Fully resolved limits of one run (extract.ts fills in the defaults). */
 export interface ResolvedLimits {
   /** Epoch milliseconds after which PDF reading stops with "timeout". */
@@ -56,12 +74,14 @@ export interface ResolvedLimits {
   maxChars: number;
   maxPdfInflatedBytes: number;
   maxDocxXmlBytes: number;
+  /** "layout" mode: most text kept per page (defaults to maxChars). */
+  maxPageChars?: number;
   /** Tests only: let PDF.js see the file unmeasured (exercises the memory cap). */
   skipPdfPrecheck?: boolean;
 }
 
 export interface ExtractionRequest {
-  mode: "text" | "pages";
+  mode: "text" | "pages" | "layout";
   bytes: Uint8Array;
   fileName: string;
   mimeType: string;
@@ -69,7 +89,7 @@ export interface ExtractionRequest {
 }
 
 export type ExtractionOutcome =
-  | { ok: true; value: ExtractedSource | ExtractedPages }
+  | { ok: true; value: ExtractedSource | ExtractedPages | ExtractedPdfLayout }
   | { ok: false; code: ExtractErrorCode | "internal"; detail: string; kind?: SourceKind };
 
 export function detectSourceKind(

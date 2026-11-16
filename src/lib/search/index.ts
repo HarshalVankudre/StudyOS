@@ -1,13 +1,17 @@
 /**
- * Workspace search (pure; no database, no React).
+ * Workspace and notebook search (pure; no database, no React).
  *
  * `buildSearchEntries` flattens one workspace into searchable entries: the
  * workspace itself, its pages, the text of its blocks, database rows,
- * flashcards and quiz questions. `searchEntries` ranks entries against a
- * query and groups the hits for the command palette. Every hit carries the
- * deep link that opens the exact place:
+ * flashcards and quiz questions. `buildNotebookEntries` does the same for a
+ * handwritten notebook: the notebook (its title) and each page with text
+ * (the recognised handwriting and the imported PDF's text layer).
+ * `searchEntries` ranks entries against a query and groups the hits for the
+ * command palette. Every hit carries the deep link that opens the exact
+ * place:
  *
  *   /app/<workspaceId>?page=<pageId>[&block=<blockId> | &db=<databaseId>&row=<rowId>]
+ *   /app/notebooks/<notebookId>[?page=<pageId>]
  *
  * Scale: designed for a student with a dozen workspaces of up to a few
  * thousand blocks each. Matching is a linear scan over pre-folded strings,
@@ -20,12 +24,22 @@ import type { Block, Database, DatabaseRow, Workspace } from "@/lib/workspace/ty
 import { databaseById, findRow, MAX_RELATION_IDS, relationIds } from "@/lib/workspace/row-lookup";
 import { clipText, fold, plainText, queryWords, snippetAround } from "./text";
 
-export type SearchKind = "workspace" | "page" | "row" | "block" | "card" | "question";
+export type SearchKind =
+  | "workspace"
+  | "page"
+  | "row"
+  | "block"
+  | "card"
+  | "question"
+  | "notebook"
+  | "notebookPage";
 
 /** Display order of result groups in the palette. */
 export const SEARCH_KIND_ORDER: readonly SearchKind[] = [
   "workspace",
+  "notebook",
   "page",
+  "notebookPage",
   "row",
   "block",
   "card",
@@ -34,6 +48,11 @@ export const SEARCH_KIND_ORDER: readonly SearchKind[] = [
 
 export interface SearchEntry {
   kind: SearchKind;
+  /**
+   * The container the hit lives in. For "notebook" and "notebookPage" hits
+   * these are the notebook's id and title (the palette shows the name as
+   * the hit's place, as it does for a workspace).
+   */
   workspaceId: string;
   workspaceName: string;
   workspaceIcon?: string;
@@ -90,14 +109,18 @@ export const GROUP_LIMIT: Record<SearchKind, number> = {
   block: 6,
   card: 5,
   question: 5,
+  notebook: 5,
+  notebookPage: 6,
 };
 
 const KIND_WEIGHT: Record<SearchKind, number> = {
   workspace: 60,
+  notebook: 55,
   page: 50,
   row: 40,
   question: 30,
   card: 30,
+  notebookPage: 25,
   block: 20,
 };
 
@@ -115,6 +138,10 @@ const enc = encodeURIComponent;
 
 /** The deep link for an entry (see the URL contract above). */
 export function entryHref(e: Pick<SearchEntry, "kind" | "workspaceId" | "pageId" | "blockId" | "databaseId" | "rowId">): string {
+  if (e.kind === "notebook" || e.kind === "notebookPage") {
+    const notebook = `/app/notebooks/${enc(e.workspaceId)}`;
+    return e.kind === "notebookPage" && e.pageId ? `${notebook}?page=${enc(e.pageId)}` : notebook;
+  }
   const base = `/app/${enc(e.workspaceId)}`;
   if (e.kind === "workspace") return base;
   const params: string[] = [];
@@ -260,6 +287,53 @@ export function buildSearchEntries(ws: Workspace): SearchEntry[] {
         icon: db.icon || undefined,
       });
     }
+  }
+  return out;
+}
+
+/** Text of one notebook page that search reads (handwriting and PDF text together). */
+const MAX_NOTEBOOK_PAGE_TEXT = 8000;
+
+/** What notebook search reads of one notebook (lib/search/server.ts loads it). */
+export interface NotebookSearchSource {
+  id: string;
+  title: string;
+  /** Pages that have text, with their 1-based page number. */
+  pages: { id: string; number: number; inkText: string; pdfText: string }[];
+}
+
+/**
+ * Entries of one handwritten notebook: the notebook (by title) and every page
+ * with text. A page's text is its recognised handwriting first (the
+ * student's own notes), then the imported PDF's text; each is read up to
+ * MAX_SEARCH_TEXT. The page number is the hit's context ("p. 3").
+ */
+export function buildNotebookEntries(nb: NotebookSearchSource): SearchEntry[] {
+  const out: SearchEntry[] = [];
+  let order = 0;
+  const base = { workspaceId: nb.id, workspaceName: nb.title };
+  const title = clipText(nb.title);
+  if (title) {
+    out.push({ ...base, kind: "notebook", title, body: "", context: "", order: order++, fTitle: fold(title), fBody: "" });
+  }
+  for (const page of nb.pages) {
+    const text = [page.inkText, page.pdfText]
+      .map((t) => clipText(t).replace(/\s+/g, " ").trim())
+      .filter(Boolean)
+      .join(" · ");
+    const body = clipText(text, MAX_NOTEBOOK_PAGE_TEXT);
+    if (!body) continue;
+    out.push({
+      ...base,
+      kind: "notebookPage",
+      pageId: page.id,
+      title: "",
+      body,
+      context: `p. ${page.number}`,
+      order: order++,
+      fTitle: "",
+      fBody: fold(body),
+    });
   }
   return out;
 }

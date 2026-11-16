@@ -1,4 +1,5 @@
 import { retryOrphanedAssetDeletes } from "@/lib/account/erase-user-data";
+import { retryOrphanedNotebookFiles } from "@/lib/notebooks/server/store";
 import { reportError } from "@/lib/ops/report-error";
 import { runRetention } from "@/lib/ops/retention";
 import { bearerToken, secretsMatch } from "@/lib/ops/secret";
@@ -28,11 +29,23 @@ export async function POST(req: Request) {
       reportError(error, { source: "api", route: "/api/ops/maintenance", method: "POST" });
       return null;
     });
+    // Imported notebook PDFs whose stored object could not be deleted when
+    // their notebook was purged or their account erased.
+    const orphanedNotebookFiles = await retryOrphanedNotebookFiles().catch((error) => {
+      reportError(error, { source: "api", route: "/api/ops/maintenance", method: "POST" });
+      return null;
+    });
     // One structured INFO line (counts only) for Cloud Logging.
     console.log(
-      JSON.stringify({ severity: "INFO", message: "[StudyOS] retention run", result, orphanedAssets }),
+      JSON.stringify({
+        severity: "INFO",
+        message: "[StudyOS] retention run",
+        result,
+        orphanedAssets,
+        orphanedNotebookFiles,
+      }),
     );
-    return Response.json({ ok: true, result, orphanedAssets });
+    return Response.json({ ok: true, result, orphanedAssets, orphanedNotebookFiles });
   } catch (error) {
     reportError(error, { source: "api", route: "/api/ops/maintenance", method: "POST" });
     return Response.json({ ok: false }, { status: 500 });
