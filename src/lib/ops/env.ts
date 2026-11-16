@@ -66,6 +66,7 @@ export const ENV_VARS: readonly EnvVarSpec[] = [
   { name: "ANTHROPIC_API_KEY", required: "ai", feature: "ai", secret: true, description: "Anthropic key; required when a plan model is a bare claude-* id." },
   { name: "STUDYOS_FREE_MODEL", required: false, feature: "ai", secret: false, description: "Model for the Free plan (default z-ai/glm-5.2)." },
   { name: "STUDYOS_PRO_MODEL", required: false, feature: "ai", secret: false, description: "Model for the Pro plan (default z-ai/glm-5.2)." },
+  { name: "STUDYOS_HANDWRITING_MODEL", required: false, feature: "ai", secret: false, description: "Vision model that reads notebook handwriting for search (lib/notebooks/server/recognize.ts). Default claude-haiku-5-5 when ANTHROPIC_API_KEY is set; a bare claude-* id uses ANTHROPIC_API_KEY, anything else must be an OpenRouter vision model (OPENROUTER_API_KEY). Without a usable model, handwriting search is off (notebooks still work). Uses no credits; capped per day (USAGE_LIMITS.handwriting)." },
   { name: "AGENT_FETCH_ALLOWLIST", required: false, feature: "webFetch", secret: false, description: "Comma-separated hosts the agent may read; empty = no web reading." },
   // Billing
   { name: "STRIPE_SECRET_KEY", required: false, feature: "billing", secret: true, description: "Stripe secret key; billing is disabled without it." },
@@ -228,6 +229,15 @@ export function checkEnvironment(env: Env = process.env, build: BuildInfo = BUIL
   }
   if (features.notifications.enabled && !features.maintenance.enabled) {
     warnings.push("VAPID keys are set but MAINTENANCE_SECRET is not: the notifications dispatch cannot run, so nothing is sent.");
+  }
+  // Mirrors handwritingModel (lib/notebooks/server/recognize.ts), kept inline
+  // so this module stays free of server-only imports.
+  const handwriting = env.STUDYOS_HANDWRITING_MODEL?.trim() || "claude-haiku-5-5";
+  const handwritingKey = apiKeyEnvVar(providerForModel(handwriting));
+  if (production && !isSet(env, handwritingKey)) {
+    warnings.push(
+      `Handwriting search is OFF: the handwriting model ${handwriting} needs ${handwritingKey}. Notebooks work; handwritten notes are just not searchable. Set ${handwritingKey}, or STUDYOS_HANDWRITING_MODEL to a vision model whose key is set.`,
+    );
   }
   if (production && !isSet(env, "STUDYOS_SUPPORT_EMAIL")) {
     warnings.push("STUDYOS_SUPPORT_EMAIL is not set: public pages show the fallback support address.");

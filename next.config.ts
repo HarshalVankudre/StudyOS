@@ -47,6 +47,9 @@ const nextConfig: NextConfig = {
     // traced through serverExternalPackages below.
     "/api/import/syllabus": ["./src/lib/import/extract-core.mjs", "./src/lib/import/extract-child.mjs"],
     "/api/materials": ["./src/lib/import/extract-core.mjs", "./src/lib/import/extract-child.mjs"],
+    "/api/notebooks/import-pdf": ["./src/lib/import/extract-core.mjs", "./src/lib/import/extract-child.mjs"],
+    // Brackets escaped: keys are picomatch globs, where [id] is a character class.
+    "/api/notebooks/\\[id\\]/pdf": ["./src/lib/import/extract-core.mjs", "./src/lib/import/extract-child.mjs"],
   },
   // Pin the workspace root to this folder so Next ignores stray lockfiles
   // elsewhere on the machine (silences the inferred-root warning).
@@ -59,9 +62,13 @@ const nextConfig: NextConfig = {
   // in standalone.
   serverExternalPackages: ["unpdf", "fflate"],
   experimental: {
-    // Syllabus uploads may be up to 10 MB plus multipart overhead; the proxy
-    // buffers request bodies and would otherwise cut them off at 10 MB.
-    proxyClientMaxBodySize: "11mb",
+    // The proxy (src/proxy.ts) buffers request bodies and silently cuts them
+    // off at this size. The largest upload is a PDF imported into a notebook
+    // (MAX_PDF_BYTES, 30 MB, lib/notebooks/model.ts: under Cloud Run's 32 MiB
+    // HTTP/1 request cap) plus multipart overhead;
+    // syllabus and material uploads stay at 10 MB. Every route still reads
+    // its own body with its own, smaller cap (lib/import/upload-body.ts).
+    proxyClientMaxBodySize: "31mb",
     serverActions: {
       // Autosave sends the whole workspace document. Workspaces may be up to
       // 2 MB (MAX_WORKSPACE_BYTES, the same cap as agent results), so leave

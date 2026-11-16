@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { auth } from "@clerk/nextjs/server";
 import Link from "next/link";
-import { Bot } from "lucide-react";
+import { Bot, NotebookPen } from "lucide-react";
 import { getDailyStudyAgentOverview } from "@/lib/agents/daily-study/store";
 import { isPro, reconcileCheckoutSession } from "@/lib/billing";
 import { getCreditBalance } from "@/lib/credits";
@@ -106,6 +106,13 @@ export default async function AppHome({
                 </Link>
               ) : null}
               <Link
+                href="/app/notebooks"
+                className="hidden items-center gap-1.5 rounded-md px-2.5 py-2 text-sm font-semibold text-ink-soft transition hover:bg-hover hover:text-ink md:inline-flex"
+              >
+                <NotebookPen className="h-4 w-4" aria-hidden />
+                {dict.notebooks.nav}
+              </Link>
+              <Link
                 href="/app/agents"
                 className="hidden items-center gap-1.5 rounded-md px-2.5 py-2 text-sm font-semibold text-ink-soft transition hover:bg-hover hover:text-ink lg:inline-flex"
               >
@@ -130,6 +137,13 @@ export default async function AppHome({
             <div className="sm:hidden">
               <CreditChip credits={credits} locale={locale} billing={billing} />
             </div>
+            <Link
+              href="/app/notebooks"
+              className="inline-flex items-center gap-1.5 rounded-md border border-line-strong px-3 py-1.5 text-xs font-semibold text-ink transition hover:bg-hover"
+            >
+              <NotebookPen className="h-3.5 w-3.5" aria-hidden />
+              {dict.notebooks.nav}
+            </Link>
             {pro ? (
               <span className="ml-auto rounded-full bg-ink px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-paper">
                 {A.pro}

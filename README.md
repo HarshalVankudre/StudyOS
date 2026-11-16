@@ -37,6 +37,7 @@ in on their own. Miss a day and the plan rebuilds around what's left.
 | **Deadlines that fill themselves in** | Calendar feeds from Canvas, Moodle, Blackboard, Brightspace and Google Calendar. When you open a workspace, StudyOS checks for new and changed deadlines (at most every six hours, or when you tap *Sync now*). Your own edits are kept; a deadline removed from the calendar is flagged, never deleted. Links are stored encrypted (set `FEED_URL_KEY`). Going the other way, subscribe to your deadlines from Google, Apple or Outlook Calendar. |
 | **A daily plan that forgives missed days** | *Today* picks a short list from deadlines, exams, flashcards and to-dos, sized to your daily time. Unfinished items roll forward, exams get short reviews in the three weeks before, and it warns when the coming days hold more work than your time allows. Deterministic: no AI credits, no invented coursework. |
 | **Study kits from your own material** | Upload slides, notes or readings (PDF, Word, text). StudyOS writes summary notes, flashcards and a practice quiz; every card and question keeps a quote from your material, and the quote is verified against the document before it is kept. Unverifiable suggestions are dropped. You see the cost first and pay only if it works. |
+| **Handwritten notebooks** | Notebooks you write in by hand, like paper: pens with pressure, a highlighter, an eraser, a lasso to move, resize and recolor what you wrote, and shapes. Ruled, grid, dotted and Cornell paper, or import a PDF (lecture slides, worksheets) and annotate it page by page. Your handwriting is recognised in the background so the search finds it, and a notebook linked to a course makes study kits from your notes. Works with Apple Pencil on iPad as an installed web app, and with a pen, touch or mouse on a PC. |
 | **Practice quizzes** | Multiple choice, true/false and short answers, an exam mode (optional timer, no feedback until you submit) and a round of the questions you keep missing. |
 | **Flashcards on FSRS** | Spaced repetition with FSRS scheduling, a gentle catch-up after days off, streak freezes, practice mode, statistics, and import/export for Anki and Quizlet text formats. |
 | **Grade tracker** | Where you stand and what you need on the rest to reach a target, in percentages, US letter grades or GPA, UK degree classes or German grades, with a what-if mode. |
@@ -48,7 +49,9 @@ in on their own. Miss a day and the plan rebuilds around what's left.
 
 Studying is free on every plan: flashcard reviews, quizzes, Today, the grade tracker,
 editing, deadline sync, export and undo never use credits. Credits pay for AI work.
-There are no feature gates: every feature is on both plans.
+There are no feature gates: every feature is on both plans. Handwriting recognition
+for search uses no credits either: it only indexes your own notes, and a daily cap
+(300 pages a day on Free, 1,500 on Pro) bounds it instead.
 
 - **Free** is a trial: a new account gets 300 credits once, to try everything. There
   is no monthly top-up.

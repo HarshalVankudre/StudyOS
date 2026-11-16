@@ -12,10 +12,35 @@ interface Row {
   updatedAt: Date;
 }
 
-const mocks = vi.hoisted(() => ({ rows: [] as Row[], findMany: vi.fn() }));
+/** A notebook with its pages' texts (what notebook search reads). */
+interface NotebookRow {
+  id: string;
+  ownerId: string;
+  title: string;
+  version: number;
+  updatedAt: Date;
+  deletedAt: Date | null;
+  pages: { id: string; inkText: string; pdfText: string; updatedAt: Date }[];
+}
+
+const mocks = vi.hoisted(() => ({
+  rows: [] as Row[],
+  notebooks: [] as NotebookRow[],
+  findMany: vi.fn(),
+  notebookFindMany: vi.fn(),
+  groupBy: vi.fn(),
+  queryRaw: vi.fn(),
+}));
 
 vi.mock("@clerk/nextjs/server", () => ({ auth: vi.fn() }));
-vi.mock("@/lib/db", () => ({ prisma: { workspace: { findMany: mocks.findMany } } }));
+vi.mock("@/lib/db", () => ({
+  prisma: {
+    workspace: { findMany: mocks.findMany },
+    notebook: { findMany: mocks.notebookFindMany },
+    notebookPage: { groupBy: mocks.groupBy },
+    $queryRaw: mocks.queryRaw,
+  },
+}));
 
 import { clearSearchCache, estimateEntryBytes, searchCacheStats, searchForOwner } from "./server";
 import { buildSearchEntries } from "./index";
@@ -47,9 +72,35 @@ const workspace = (id: string, name: string, pageTitle: string): Workspace => ({
   databases: [],
 });
 
+const liveNotebooks = (where: { ownerId: string; id?: { in: string[] } }) =>
+  mocks.notebooks.filter(
+    (n) => n.ownerId === where.ownerId && n.deletedAt === null && (!where.id || where.id.in.includes(n.id)),
+  );
+
 beforeEach(() => {
   clearSearchCache();
   mocks.rows.length = 0;
+  mocks.notebooks.length = 0;
+  mocks.notebookFindMany.mockReset().mockImplementation(async (args: { where: { ownerId: string; id?: { in: string[] } } }) =>
+    liveNotebooks(args.where).sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime()),
+  );
+  mocks.groupBy.mockReset().mockImplementation(async (args: { where: { ownerId: string; notebookId: { in: string[] } } }) =>
+    mocks.notebooks
+      .filter((n) => n.ownerId === args.where.ownerId && args.where.notebookId.in.includes(n.id) && n.pages.length > 0)
+      .map((n) => ({ notebookId: n.id, _max: { updatedAt: new Date(Math.max(...n.pages.map((p) => p.updatedAt.getTime()))) } })),
+  );
+  // The page-text query: (template, ownerId-free values..., ownerId, ids) as Prisma passes them.
+  mocks.queryRaw.mockReset().mockImplementation(async (_sql: TemplateStringsArray, ...values: unknown[]) => {
+    const ownerId = values[2] as string;
+    const ids = values[3] as string[];
+    return mocks.notebooks
+      .filter((n) => n.ownerId === ownerId && ids.includes(n.id))
+      .flatMap((n) =>
+        n.pages
+          .map((p, i) => ({ notebookId: n.id, id: p.id, n: BigInt(i + 1), inkText: p.inkText, pdfText: p.pdfText }))
+          .filter((p) => p.inkText || p.pdfText),
+      );
+  });
   mocks.findMany.mockReset().mockImplementation(async (args: { where: Record<string, unknown> }) =>
     mocks.rows
       .filter((r) => matches(r, args.where))
@@ -140,5 +191,54 @@ describe("searchForOwner", () => {
     const stats = searchCacheStats();
     expect(stats.bytes).toBeLessThanOrEqual(one * 3.5);
     expect(stats.items).toBeLessThanOrEqual(3);
+  });
+});
+
+describe("searchForOwner: handwritten notebooks", () => {
+  const notebook = (id: string, ownerId: string, title: string, pages: NotebookRow["pages"], extra: Partial<NotebookRow> = {}) =>
+    mocks.notebooks.push({ id, ownerId, title, version: 1, updatedAt: new Date(1_000), deletedAt: null, pages, ...extra });
+  const page = (id: string, inkText: string, pdfText = "", at = 1_000) => ({ id, inkText, pdfText, updatedAt: new Date(at) });
+
+  it("finds a notebook by title and a page by its handwriting or PDF text, with deep links", async () => {
+    notebook("nb1", "alice", "Biology notes", [page("p1", ""), page("p2", "mitochondria make ATP"), page("p3", "", "Krebs cycle slide")]);
+    const r = await searchForOwner("alice", "mitochondria");
+    const hit = r.groups.find((g) => g.kind === "notebookPage")?.hits[0];
+    expect(hit).toMatchObject({ href: "/app/notebooks/nb1?page=p2", context: "p. 2", workspaceName: "Biology notes" });
+
+    const byTitle = await searchForOwner("alice", "biology");
+    expect(byTitle.groups.find((g) => g.kind === "notebook")?.hits[0].href).toBe("/app/notebooks/nb1");
+    expect((await searchForOwner("alice", "krebs")).groups[0].hits[0].href).toBe("/app/notebooks/nb1?page=p3");
+  });
+
+  it("never searches another student's notebooks or the trash", async () => {
+    notebook("mine", "alice", "Chemistry", [page("a", "titration")]);
+    notebook("theirs", "bob", "Chemistry", [page("b", "titration")]);
+    notebook("trashed", "alice", "Old chemistry", [page("c", "titration")], { deletedAt: new Date() });
+    const r = await searchForOwner("alice", "titration");
+    expect(r.groups.flatMap((g) => g.hits.map((h) => h.href))).toEqual(["/app/notebooks/mine?page=a"]);
+    for (const call of mocks.notebookFindMany.mock.calls) {
+      expect(call[0].where).toMatchObject({ ownerId: "alice", deletedAt: null });
+    }
+    expect(mocks.queryRaw.mock.calls[0][3]).toBe("alice");
+  });
+
+  it("reuses a notebook's entries until it or one of its pages changes (a recognition included)", async () => {
+    notebook("nb", "alice", "Physics", [page("p1", "momentum")]);
+    await searchForOwner("alice", "momentum");
+    await searchForOwner("alice", "momentum");
+    expect(mocks.queryRaw).toHaveBeenCalledTimes(1);
+
+    // Handwriting recognised: the page changed, the notebook's version did not.
+    mocks.notebooks[0].pages[0] = page("p1", "momentum and impulse", "", 5_000);
+    const r = await searchForOwner("alice", "impulse");
+    expect(r.total).toBe(1);
+    expect(mocks.queryRaw).toHaveBeenCalledTimes(2);
+  });
+
+  it("still answers from workspaces when notebook search fails", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    add("alice", workspace("w", "W", "Optics"));
+    mocks.notebookFindMany.mockRejectedValue(new Error("db hiccup"));
+    expect((await searchForOwner("alice", "optics")).total).toBeGreaterThan(0);
   });
 });
