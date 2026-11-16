@@ -23,8 +23,8 @@ export function ThemeToggle({ className }: { className?: string }) {
 
   const isDark = resolvedTheme === "dark";
   // Says what pressing it does, in the visitor's language. Before hydration
-  // the theme is unknown; the app's default theme is dark.
-  const darkNow = mounted ? isDark : true;
+  // the theme is unknown; the app's default theme is light.
+  const darkNow = mounted ? isDark : false;
   const label = darkNow ? dict.command.actions.themeLight : dict.command.actions.themeDark;
 
   return (
@@ -34,7 +34,7 @@ export function ThemeToggle({ className }: { className?: string }) {
       title={label}
       onClick={() => setTheme(isDark ? "light" : "dark")}
       className={cn(
-        "grid h-10 w-10 shrink-0 place-items-center sm:h-8 sm:w-8 rounded-md border border-line-strong text-[15px] text-ink-soft transition hover:bg-hover hover:text-ink",
+        "grid h-10 w-10 shrink-0 place-items-center rounded-full border border-ink/15 text-[15px] text-ink-soft transition hover:border-ink/40 hover:text-ink sm:h-9 sm:w-9",
         className,
       )}
     >

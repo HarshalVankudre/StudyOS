@@ -15,6 +15,7 @@ import { repairWorkspace } from "@/lib/workspace/repair";
 import type { Workspace } from "@/lib/workspace/types";
 import { dayKeyOf } from "@/lib/workspace/view-logic";
 import { shiftDay } from "@/lib/study/days";
+import { loadPeriodTotals } from "@/lib/study/insights-store";
 import type { NotificationStore } from "./dispatch";
 import { ensureTodayPlan } from "./plan";
 import { fromRow, type PreferenceRow } from "./preferences";
@@ -58,7 +59,8 @@ export const prismaNotificationStore: NotificationStore = {
       )
       RETURNING p."userId", p."timeZone", p."locale", p."dailyEnabled", p."dailyMinute",
         p."deadlineEnabled", p."deadlineMinute", p."deadlineLeads", p."examLeads",
-        p."streakEnabled", p."quietEnabled", p."quietStart", p."quietEnd"`;
+        p."streakEnabled", p."weeklyEnabled", p."weeklyDay", p."weeklyMinute",
+        p."quietEnabled", p."quietStart", p."quietEnd"`;
     return rows.map((row) => ({ userId: row.userId, prefs: fromRow(row) }));
   },
 
@@ -69,9 +71,22 @@ export const prismaNotificationStore: NotificationStore = {
     });
   },
 
+  async unlease(userIds) {
+    if (userIds.length === 0) return;
+    await prisma.notificationPreference.updateMany({
+      where: { userId: { in: userIds } },
+      data: { leaseUntil: null },
+    });
+  },
+
   countMessages: (userId, localDate) =>
     prisma.notificationLog.count({
       where: { userId, localDate, message: true, status: { in: ["pending", "sent"] } },
+    }),
+
+  countShownSince: (userId, kind, fromLocalDate) =>
+    prisma.notificationLog.count({
+      where: { userId, kind, localDate: { gte: fromLocalDate }, message: true, status: { in: ["pending", "sent"] } },
     }),
 
   async claim(entry) {
@@ -95,6 +110,17 @@ export const prismaNotificationStore: NotificationStore = {
 
   todayPlan: (userId, localDate, timeZone, workspaces, now) =>
     ensureTodayPlan(userId, localDate, timeZone, workspaces, now),
+
+  async weekTotals(userId, today) {
+    // The insights page's own numbers for the same 7 days the recap opens.
+    const { totals } = await loadPeriodTotals(userId, "7d", today);
+    return {
+      focusMinutes: totals.focusMinutes,
+      cards: totals.cards,
+      quizAnswers: totals.quizAnswers,
+      activeDays: totals.activeDays,
+    };
+  },
 
   async studyDays(userId, today, timeZone) {
     const from = shiftDay(today, -STREAK_HISTORY_DAYS);

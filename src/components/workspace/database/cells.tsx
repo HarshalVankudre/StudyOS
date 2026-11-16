@@ -238,7 +238,7 @@ export function UrlCell({
           target="_blank"
           rel="noopener noreferrer nofollow"
           title={href}
-          className="inline-flex min-w-0 items-center gap-1 truncate px-1 py-0.5 text-lime underline-offset-2 hover:underline"
+          className="inline-flex min-w-0 items-center gap-1 truncate px-1 py-0.5 text-lime-deep underline-offset-2 hover:underline"
         >
           <span dir="ltr" className="truncate">{displayUrl(value)}</span>
           <ExternalLink className="h-3 w-3 shrink-0" aria-hidden />
@@ -284,7 +284,7 @@ export function CompleteToggle({
       onClick={onToggle}
       aria-pressed={done}
       aria-label={t(done ? dict.dbViews.markOpen : dict.dbViews.markDone, { name })}
-      className={`grid h-9 w-9 shrink-0 place-items-center rounded-full transition hover:bg-hover ${done ? "text-lime" : "text-ink-faint hover:text-ink-soft"}`}
+      className={`grid h-9 w-9 shrink-0 place-items-center rounded-full transition hover:bg-hover ${done ? "text-lime-deep" : "text-ink-faint hover:text-ink-soft"}`}
     >
       {done ? <CircleCheck className="h-5 w-5" aria-hidden /> : <Circle className="h-5 w-5" aria-hidden />}
     </button>
@@ -473,7 +473,7 @@ export function CellDisplay({
     case "checkbox":
       return value === true ? (
         <span className="inline-flex items-center gap-1 text-xs text-ink-soft">
-          <Check className="h-3.5 w-3.5 text-lime" aria-hidden />
+          <Check className="h-3.5 w-3.5 text-lime-deep" aria-hidden />
           {prop.name}
         </span>
       ) : null;
@@ -521,7 +521,7 @@ export function CellDisplay({
           href={href}
           target="_blank"
           rel="noopener noreferrer nofollow"
-          className="inline-flex min-w-0 max-w-full items-center gap-1 text-xs text-lime underline-offset-2 hover:underline"
+          className="inline-flex min-w-0 max-w-full items-center gap-1 text-xs text-lime-deep underline-offset-2 hover:underline"
         >
           <span dir="ltr" className="truncate">{text}</span>
           <ExternalLink className="h-3 w-3 shrink-0" aria-hidden />

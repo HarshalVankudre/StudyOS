@@ -21,7 +21,7 @@ export function CreditMeter({ initial }: { initial: number }) {
     <Link
       href="/app/credits"
       title={low ? dict.credits.runningLow : dict.credits.label}
-      className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition ${
+      className={`flex min-h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1 text-xs font-semibold transition ${
         low
           ? "border-amber-500/40 bg-amber-500/10 text-amber-600 hover:bg-amber-500/20"
           : "border-ink/15 text-ink hover:border-ink/40 hover:bg-card"
@@ -35,7 +35,7 @@ export function CreditMeter({ initial }: { initial: number }) {
       </span>
       {plural(dict.counts.credits, balance)}
       {low && (
-        <span className="rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[10px] uppercase tracking-wide">
+        <span className="rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[11px] leading-none">
           {dict.credits.low}
         </span>
       )}

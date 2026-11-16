@@ -1,10 +1,10 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { en } from "@/lib/i18n/dictionaries/en";
 import type { SearchResults } from "@/lib/search";
 import { CommandPalette, workspaceIdFromPath } from "./CommandPalette";
-import { OPEN_EXPORT_EVENT, OPEN_STUDY_HUB_EVENT } from "./events";
+import { OPEN_EXPORT_EVENT, OPEN_FEEDBACK_EVENT, OPEN_NOTION_IMPORT_EVENT, OPEN_STUDY_HUB_EVENT, START_FOCUS_EVENT } from "./events";
 
 const mocks = vi.hoisted(() => ({
   push: vi.fn(),
@@ -12,8 +12,10 @@ const mocks = vi.hoisted(() => ({
   pathname: "/app",
   setTheme: vi.fn(),
   setLocale: vi.fn(),
+  toastError: vi.fn(),
 }));
 
+vi.mock("sonner", () => ({ toast: { error: mocks.toastError } }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: mocks.push, refresh: mocks.refresh }),
   usePathname: () => mocks.pathname,
@@ -74,6 +76,21 @@ beforeEach(() => {
   });
   vi.stubGlobal("fetch", fetchMock);
 });
+
+/**
+ * Type a query and wait until the palette has fetched and rendered its
+ * results, so a click never lands on an option the debounced search is about
+ * to replace (which happens under load and makes the click a no-op).
+ */
+async function typeSettled(user: ReturnType<typeof userEvent.setup>, input: HTMLElement, text: string) {
+  await user.type(input, text);
+  await waitFor(() =>
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes(`q=${encodeURIComponent(text)}`))).toBe(true),
+  );
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
 
 function renderPalette(extra: Partial<React.ComponentProps<typeof CommandPalette>> = {}) {
   const onOpenChange = vi.fn();
@@ -149,6 +166,18 @@ describe("CommandPalette", () => {
     await waitFor(() => expect(mocks.refresh).toHaveBeenCalled());
   });
 
+  it("a language change that cannot reach the server says so instead of failing the page", async () => {
+    const user = userEvent.setup();
+    mocks.refresh.mockClear();
+    mocks.setLocale.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    renderPalette();
+    await user.click(screen.getByRole("option", { name: C.actions.language }));
+    await user.type(screen.getByRole("combobox"), "deut");
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith(en.safety.actionFailed));
+    expect(mocks.refresh).not.toHaveBeenCalled();
+  });
+
   it("offers the study hub and export inside a workspace", async () => {
     mocks.pathname = "/app/w1";
     const user = userEvent.setup();
@@ -164,6 +193,101 @@ describe("CommandPalette", () => {
     window.removeEventListener(OPEN_STUDY_HUB_EVENT, hub);
     window.removeEventListener(OPEN_EXPORT_EVENT, exp);
   });
+
+  it("opens the feedback dialog from anywhere, closing itself first", async () => {
+    const user = userEvent.setup();
+    const feedback = vi.fn();
+    window.addEventListener(OPEN_FEEDBACK_EVENT, feedback);
+    const { onOpenChange, input } = renderPalette();
+    await typeSettled(user, input, "feedb");
+    await user.click(await screen.findByRole("option", { name: en.feedback.open }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(feedback).toHaveBeenCalledTimes(1);
+    window.removeEventListener(OPEN_FEEDBACK_EVENT, feedback);
+  });
+
+  it("opens the Notion import from anywhere, closing itself first", async () => {
+    const user = userEvent.setup();
+    const opened = vi.fn();
+    window.addEventListener(OPEN_NOTION_IMPORT_EVENT, opened);
+    const { onOpenChange, input } = renderPalette();
+    await typeSettled(user, input, "notion");
+    await user.click(await screen.findByRole("option", { name: en.notionImport.paletteAction }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(opened).toHaveBeenCalledTimes(1);
+    window.removeEventListener(OPEN_NOTION_IMPORT_EVENT, opened);
+  });
+
+  it("starts the focus timer from anywhere, closing itself first", async () => {
+    const user = userEvent.setup();
+    const focus = vi.fn();
+    window.addEventListener(START_FOCUS_EVENT, focus);
+    const { onOpenChange, input } = renderPalette();
+    await typeSettled(user, input, "focus");
+    await user.click(await screen.findByRole("option", { name: en.focus.paletteAction }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(focus).toHaveBeenCalledTimes(1);
+    window.removeEventListener(START_FOCUS_EVENT, focus);
+  });
+});
+
+describe("CommandPalette: insights", () => {
+  it("opens the insights page from anywhere, closing itself first", async () => {
+    const user = userEvent.setup();
+    const { onOpenChange, input } = renderPalette();
+    await typeSettled(user, input, "insights");
+    await user.click(await screen.findByRole("option", { name: en.insights.paletteAction }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(mocks.push).toHaveBeenCalledWith("/app/insights");
+  });
+
+  it("does not take the insights page for a workspace", () => {
+    mocks.pathname = "/app/insights";
+    renderPalette();
+    expect(screen.getByRole("option", { name: en.insights.paletteAction })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: C.actions.studyHub })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: C.actions.export })).not.toBeInTheDocument();
+  });
+});
+
+describe("CommandPalette: agenda", () => {
+  it("opens the agenda from anywhere, closing itself first", async () => {
+    const user = userEvent.setup();
+    const { onOpenChange, input } = renderPalette();
+    await typeSettled(user, input, "agenda");
+    await user.click(await screen.findByRole("option", { name: en.agenda.paletteAction }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(mocks.push).toHaveBeenCalledWith("/app/agenda");
+  });
+
+  it("does not take the agenda for a workspace", () => {
+    mocks.pathname = "/app/agenda";
+    renderPalette();
+    expect(screen.getByRole("option", { name: en.agenda.paletteAction })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: C.actions.studyHub })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: C.actions.export })).not.toBeInTheDocument();
+    expect(workspaceIdFromPath("/app/agenda")).toBeNull();
+  });
+});
+
+describe("CommandPalette: grades overview", () => {
+  it("opens the grades overview from anywhere, closing itself first", async () => {
+    const user = userEvent.setup();
+    const { onOpenChange, input } = renderPalette();
+    await typeSettled(user, input, "grades");
+    await user.click(await screen.findByRole("option", { name: en.gradesOverview.paletteAction }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(mocks.push).toHaveBeenCalledWith("/app/grades");
+  });
+
+  it("does not take the grades overview for a workspace", () => {
+    mocks.pathname = "/app/grades";
+    renderPalette();
+    expect(screen.getByRole("option", { name: en.gradesOverview.paletteAction })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: C.actions.studyHub })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: C.actions.export })).not.toBeInTheDocument();
+    expect(workspaceIdFromPath("/app/grades")).toBeNull();
+  });
 });
 
 describe("workspaceIdFromPath", () => {
@@ -172,6 +296,8 @@ describe("workspaceIdFromPath", () => {
     expect(workspaceIdFromPath("/app/abc/x")).toBe("abc");
     expect(workspaceIdFromPath("/app")).toBeNull();
     expect(workspaceIdFromPath("/app/settings")).toBeNull();
+    expect(workspaceIdFromPath("/app/insights")).toBeNull();
+    expect(workspaceIdFromPath("/app/admin")).toBeNull();
     expect(workspaceIdFromPath("/generate")).toBeNull();
   });
 });

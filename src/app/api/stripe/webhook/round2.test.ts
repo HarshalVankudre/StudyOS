@@ -491,6 +491,120 @@ describe("4. a lost dispute cancels the subscription whichever payment it was on
     expect(h.stripe.state.subscriptions.get(a.subscription.id)?.status).toBe("canceled");
   });
 
+  /** Buy a credit pack and lose a chargeback on it (closed "lost"); returns the dispute. */
+  async function loseAPackDispute() {
+    const { createCreditPackCheckout } = await import("@/lib/billing");
+    const { url } = await createCreditPackCheckout({ userId: USER, email: null, origin: "o" });
+    const p = h.stripe.completePackCheckout(url.split("/").pop()!);
+    await send("checkout.session.completed", p.session);
+    const d = h.stripe.dispute(p.chargeId);
+    expect((await send("charge.dispute.closed", { ...d, status: "lost" })).status).toBe(200);
+    return d;
+  }
+
+  it("a lost dispute on a credit pack stops the renewals, but the month already paid for stays Pro", async () => {
+    clockAt(at(2026, 2, 5));
+    const a = await subscribe({ periodStart: at(2026, 2, 5) });
+    await send("checkout.session.completed", a.session);
+    await send("invoice.paid", a.invoice);
+    clockAt(at(2026, 2, 12));
+    const d = await loseAPackDispute();
+    // Not canceled now: set to end with the paid period.
+    expect(h.stripe.state.subscriptions.get(a.subscription.id)).toMatchObject({ status: "active", cancel_at_period_end: true });
+    expect(h.db.state.intents).toContainEqual(
+      expect.objectContaining({ kind: "cancel_lost_dispute", key: d.id, reason: "credit_pack", state: "done" }),
+    );
+    expect(h.db.state.billingEvents).toContainEqual(
+      expect.objectContaining({ kind: "lost_dispute_cancel", stripeObjectId: d.id, detail: expect.stringMatching(/cancel at period end/) }),
+    );
+    expect(await planOf()).toBe("pro");
+    expect(h.stripe.state.calls).not.toContain("subscriptions.cancel");
+    // A retry of the closure changes nothing.
+    expect((await send("charge.dispute.closed", { ...d, status: "lost" })).status).toBe(200);
+    expect(h.stripe.state.subscriptions.get(a.subscription.id)?.status).toBe("active");
+
+    // March 5: the period ends and Stripe ends the subscription instead of renewing it.
+    clockAt(at(2026, 3, 5, 2));
+    const invoicesBefore = h.stripe.state.invoices.size;
+    const end = h.stripe.endPeriod(a.subscription.id);
+    expect(end.renewed).toBe(false);
+    await send("customer.subscription.deleted", end.subscription);
+    expect(h.stripe.state.invoices.size).toBe(invoicesBefore); // never billed again
+    expect(await planOf()).toBe("free");
+    expect(proGrants()).toHaveLength(1); // February, as paid
+  });
+
+  it("an annual subscriber who loses a pack dispute keeps Pro and every monthly allowance of the paid year, then is not renewed", async () => {
+    clockAt(at(2026, 1, 10));
+    const a = await subscribe({ periodStart: at(2026, 1, 10), periodEnd: at(2027, 1, 10), interval: "year" });
+    await send("checkout.session.completed", a.session);
+    await send("invoice.paid", a.invoice);
+    clockAt(at(2026, 2, 20));
+    await loseAPackDispute();
+    expect(h.stripe.state.subscriptions.get(a.subscription.id)).toMatchObject({ status: "active", cancel_at_period_end: true });
+    expect(await planOf()).toBe("pro");
+    clockAt(at(2026, 7, 11));
+    await getCreditBalance(USER);
+    expect(proGrants()).toHaveLength(7); // January (the invoice) + February..July
+    expect(await planOf()).toBe("pro");
+
+    // The paid year ends: no renewal, and no allowance beyond the year.
+    clockAt(at(2027, 1, 10, 2));
+    const invoicesBefore = h.stripe.state.invoices.size;
+    const end = h.stripe.endPeriod(a.subscription.id);
+    expect(end.renewed).toBe(false);
+    await send("customer.subscription.deleted", end.subscription);
+    expect(h.stripe.state.invoices.size).toBe(invoicesBefore);
+    clockAt(at(2027, 3, 1));
+    await getCreditBalance(USER);
+    expect(proGrants()).toHaveLength(12); // the paid year: January 2026 + 11 anniversaries
+    expect(await planOf()).toBe("free");
+  });
+
+  it("stopping the renewals after a lost pack dispute is retried until Stripe confirms", async () => {
+    clockAt(at(2026, 2, 5));
+    const a = await subscribe({ periodStart: at(2026, 2, 5) });
+    await send("checkout.session.completed", a.session);
+    await send("invoice.paid", a.invoice);
+    const { createCreditPackCheckout } = await import("@/lib/billing");
+    const { url } = await createCreditPackCheckout({ userId: USER, email: null, origin: "o" });
+    const p = h.stripe.completePackCheckout(url.split("/").pop()!);
+    await send("checkout.session.completed", p.session);
+    const d = h.stripe.dispute(p.chargeId);
+    h.stripe.failNext("subscriptions.update");
+    expect((await send("charge.dispute.closed", { ...d, status: "lost" })).status).toBe(500);
+    expect(h.stripe.state.subscriptions.get(a.subscription.id)?.cancel_at_period_end).toBe(false);
+    expect(await runBillingMaintenance()).toMatchObject({ jobsCompleted: 1 });
+    expect(h.stripe.state.subscriptions.get(a.subscription.id)).toMatchObject({ status: "active", cancel_at_period_end: true });
+    expect(await planOf()).toBe("pro");
+  });
+
+  it("a lost pack dispute while the subscription is past due cancels it at once: there is no paid period to keep", async () => {
+    clockAt(at(2026, 2, 5));
+    const a = await subscribe({ periodStart: at(2026, 2, 5) });
+    await send("checkout.session.completed", a.session);
+    await send("invoice.paid", a.invoice);
+    clockAt(at(2026, 3, 5, 2));
+    await send("customer.subscription.updated", h.stripe.failRenewal(a.subscription.id).subscription);
+    await loseAPackDispute();
+    expect(h.stripe.state.subscriptions.get(a.subscription.id)?.status).toBe("canceled");
+    expect(await planOf()).toBe("free");
+  });
+
+  it("a won dispute on a credit pack cancels nothing", async () => {
+    clockAt(at(2026, 2, 5));
+    const a = await subscribe({ periodStart: at(2026, 2, 5) });
+    await send("checkout.session.completed", a.session);
+    await send("invoice.paid", a.invoice);
+    const { createCreditPackCheckout } = await import("@/lib/billing");
+    const { url } = await createCreditPackCheckout({ userId: USER, email: null, origin: "o" });
+    const p = h.stripe.completePackCheckout(url.split("/").pop()!);
+    await send("checkout.session.completed", p.session);
+    await send("charge.dispute.closed", { ...h.stripe.dispute(p.chargeId), status: "won" });
+    expect(h.stripe.state.subscriptions.get(a.subscription.id)?.status).toBe("active");
+    expect(await planOf()).toBe("pro");
+  });
+
   it("a dispute of an old month that is won does not cancel anything", async () => {
     clockAt(at(2026, 2, 5));
     const a = await subscribe({ periodStart: at(2026, 2, 5) });

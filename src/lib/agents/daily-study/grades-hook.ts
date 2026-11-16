@@ -5,7 +5,7 @@
  * into the planner through `PlannerInput.weightOf`; when it has nothing to
  * say, the planner falls back to its own "Weight" column detection.
  */
-import { detectGradeColumns, resolveGradeColumns } from "@/lib/grades";
+import { detectGradeColumns, isGradeEntry, resolveGradeColumns, type ResolvedColumns } from "@/lib/grades";
 import type { Database, GradesBlock, Workspace } from "@/lib/workspace/types";
 import type { WeightResolver } from "./planner";
 
@@ -24,8 +24,12 @@ export function gradesWeightResolver(): WeightResolver {
     let propertyId = cache.get(database);
     if (propertyId === undefined) {
       const block = gradesBlockFor(workspace, database);
-      const columns = block
-        ? resolveGradeColumns(database, block.columns)
+      // A block of module grades has no weights: it says nothing (its score
+      // column holds grades like 1.7, never a share of a course grade).
+      const columns: ResolvedColumns = block
+        ? isGradeEntry(block)
+          ? {}
+          : resolveGradeColumns(database, block.columns)
         : detectGradeColumns(database);
       propertyId = columns.weight?.id ?? null;
       cache.set(database, propertyId);
@@ -33,8 +37,7 @@ export function gradesWeightResolver(): WeightResolver {
     if (!propertyId) return undefined;
     const value = row.cells[propertyId];
     if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return undefined;
-    // A weight written as a fraction (0.25) means 25%.
-    const percent = value <= 1 ? value * 100 : value;
-    return Math.min(100, Math.round(percent * 10) / 10);
+    // Percent, as the grade calculator reads it: 1 is a 1 % item, never 100 %.
+    return Math.min(100, Math.round(value * 10) / 10);
   };
 }

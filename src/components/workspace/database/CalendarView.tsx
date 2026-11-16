@@ -133,7 +133,7 @@ export function CalendarView(props: ViewBodyProps) {
 
       {/* Month grid: tablets and up. */}
       <div className="hidden sm:block" data-testid="calendar-grid">
-        <div className="grid grid-cols-7 border-b border-line bg-surface text-center font-mono text-[10.5px] uppercase tracking-wide text-ink-faint">
+        <div className="grid grid-cols-7 border-b border-line bg-surface text-center text-[11.5px] text-ink-faint">
           {weekdays.map((w, i) => (
             <div key={i} className="py-1.5">
               {w}
@@ -212,7 +212,7 @@ export function CalendarView(props: ViewBodyProps) {
               return (
                 <li key={day} aria-current={isToday ? "date" : undefined} className="px-3 py-2">
                   <div className="mb-1.5 flex items-center justify-between gap-2">
-                    <span className={`text-xs font-medium ${isToday ? "text-lime" : "text-ink-soft"}`}>
+                    <span className={`text-xs font-medium ${isToday ? "text-lime-deep" : "text-ink-soft"}`}>
                       {formatDay(day, locale, { weekday: "short", day: "numeric", month: "short" })}
                       {isToday && <span className="ms-1.5">· {dict.dbViews.today}</span>}
                     </span>

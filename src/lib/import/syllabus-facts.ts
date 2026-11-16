@@ -260,7 +260,8 @@ function withYear(
   const todayMs = Date.parse(`${today}T00:00:00Z`);
   for (const candidateYear of [year, year + 1, year - 1]) {
     const iso = makeIso(candidateYear, month, day);
-    if (!iso) return null;
+    // "Feb 29" is missing only from some years: try the next candidate.
+    if (!iso) continue;
     const diffDays = (Date.parse(`${iso}T00:00:00Z`) - todayMs) / 86_400_000;
     if (diffDays >= -60 && diffDays <= 305) return iso;
   }

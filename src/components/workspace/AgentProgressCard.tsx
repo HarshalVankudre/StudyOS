@@ -86,7 +86,7 @@ export function AgentProgressCard({
             type="button"
             onClick={onStop}
             disabled={!canStop || stopping}
-            className="rounded-md border border-paper/25 bg-paper/10 px-2.5 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-paper transition hover:border-rose-300/70 hover:bg-rose-400/15 hover:text-rose-100 disabled:cursor-not-allowed disabled:opacity-45"
+            className="rounded-md border border-paper/25 bg-paper/10 px-2.5 py-1.5 text-[11.5px] font-semibold text-paper transition hover:border-rose-300/70 hover:bg-rose-400/15 hover:text-rose-100 disabled:cursor-not-allowed disabled:opacity-45"
           >
             {stopping ? dict.agentChat.stopping : dict.agentChat.stopTask}
           </button>
@@ -105,7 +105,7 @@ export function AgentProgressCard({
               style={{ width: `${percent}%` }}
             />
           </div>
-          <span className="font-mono text-[10px] font-semibold text-lime">
+          <span className="font-mono text-[10px] font-semibold text-lime-deep">
             {percent}%
           </span>
         </div>

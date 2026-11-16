@@ -17,7 +17,9 @@
  * Feb 28 and then Mar 31), renewals that fail and go past_due with the period
  * already advanced, checkout sessions, invoices with `total`, `amount_paid`
  * and `starting_balance`, invoice payments, charges, refunds that can be
- * pending and then fail, disputes, and prices. Any call can be made to fail
+ * pending and then fail, disputes, prices, the Stripe Tax settings' default
+ * tax behavior, and cancelling at period end (endPeriod ends such a
+ * subscription instead of renewing it). Any call can be made to fail
  * (`failNext`), with a transient error or any Stripe error (`stripeError`),
  * including part-way through a multi-call flow.
  *
@@ -264,6 +266,32 @@ const TABLES: Record<string, TableSpec> = {
       settledAt: null,
     }),
   },
+  // The invite program (lib/referral).
+  referralCode: {
+    pk: (r) => r.userId,
+    uniques: [(r) => `code:${r.code}`],
+    defaults: () => ({ createdAt: now() }),
+  },
+  referral: {
+    pk: (r) => r.id,
+    // Like Postgres, the unique index ignores NULLs (anonymised rows).
+    uniques: [(r) => (r.refereeId ? `referee:${r.refereeId}` : null)],
+    defaults: () => ({
+      id: nextId("ref"),
+      status: "pending",
+      rejectReason: null,
+      qualifiedAt: null,
+      rewardedAt: null,
+      referrerOutcome: null,
+      lastTriedAt: null,
+      createdAt: now(),
+    }),
+  },
+  referralMailbox: {
+    pk: (r) => r.id,
+    uniques: [],
+    defaults: () => ({ id: nextId("rmb"), createdAt: now() }),
+  },
 };
 
 type Tx = { id: symbol; writes: Map<string, Map<string, Row | null>>; locks: Set<string> };
@@ -474,6 +502,9 @@ export function createFakeDb() {
     deletedAccount: model("deletedAccount"),
     billingIntent: model("billingIntent"),
     creditHold: model("creditHold"),
+    referralCode: model("referralCode"),
+    referral: model("referral"),
+    referralMailbox: model("referralMailbox"),
   };
 
   async function commit(tx: Tx) {
@@ -675,6 +706,8 @@ export function createFakeStripe() {
     refundKeys: new Map<string, Row>(),
     charges: new Map<string, Row>(),
     prices: new Map<string, Row>(),
+    /** The Stripe Tax settings (setTaxDefault); defaults.tax_behavior null = none set, Stripe's starting state. */
+    taxSettings: { object: "tax.settings", defaults: { tax_behavior: null, tax_code: null } } as Row,
     portalSessions: [] as Row[],
     /** Calls made, by path ("refunds.create"), for assertions. */
     calls: [] as string[],
@@ -700,6 +733,7 @@ export function createFakeStripe() {
       id: `ch_${piId}`,
       object: "charge",
       payment_intent: piId,
+      currency: "usd",
       amount,
       amount_refunded: 0,
       refunded: false,
@@ -752,6 +786,17 @@ export function createFakeStripe() {
         endSubscription(sub);
         return structuredClone(sub);
       },
+      /** Only cancel_at_period_end is modelled (endPeriod honours it). */
+      update: async (id: string, params: any) => {
+        const sub = s.subscriptions.get(id);
+        if (!sub) throw stripeError("StripeInvalidRequestError", "resource_missing");
+        if (sub.status === "canceled") throw stripeError("StripeInvalidRequestError", "subscription_canceled");
+        if (typeof params?.cancel_at_period_end === "boolean") {
+          sub.cancel_at_period_end = params.cancel_at_period_end;
+          sub.cancel_at = params.cancel_at_period_end ? sub.items.data[0].current_period_end : null;
+        }
+        return structuredClone(sub);
+      },
       search: async ({ query }: any) => {
         const m = /metadata\['userId'\]:'([^']+)'/.exec(query);
         return list([...s.subscriptions.values()].filter((x) => x.metadata?.userId === m?.[1]).map((x) => structuredClone(x)));
@@ -761,6 +806,9 @@ export function createFakeStripe() {
       sessions: {
         create: async (params: any) => {
           const id = nextId("cs");
+          // The amount of an inline price, or of a stored Price (setPrice).
+          const line = params.line_items?.[0];
+          const listed = line?.price ? s.prices.get(line.price) : undefined;
           const session = {
             id,
             object: "checkout.session",
@@ -771,7 +819,8 @@ export function createFakeStripe() {
             customer: params.customer ?? null,
             subscription: null,
             payment_intent: null,
-            amount_total: params.line_items?.[0]?.price_data?.unit_amount ?? null,
+            amount_total: line?.price_data?.unit_amount ?? listed?.unit_amount ?? null,
+            currency: line?.price_data?.currency ?? listed?.currency ?? null,
             ...params,
           };
           s.sessions.set(id, session);
@@ -818,6 +867,11 @@ export function createFakeStripe() {
         const p = s.prices.get(id);
         if (!p) throw stripeError("StripeInvalidRequestError", "resource_missing");
         return structuredClone(p);
+      },
+    },
+    tax: {
+      settings: {
+        retrieve: async () => structuredClone(s.taxSettings),
       },
     },
     invoicePayments: {
@@ -1072,15 +1126,21 @@ export function createFakeStripe() {
     return { invoice, subscription: structuredClone(sub) };
   }
 
-  /** Complete a credit-pack checkout (paid now, or pending for async methods). */
-  function completePackCheckout(sessionId: string, opts: { paid?: boolean } = {}) {
+  /**
+   * Complete a credit-pack checkout (paid now, or pending for async methods).
+   * `amountTotal`: the total Stripe charged when it differs from the price,
+   * e.g. with tax added on top (exclusive Stripe Tax).
+   */
+  function completePackCheckout(sessionId: string, opts: { paid?: boolean; amountTotal?: number } = {}) {
     const session = s.sessions.get(sessionId)!;
     const piId = nextId("pi");
+    if (opts.amountTotal !== undefined) session.amount_total = opts.amountTotal;
     const amount = session.amount_total ?? 1000;
     s.charges.set(`ch_${piId}`, {
       id: `ch_${piId}`,
       object: "charge",
       payment_intent: piId,
+      currency: session.currency ?? "usd",
       amount,
       amount_refunded: 0,
       refunded: false,
@@ -1145,10 +1205,10 @@ export function createFakeStripe() {
     return { ...refund };
   }
 
-  /** A dispute object for a charge (status as given). */
+  /** A dispute object for a charge (status as given), in the charge's currency unless told. */
   function dispute(
     chargeId: string,
-    opts: { id?: string; amount?: number; status?: string; reason?: string; created?: number } = {},
+    opts: { id?: string; amount?: number; currency?: string; status?: string; reason?: string; created?: number } = {},
   ) {
     const charge = s.charges.get(chargeId)!;
     return {
@@ -1157,6 +1217,7 @@ export function createFakeStripe() {
       charge: chargeId,
       payment_intent: charge.payment_intent,
       amount: opts.amount ?? charge.amount,
+      currency: opts.currency ?? charge.currency ?? "usd",
       reason: opts.reason ?? "fraudulent",
       status: opts.status ?? "needs_response",
       created: opts.created ?? nowSec(),
@@ -1183,6 +1244,20 @@ export function createFakeStripe() {
     sub.latest_invoice = invoice.id;
     sub.status = "past_due";
     return { invoice, subscription: structuredClone(sub) };
+  }
+
+  /**
+   * The current period ends: a subscription set to cancel at period end is
+   * canceled then (Stripe ends it without an invoice); any other renews
+   * (renewSubscription).
+   */
+  function endPeriod(subId: string) {
+    const sub = s.subscriptions.get(subId)!;
+    if (sub.cancel_at_period_end) {
+      endSubscription(sub, sub.items.data[0].current_period_end);
+      return { renewed: false as const, subscription: structuredClone(sub) };
+    }
+    return { renewed: true as const, ...renewSubscription(subId) };
   }
 
   /** Pay a subscription's open invoice now (the retry succeeded): active again. */
@@ -1212,6 +1287,11 @@ export function createFakeStripe() {
     dispute,
     failRenewal,
     payOpenInvoice,
+    endPeriod,
+    /** The Stripe Tax settings' default tax behavior (null: none set). */
+    setTaxDefault: (taxBehavior: "inclusive" | "exclusive" | "inferred_by_currency" | null) => {
+      s.taxSettings = { ...s.taxSettings, defaults: { ...s.taxSettings.defaults, tax_behavior: taxBehavior } };
+    },
     /** A Stripe Price (default: an active recurring monthly USD 5.00 price). */
     setPrice: (id: string, price: Row = {}) => {
       s.prices.set(id, {
@@ -1260,6 +1340,7 @@ export function createFakeStripe() {
         if (v instanceof Map) v.clear();
         else if (Array.isArray(v)) v.length = 0;
       }
+      s.taxSettings = { object: "tax.settings", defaults: { tax_behavior: null, tax_code: null } };
       failures.clear();
     },
   };

@@ -5,26 +5,26 @@ import type {
   FlashcardsBlock,
   Page,
   QuizBlock,
-  QuizQuestion,
   Workspace,
 } from "@/lib/workspace/types";
-import { pageForDatabase } from "@/lib/workspace/deep-link";
-import { completionField, dayDiff, isRowComplete } from "@/lib/workspace/view-logic";
+import { completionField, dayDiff } from "@/lib/workspace/view-logic";
 import { isNew, isStudyable } from "@/lib/study/srs";
+// The quiz block's own rule, so the plan counts exactly the questions a run takes.
+import { isPlayableQuestion } from "@/lib/study/quiz";
 import {
-  classifyExam,
   cleanText,
   courseKeywords,
+  datedRows,
   estimateEffortMinutes,
-  examPrepMinutes,
+  examPrepTotalMinutes,
+  FORMALITY_MINUTES,
   mentions,
   rowCourse,
-  rowDueDate,
-  rowTitle,
-  rowWeight,
 } from "./classify";
 import {
   DEFAULT_DAILY_MINUTES,
+  MAX_DAILY_MINUTES,
+  MAX_STORED_PLAN_ITEMS,
   RESTART_AFTER_CARRIES,
   type DailyStudyPlanItem,
   type ExamCountdown,
@@ -52,8 +52,8 @@ const MAX_TASK_ITEMS = 3;
 const MIN_SESSION_MINUTES = 10;
 /** New cards introduced per deck session; the rest wait for later days. */
 export const NEW_CARDS_PER_SESSION = 10;
-/** Overdue work older than this is left out of the plan (no nagging). */
-const OVERDUE_WINDOW_DAYS = 14;
+/** Overdue work older than this is left out of the plan (no nagging), and out of the agenda. */
+export const OVERDUE_WINDOW_DAYS = 14;
 /** Exams further out than this get a countdown but no sessions yet. */
 const EXAM_PREP_WINDOW_DAYS = 21;
 /** Exams within this many days get a countdown. */
@@ -74,6 +74,32 @@ const MAX_SESSION_MINUTES = 90;
 const MINUTES_PER_REVIEW = 0.6;
 const MINUTES_PER_NEW_CARD = 1.5;
 const MAX_DECK_MINUTES = 30;
+
+/**
+ * Module exams (a German Klausur that decides a whole module, see
+ * classify `ExamInfo.module`): prepared over six weeks, twice a week from 42
+ * to 29 days out, every other day from 28 to 15, daily in the last 14 days.
+ */
+export const MODULE_PREP_WINDOW_DAYS = 42;
+const MODULE_EVERY_OTHER_DAY_FROM = 28;
+const MODULE_DAILY_FROM = 14;
+/**
+ * A module exam session starts at the usual exam session size, so several
+ * exams share a day, and grows up to this when the day has time left (the
+ * nearest exam first, since it scores highest).
+ */
+const MODULE_SESSION_MAX_MINUTES = 90;
+const EXAM_SESSION_MINUTES = 45;
+
+/**
+ * Administrative deadlines (registrations, re-registration, fees): on the
+ * plan from a week before, always on it in the last three days (they take
+ * minutes and cannot be made up). At most this many a day, so a week full of
+ * deregistration windows cannot crowd out the studying.
+ */
+const FORMALITY_LEAD_DAYS = 7;
+const FORMALITY_GUARANTEE_DAYS = 3;
+const MAX_FORMALITY_ITEMS = 3;
 
 export interface PreviousPlan {
   localDate: string;
@@ -191,6 +217,12 @@ interface Candidate {
   score: number;
   /** A plain review session's deck, so the session can be resized honestly. */
   deck?: DeckLoad;
+  /** An administrative deadline: a fixed few minutes, outside the item cap. */
+  formality?: boolean;
+  /** A formality due within FORMALITY_GUARANTEE_DAYS: placed before anything else. */
+  guaranteed?: boolean;
+  /** A module exam session may grow to this when the day has time left. */
+  growTo?: number;
 }
 
 /** What a deck has for today: reviews due, new cards to introduce, all cards ready. */
@@ -228,6 +260,10 @@ interface ExamRow {
   days: number;
   date: string;
   major: boolean;
+  /** Decides a module (see MODULE_PREP_WINDOW_DAYS). */
+  module: boolean;
+  /** Total preparation minutes (classify `examPrepTotalMinutes`). */
+  prepTotal: number;
   weight: number | null;
   target: PlanTarget;
   ledgerKey: string;
@@ -243,7 +279,7 @@ interface WorkloadEntry {
 
 export function normalizeDailyMinutes(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_DAILY_MINUTES;
-  return Math.min(240, Math.max(15, Math.round(value)));
+  return Math.min(MAX_DAILY_MINUTES, Math.max(15, Math.round(value)));
 }
 
 /** Minutes for a one-day override ("I only have 15 minutes today"). */
@@ -296,25 +332,47 @@ export function buildDailyStudyPlan(input: PlannerInput): BuiltDailyStudyPlan {
   }
 
   function collectRows(workspace: Workspace, database: Database) {
-    if (!database.properties.some((p) => p.type === "date")) return;
+    const rows = datedRows(workspace, database, { weightOf: input.weightOf });
+    if (rows.length === 0) return;
     const field = completionField(database);
-    const pageId = pageForDatabase(workspace, database.id);
-    for (const row of database.rows) {
-      if (isRowComplete(database, row, field)) continue;
-      const due = rowDueDate(database, row);
-      if (!due) continue;
+    for (const { row, due, title, weight, exam, formality, target, ledgerKey } of rows) {
       const days = dayDiff(localDate, due);
-      const title = rowTitle(database, row) ?? cleanText(database.name);
-      if (!title) continue;
-      const weight = input.weightOf?.(workspace, database, row) ?? rowWeight(database, row);
-      const ledgerKey = `${workspace.id}:${database.id}:${row.id}`;
-      const target: PlanTarget = {
-        workspaceId: workspace.id,
-        ...(pageId ? { pageId } : {}),
-        databaseId: database.id,
-        rowId: row.id,
-      };
-      const exam = classifyExam(database, row, title, weight);
+
+      if (formality) {
+        if (days < -OVERDUE_WINDOW_DAYS) continue;
+        // Kept in the ledger, so a formality ticked off in a list without a
+        // done column stays done on the days after.
+        openLedgerKeys.add(ledgerKey);
+        if ((ledger[ledgerKey] ?? 0) >= FORMALITY_MINUTES) continue;
+        const id = `deadline:${workspace.id}:${database.id}:${row.id}`;
+        if (days <= WORKLOAD_HORIZON_DAYS) {
+          workload.push({ candidateId: id, title, due: Math.max(0, days), minutes: FORMALITY_MINUTES });
+        }
+        if (days > FORMALITY_LEAD_DAYS) continue;
+        // One short item to finish: never split into sessions, never "start
+        // early", never shrunk to a restart. Overdue, it is scored like any
+        // overdue deadline (it may still be possible, or need a call).
+        candidates.push({
+          score: days < 0 ? deadlineScore(days, weight) : formalityScore(days),
+          formality: true,
+          guaranteed: days >= 0 && days <= FORMALITY_GUARANTEE_DAYS,
+          item: {
+            id,
+            kind: "deadline",
+            mode: field ? "finish" : "session",
+            title,
+            workspaceName: cleanText(workspace.name),
+            section: cleanText(database.name),
+            target,
+            minutes: FORMALITY_MINUTES,
+            reason: { code: formalityCode(days), days, effortMinutes: FORMALITY_MINUTES },
+            ...(weight !== null ? { weight } : {}),
+            dueDate: due,
+            ledgerKey,
+          },
+        });
+        continue;
+      }
 
       if (exam.isExam) {
         if (days < 0 || days > EXAM_COUNTDOWN_DAYS) continue;
@@ -328,6 +386,8 @@ export function buildDailyStudyPlan(input: PlannerInput): BuiltDailyStudyPlan {
           days,
           date: due,
           major: exam.major,
+          module: exam.module === true,
+          prepTotal: examPrepTotalMinutes(workspace, database, row, exam, weight),
           weight,
           target,
           ledgerKey,
@@ -487,19 +547,41 @@ export function buildDailyStudyPlan(input: PlannerInput): BuiltDailyStudyPlan {
    */
   const examFallbacks = new Map<string, Candidate>();
   const usedDecks = new Set<string>();
+  /** Days to the nearest module exam after today (none: Infinity). */
+  const nearestModuleExam = Math.min(
+    Infinity,
+    ...exams.filter((exam) => exam.module && exam.days >= 1).map((exam) => exam.days),
+  );
   for (const exam of exams) {
-    const prepTotal = examPrepMinutes(exam.major, exam.weight);
-    const prepLeft = Math.max(0, prepTotal - (ledger[exam.ledgerKey] ?? 0));
+    const prepLeft = Math.max(0, exam.prepTotal - (ledger[exam.ledgerKey] ?? 0));
     const baseId = `exam:${exam.ledgerKey}`;
+    // The workload check counts an exam's remaining preparation once the
+    // exam is inside its horizon: all of it must happen before the exam.
+    // Preparation for a module exam further out can still move to later
+    // days, so it is not counted yet (no "30 hours don't fit" six weeks out).
     const inWorkload = exam.days >= 1 && exam.days <= WORKLOAD_HORIZON_DAYS && prepLeft > 0;
     const workloadEntry: WorkloadEntry | null = inWorkload
       ? { candidateId: null, title: exam.title, due: exam.days, minutes: prepLeft }
       : null;
     if (workloadEntry) workload.push(workloadEntry);
-    if (exam.days > EXAM_PREP_WINDOW_DAYS) continue;
+    if (exam.days > (exam.module ? MODULE_PREP_WINDOW_DAYS : EXAM_PREP_WINDOW_DAYS)) continue;
 
+    // A module exam's sessions spread what is left over the review days to
+    // come: they start at the usual size and may grow (`growTo`). In the last
+    // two weeks a session is never shorter than the usual size, and the
+    // nearest exam may take up to the longest session: the next Klausur is
+    // what the day is for.
+    const daily = exam.module && exam.days >= 1 && exam.days <= MODULE_DAILY_FROM;
+    const sessionTarget = !exam.module
+      ? null
+      : daily && exam.days === nearestModuleExam
+        ? MODULE_SESSION_MAX_MINUTES
+        : Math.max(
+            daily ? EXAM_SESSION_MINUTES : 0,
+            clampRound(Math.ceil(prepLeft / moduleSessionsLeft(exam.days)), 20, MODULE_SESSION_MAX_MINUTES),
+          );
     const wasCarried = [...carried.keys()].some((id) => id.startsWith(`${baseId}:`));
-    if (!isReviewDay(exam.days, exam.major) && !wasCarried) {
+    if (!isReviewDay(exam.days, exam.major, exam.module) && !wasCarried) {
       if (workloadEntry) {
         const id = `${baseId}:notes`;
         workloadEntry.candidateId = id;
@@ -545,7 +627,13 @@ export function buildDailyStudyPlan(input: PlannerInput): BuiltDailyStudyPlan {
       (exam.days === 0 ? 920 : exam.days === 1 ? 880 : exam.days <= 3 ? 800 : 720 - exam.days * 8) +
       (exam.major ? 40 : 0);
     const sessionMinutes =
-      exam.days === 0 ? 20 : clampRound(Math.ceil(prepLeft / Math.max(exam.days, 1)), 20, 45);
+      exam.days === 0
+        ? 20
+        : sessionTarget !== null
+          ? Math.min(sessionTarget, EXAM_SESSION_MINUTES)
+          : clampRound(Math.ceil(prepLeft / Math.max(exam.days, 1)), 20, EXAM_SESSION_MINUTES);
+    const growTo =
+      exam.days > 0 && sessionTarget !== null && sessionTarget > sessionMinutes ? { growTo: sessionTarget } : {};
     const common = {
       workspaceName: cleanText(exam.workspace.name),
       ...(exam.weight !== null ? { weight: exam.weight } : {}),
@@ -565,6 +653,8 @@ export function buildDailyStudyPlan(input: PlannerInput): BuiltDailyStudyPlan {
       planned += 1;
       candidates.push({
         score,
+        // A practice run (no cards due) is a work session that can grow.
+        ...(due > 0 ? {} : growTo),
         item: {
           ...common,
           id: `${baseId}:${deck.block.id}`,
@@ -602,6 +692,7 @@ export function buildDailyStudyPlan(input: PlannerInput): BuiltDailyStudyPlan {
     if (planned === 0) {
       candidates.push({
         score,
+        ...growTo,
         item: {
           ...common,
           id: `${baseId}:notes`,
@@ -677,28 +768,50 @@ export function buildDailyStudyPlan(input: PlannerInput): BuiltDailyStudyPlan {
     remaining -= rounded;
   };
 
+  // The review share is a share of the day as the student has it, before
+  // any formality takes its few minutes.
+  const dayForShare = remaining;
+  let formalities = 0;
+
+  // A formality due within a few days goes in first: it takes minutes and
+  // cannot be made up afterwards.
+  for (const c of open) {
+    if (!c.guaranteed || formalities >= MAX_FORMALITY_ITEMS) continue;
+    if (remaining < c.item.minutes) break;
+    place(c, c.item.minutes);
+    formalities += 1;
+  }
+
   // Due reviews first get a bounded share of the day, so a big deadline
   // cannot crowd the cards out (a skipped review day makes the next longer).
   // Very short days keep the plain priority order.
-  if (remaining >= REVIEW_SHARE_MIN_BUDGET) {
-    let share = Math.max(MIN_SESSION_MINUTES, roundDown5(remaining * REVIEW_SHARE));
+  if (dayForShare >= REVIEW_SHARE_MIN_BUDGET) {
+    let share = Math.max(MIN_SESSION_MINUTES, roundDown5(dayForShare * REVIEW_SHARE));
+    let reviews = 0;
     for (const c of open) {
       if (!c.deck) continue;
-      if (share < MIN_SESSION_MINUTES || placed.length >= MAX_REVIEW_ITEMS) break;
-      const minutes = Math.min(c.item.minutes, share);
+      if (share < MIN_SESSION_MINUTES || reviews >= MAX_REVIEW_ITEMS) break;
+      const minutes = Math.min(c.item.minutes, share, remaining);
+      if (minutes < MIN_SESSION_MINUTES) break;
       place(c, minutes);
+      reviews += 1;
       share -= roundDown5(minutes);
     }
   }
 
+  // Formalities do not count toward the item cap (they have their own).
+  let workItems = placed.filter((p) => !p.c.formality).length;
   let tasks = 0;
   for (const c of open) {
-    if (placed.length >= MAX_PLAN_ITEMS || remaining < MIN_SESSION_MINUTES) break;
+    if (remaining < MIN_SESSION_MINUTES) break;
     if (isPlaced(c)) continue;
+    if (c.formality ? formalities >= MAX_FORMALITY_ITEMS : workItems >= MAX_PLAN_ITEMS) continue;
     if (c.item.kind === "task" && tasks >= MAX_TASK_ITEMS) continue;
     const minutes = Math.min(c.item.minutes, remaining);
     if (minutes < MIN_SESSION_MINUTES) continue;
     if (c.item.kind === "task") tasks += 1;
+    if (c.formality) formalities += 1;
+    else workItems += 1;
     place(c, minutes);
   }
 
@@ -706,6 +819,10 @@ export function buildDailyStudyPlan(input: PlannerInput): BuiltDailyStudyPlan {
   // to its share, a deadline due tomorrow), then let work sessions run longer
   // toward their remaining effort, so the plan uses the time the student has.
   const byPriority = [...placed].sort((a, b) => compareCandidates(a.c, b.c));
+  // A stored plan holds at most MAX_STORED_PLAN_ITEMS, items already done
+  // included (a rebuild keeps them): the least pressing give way.
+  const room = Math.max(0, MAX_STORED_PLAN_ITEMS - kept.length);
+  for (const dropped of byPriority.splice(room)) remaining += dropped.minutes;
   for (const p of byPriority) {
     if (remaining < 5) break;
     const grow = Math.min(p.c.item.minutes - p.minutes, remaining);
@@ -716,11 +833,16 @@ export function buildDailyStudyPlan(input: PlannerInput): BuiltDailyStudyPlan {
   }
   for (const p of byPriority) {
     if (remaining < 5) break;
-    if (p.c.item.kind !== "deadline") continue;
+    // A formality takes its few minutes, no more.
+    if (p.c.formality) continue;
+    if (p.c.item.kind !== "deadline" && p.c.growTo === undefined) continue;
     // Waiting a while: the small restart step stays small.
     if ((p.c.item.carry?.count ?? 0) >= RESTART_AFTER_CARRIES) continue;
-    const effort = p.c.item.reason.effortMinutes ?? p.minutes;
-    const grow = Math.min(Math.min(effort, MAX_SESSION_MINUTES) - p.minutes, remaining);
+    // A module exam session grows toward its share of the preparation left;
+    // byPriority puts the nearest exam first, so it gets the most of the day.
+    const limit =
+      p.c.growTo ?? Math.min(p.c.item.reason.effortMinutes ?? p.minutes, MAX_SESSION_MINUTES);
+    const grow = Math.min(limit - p.minutes, remaining);
     if (grow >= 5) {
       p.minutes += roundDown5(grow);
       remaining -= roundDown5(grow);
@@ -764,12 +886,41 @@ export function buildDailyStudyPlan(input: PlannerInput): BuiltDailyStudyPlan {
  * Review days counted backwards from an exam: every one of the last three
  * days, every day of the last week for a major exam, and spaced sessions
  * (5, 7, 10, 14, 21 days out) before that.
+ *
+ * A module exam (`module`) is prepared like a German Klausurenphase: twice a
+ * week from 42 to 29 days out (42, 38, 35, 31), every other day from 28 to
+ * 15 (28, 26, ..., 16), and every day of the last 14.
  */
-export function isReviewDay(daysToExam: number, major: boolean): boolean {
+export function isReviewDay(daysToExam: number, major: boolean, module = false): boolean {
   if (daysToExam < 0) return false;
+  if (module) {
+    if (daysToExam > MODULE_PREP_WINDOW_DAYS) return false;
+    if (daysToExam <= MODULE_DAILY_FROM) return true;
+    if (daysToExam <= MODULE_EVERY_OTHER_DAY_FROM) return daysToExam % 2 === 0;
+    return daysToExam % 7 === 0 || daysToExam % 7 === 3;
+  }
   if (daysToExam <= 3) return true;
   if (major && daysToExam <= 7) return true;
   return [5, 7, 10, 14, 21].includes(daysToExam);
+}
+
+/** Module exam review days from today (included) to the day before the exam. */
+function moduleSessionsLeft(daysToExam: number): number {
+  let count = 0;
+  for (let day = daysToExam; day >= 1; day -= 1) if (isReviewDay(day, true, true)) count += 1;
+  return Math.max(1, count);
+}
+
+/** A formality due today first of all; a week out still above most work sessions. */
+function formalityScore(days: number): number {
+  return days <= 0 ? 950 : 940 - days * 40;
+}
+
+function formalityCode(days: number): PlanReason["code"] {
+  if (days < 0) return "formality_overdue";
+  if (days === 0) return "formality_today";
+  if (days === 1) return "formality_tomorrow";
+  return "formality_soon";
 }
 
 /**
@@ -878,21 +1029,6 @@ function deckItem(item: PlanItemDraft, deck: DeckLoad, minutes: number): PlanIte
   if (count < deck.ready) reason.readyCount = deck.ready;
   else delete reason.readyCount;
   return { ...item, minutes, reason, dueCount: count };
-}
-
-function isPlayableQuestion(q: QuizQuestion): boolean {
-  if (!q.prompt?.trim()) return false;
-  if (q.kind === "mcq") {
-    const choices = q.choices ?? [];
-    return (
-      choices.length >= 2 &&
-      typeof q.answerIndex === "number" &&
-      q.answerIndex < choices.length &&
-      choices.every((c) => c.trim() !== "")
-    );
-  }
-  if (q.kind === "true_false") return typeof q.answerBool === "boolean";
-  return Boolean(q.answerText?.trim());
 }
 
 /** Clamp, then round to a friendly multiple of five minutes. */

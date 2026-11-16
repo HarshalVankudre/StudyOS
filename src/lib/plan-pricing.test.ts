@@ -1,17 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  amountOfOneTimePrice,
   annualCheckoutConfigured,
   clearProPriceCache,
   DEFAULT_PRO_ANNUAL_USD,
   DEFAULT_PRO_MONTHLY_USD,
+  effectiveTaxBehavior,
+  extraCurrencies,
   formatPrice,
   formatUsd,
+  getCreditPackPricing,
   getProPricing,
   parseUsd,
   PRICE_CACHE_MS,
   proPricing,
   type StripePriceLike,
 } from "./plan-pricing";
+import { CREDIT_PACK_PRICE_USD } from "./price-list";
 import { isAnnualBillingAvailable } from "./stripe";
 
 const report = vi.hoisted(() => vi.fn());
@@ -200,6 +205,224 @@ describe("round 2, finding 7: Stripe is the source of truth for the displayed pr
       fetchPrice: fetcher({ price_m: price(), price_y: yearly({ currency: "eur" }) }),
     });
     expect(out.annual?.savingsPercent).toBe(0);
+  });
+});
+
+describe("the credit pack's price (STRIPE_PRICE_CREDIT_PACK)", () => {
+  const PACK = { ...BILLING, STRIPE_PRICE_CREDIT_PACK: "price_pack" };
+  const oneTime = (over: Partial<StripePriceLike> = {}): StripePriceLike => ({
+    id: "price_pack",
+    active: true,
+    type: "one_time",
+    billing_scheme: "per_unit",
+    currency: "eur",
+    unit_amount: 999,
+    recurring: null,
+    ...over,
+  });
+  const fetcher = (price: StripePriceLike | Error) =>
+    vi.fn(async () => {
+      if (price instanceof Error) throw price;
+      return price;
+    });
+
+  beforeEach(() => {
+    clearProPriceCache();
+    report.mockReset();
+  });
+
+  it("without it, nothing changes: the price list's USD price, sold whenever billing is on, Stripe never asked", async () => {
+    const fetchPrice = fetcher(oneTime());
+    const configured = { price: { amount: CREDIT_PACK_PRICE_USD, currency: "USD" }, priceId: null, source: "configured" };
+    expect(await getCreditPackPricing({ env: BILLING, fetchPrice })).toEqual({ ...configured, offered: true });
+    expect(await getCreditPackPricing({ env: {}, fetchPrice })).toEqual({ ...configured, offered: false });
+    // Set, but billing is off: still nothing to sell, nothing asked.
+    expect(await getCreditPackPricing({ env: { STRIPE_PRICE_CREDIT_PACK: "price_pack" }, fetchPrice })).toEqual({ ...configured, offered: false });
+    expect(fetchPrice).not.toHaveBeenCalled();
+  });
+
+  it("with it, shows and sells the Stripe Price's amount and currency", async () => {
+    expect(await getCreditPackPricing({ env: PACK, fetchPrice: fetcher(oneTime()) })).toEqual({
+      price: { amount: 9.99, currency: "EUR" },
+      priceId: "price_pack",
+      offered: true,
+      source: "stripe",
+    });
+    clearProPriceCache();
+    const jpy = await getCreditPackPricing({ env: PACK, fetchPrice: fetcher(oneTime({ currency: "jpy", unit_amount: 1500 })) });
+    expect(jpy.price).toEqual({ amount: 1500, currency: "JPY" });
+  });
+
+  it("never sells the pack at another price when its Stripe Price is wrong or unreadable, and says so once", async () => {
+    for (const wrong of [
+      oneTime({ active: false }),
+      oneTime({ type: "recurring", recurring: { interval: "month", interval_count: 1 } }),
+      oneTime({ billing_scheme: "tiered" }),
+      oneTime({ unit_amount: null }),
+      oneTime({ unit_amount: 0 }),
+    ]) {
+      clearProPriceCache();
+      report.mockReset();
+      const fetchPrice = fetcher(wrong);
+      const out = await getCreditPackPricing({ env: PACK, fetchPrice });
+      expect(out).toMatchObject({ offered: false, priceId: null, source: "configured" });
+      await getCreditPackPricing({ env: PACK, fetchPrice });
+      expect(report).toHaveBeenCalledTimes(1);
+    }
+    clearProPriceCache();
+    expect(await getCreditPackPricing({ env: PACK, fetchPrice: fetcher(new Error("Stripe down")) })).toMatchObject({
+      offered: false,
+      priceId: null,
+    });
+  });
+
+  it("accepts only active, flat, one-time prices", () => {
+    expect(amountOfOneTimePrice(oneTime())).toEqual({ amount: 9.99, currency: "EUR" });
+    expect(amountOfOneTimePrice(oneTime({ billing_scheme: null }))).toEqual({ amount: 9.99, currency: "EUR" });
+    expect(amountOfOneTimePrice(oneTime({ type: "recurring" }))).toBeNull();
+  });
+
+  /** The Stripe Tax settings with this default tax behavior (null: none set). */
+  const taxDefault = (value: string | null) => vi.fn(async () => ({ defaults: { tax_behavior: value } }));
+  const TAXED = { ...PACK, STRIPE_AUTOMATIC_TAX: "1" };
+
+  it("does not sell a Stripe Price whose tax behavior contradicts STRIPE_TAX_BEHAVIOR while Stripe Tax is on, and says so once", async () => {
+    const exclusive = fetcher(oneTime({ tax_behavior: "exclusive" }));
+    const settings = taxDefault("inclusive");
+    expect(await getCreditPackPricing({ env: TAXED, fetchPrice: exclusive, fetchTaxSettings: settings })).toMatchObject({
+      offered: false,
+      priceId: null,
+      source: "configured",
+    });
+    await getCreditPackPricing({ env: TAXED, fetchPrice: exclusive, fetchTaxSettings: settings });
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(String(report.mock.calls[0][0])).toMatch(
+      /STRIPE_PRICE_CREDIT_PACK price_pack has tax behavior exclusive but STRIPE_TAX_BEHAVIOR is inclusive: it is not offered/,
+    );
+    // Its own behavior decides: the account default is not even read.
+    expect(settings).not.toHaveBeenCalled();
+    report.mockReset();
+    clearProPriceCache();
+    // Matching, or Stripe Tax off (nothing is said about VAT then): sold, nothing to say.
+    expect(
+      await getCreditPackPricing({ env: { ...TAXED, STRIPE_TAX_BEHAVIOR: "exclusive" }, fetchPrice: exclusive, fetchTaxSettings: settings }),
+    ).toMatchObject({ offered: true, priceId: "price_pack" });
+    expect(await getCreditPackPricing({ env: PACK, fetchPrice: exclusive, fetchTaxSettings: settings })).toMatchObject({ offered: true });
+    expect(report).not.toHaveBeenCalled();
+    expect(settings).not.toHaveBeenCalled();
+  });
+
+  it("a Price without its own tax behavior follows the Stripe Tax default, read once and cached", async () => {
+    const unspecified = fetcher(oneTime({ tax_behavior: "unspecified" }));
+    const inclusive = taxDefault("inclusive");
+    expect(await getCreditPackPricing({ env: TAXED, fetchPrice: unspecified, fetchTaxSettings: inclusive, now: 0 })).toMatchObject({ offered: true });
+    expect(await getCreditPackPricing({ env: TAXED, fetchPrice: unspecified, fetchTaxSettings: inclusive, now: PRICE_CACHE_MS - 1 })).toMatchObject({ offered: true });
+    expect(inclusive).toHaveBeenCalledTimes(1);
+    expect(report).not.toHaveBeenCalled();
+    clearProPriceCache();
+    // A default that contradicts the setting: not sold.
+    expect(
+      await getCreditPackPricing({ env: TAXED, fetchPrice: fetcher(oneTime({ tax_behavior: null })), fetchTaxSettings: taxDefault("exclusive") }),
+    ).toMatchObject({ offered: false });
+    expect(String(report.mock.calls[0][0])).toMatch(/has tax behavior exclusive \(the Stripe Tax default\) but STRIPE_TAX_BEHAVIOR is inclusive/);
+  });
+
+  it("whether a Price includes VAT that cannot be told (no default, inferred by currency, settings unreadable) is not sold", async () => {
+    const unspecified = fetcher(oneTime({ tax_behavior: "unspecified" }));
+    for (const settings of [taxDefault(null), taxDefault("inferred_by_currency"), vi.fn(async () => Promise.reject(new Error("Stripe down")))]) {
+      clearProPriceCache();
+      report.mockReset();
+      expect(await getCreditPackPricing({ env: TAXED, fetchPrice: unspecified, fetchTaxSettings: settings })).toMatchObject({ offered: false });
+      expect(report.mock.calls.map((c) => String(c[0])).join("\n")).toMatch(/cannot be told: it is not offered/);
+    }
+  });
+
+  it("the effective tax behavior: the Price's own, else the account default, else unknown", () => {
+    expect(effectiveTaxBehavior("inclusive", "exclusive")).toBe("inclusive");
+    expect(effectiveTaxBehavior("exclusive", null)).toBe("exclusive");
+    expect(effectiveTaxBehavior("unspecified", "exclusive")).toBe("exclusive");
+    expect(effectiveTaxBehavior(null, "inclusive")).toBe("inclusive");
+    expect(effectiveTaxBehavior(undefined, "inferred_by_currency")).toBeNull();
+    expect(effectiveTaxBehavior("unspecified", null)).toBeNull();
+    expect(effectiveTaxBehavior("unspecified", undefined)).toBeNull();
+  });
+
+  it("the Pro prices follow the same rule: a monthly mismatch offers no Pro, an annual one no annual", async () => {
+    const recurring = (id: string, interval: "month" | "year", tax_behavior: string) => ({
+      id,
+      active: true,
+      type: "recurring",
+      billing_scheme: "per_unit",
+      currency: "eur",
+      unit_amount: interval === "year" ? 4800 : 500,
+      recurring: { interval, interval_count: 1 },
+      tax_behavior,
+    });
+    const env = { ...BILLING, STRIPE_PRICE_PRO_ANNUAL: "price_y", STRIPE_AUTOMATIC_TAX: "1" };
+    const settings = taxDefault("inclusive");
+    let out = await getProPricing({
+      env,
+      fetchTaxSettings: settings,
+      fetchPrice: vi.fn(async (id: string) => recurring(id, id === "price_y" ? "year" : "month", "exclusive")),
+    });
+    expect(out).toMatchObject({ offered: { month: false, year: false }, source: "configured" });
+    expect(String(report.mock.calls[0][0])).toMatch(/STRIPE_PRICE_PRO price_m has tax behavior exclusive/);
+    clearProPriceCache();
+    out = await getProPricing({
+      env,
+      fetchTaxSettings: settings,
+      fetchPrice: vi.fn(async (id: string) => recurring(id, id === "price_y" ? "year" : "month", id === "price_y" ? "exclusive" : "inclusive")),
+    });
+    expect(out).toMatchObject({ offered: { month: true, year: false }, annual: null, source: "stripe" });
+  });
+});
+
+describe("prices with extra currencies (currency_options)", () => {
+  const options = (...codes: string[]) => Object.fromEntries(codes.map((c) => [c, { unit_amount: 500 }]));
+  const monthly = (over: Partial<StripePriceLike> = {}): StripePriceLike => ({
+    id: "price_m",
+    active: true,
+    type: "recurring",
+    billing_scheme: "per_unit",
+    currency: "usd",
+    unit_amount: 500,
+    recurring: { interval: "month", interval_count: 1 },
+    ...over,
+  });
+
+  beforeEach(() => {
+    clearProPriceCache();
+    report.mockReset();
+  });
+
+  it("are not offered, and the owner is told once to use single-currency prices", async () => {
+    const fetchPrice = vi.fn(async () => monthly({ currency_options: options("usd", "eur", "gbp") }));
+    expect(await getProPricing({ env: BILLING, fetchPrice })).toMatchObject({ offered: { month: false, year: false }, source: "configured" });
+    await getProPricing({ env: BILLING, fetchPrice });
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(String(report.mock.calls[0][0])).toMatch(/STRIPE_PRICE_PRO price_m also charges in EUR, GBP \(currency_options\).*Use a single-currency Price/);
+    expect(extraCurrencies(monthly({ currency_options: options("USD", "eur") }))).toEqual(["EUR"]);
+  });
+
+  it("a Price whose options list only its own currency is a single-currency Price", async () => {
+    expect(await getProPricing({ env: BILLING, fetchPrice: vi.fn(async () => monthly({ currency_options: options("usd") })) })).toMatchObject({
+      offered: { month: true },
+    });
+    expect(report).not.toHaveBeenCalled();
+  });
+
+  it("applies to the annual price and the pack too", async () => {
+    const env = { ...BILLING, STRIPE_PRICE_PRO_ANNUAL: "price_y", STRIPE_PRICE_CREDIT_PACK: "price_pack" };
+    const fetchPrice = vi.fn(async (id: string) =>
+      id === "price_y"
+        ? monthly({ id, unit_amount: 4800, recurring: { interval: "year", interval_count: 1 }, currency_options: options("usd", "eur") })
+        : id === "price_pack"
+          ? monthly({ id, type: "one_time", recurring: null, currency_options: options("usd", "jpy") })
+          : monthly(),
+    );
+    expect(await getProPricing({ env, fetchPrice })).toMatchObject({ offered: { month: true, year: false }, annual: null });
+    expect(await getCreditPackPricing({ env, fetchPrice })).toMatchObject({ offered: false, priceId: null });
+    expect(report).toHaveBeenCalledTimes(2);
   });
 });
 

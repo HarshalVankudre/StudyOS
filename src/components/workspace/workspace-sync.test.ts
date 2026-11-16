@@ -935,3 +935,156 @@ describe("closing a tab (browser QA)", () => {
     expect(texts(b.workspace)).toEqual(["hi, crashed"]);
   });
 });
+
+describe("round four: a list reordered in more than one unsaved step keeps its order when replayed", () => {
+  // Which items a diff reports as moved depends on the two orders it
+  // compares: "C to the top, then B to the top" is "A to the bottom" overall.
+  const listed = (): Workspace => ({
+    ...ws(),
+    pages: [
+      { id: "p1", title: "Home", blocks: ["A", "B", "C", "Z"].map((id) => para(id, id)) },
+      {
+        id: "p2",
+        title: "Deck",
+        blocks: [{ id: "deck", type: "flashcards", cards: [{ id: "c1", front: "Q", back: "A" }] }],
+      },
+    ],
+  });
+  const order = (w: Workspace) => w.pages[0].blocks.map((b) => b.id).join("");
+  const toTop = (id: string) => (d: Workspace) => {
+    const blocks = d.pages[0].blocks;
+    const [moved] = blocks.splice(
+      blocks.findIndex((b) => b.id === id),
+      1,
+    );
+    blocks.unshift(moved);
+  };
+
+  it("a save refused while the second move was made: both moves are replayed", async () => {
+    const fake = fakeServer(listed());
+    let open: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (open = resolve));
+    const a = openTab(fake, {
+      deps: {
+        save: async (id, w, base) => {
+          await gate;
+          return fake.save(id, w, base);
+        },
+      },
+    });
+    a.update(toTop("C"));
+    const sending = a.flush(); // in flight with the first move
+    await vi.advanceTimersByTimeAsync(0);
+    a.update(toTop("B"));
+    expect(order(a.workspace)).toBe("BCAZ");
+    fake.write(setText("Z", "edited elsewhere")); // so the save is refused
+    open();
+    await sending;
+    await drain();
+    expect(order(a.workspace)).toBe("BCAZ");
+    expect(order(fake.server.workspace)).toBe("BCAZ");
+    expect(texts(fake.server.workspace)).toContain("edited elsewhere");
+  });
+
+  it("move, move, undo while the agent works: the order left is replayed onto its result", async () => {
+    const fake = fakeServer(listed());
+    const a = openTab(fake);
+    a.setAgentBusy(true);
+    a.update(toTop("C"));
+    a.update(toTop("B"));
+    a.undo();
+    expect(order(a.workspace)).toBe("CABZ");
+    fake.write(setText("Z", "agent text"));
+    a.setAgentBusy(false);
+    await drain();
+    expect(order(a.workspace)).toBe("CABZ");
+    expect(order(fake.server.workspace)).toBe("CABZ");
+    expect(texts(fake.server.workspace)).toContain("agent text");
+  });
+
+  it("move, move, undo, grade, undo the grade: the order stays (no server involved)", () => {
+    const fake = fakeServer(listed());
+    const a = openTab(fake);
+    const ref = { pageId: "p2", blockId: "deck", cardId: "c1" };
+    const at = new Date("2026-11-12T10:00:00Z");
+    a.update(toTop("C"));
+    a.update(toTop("B"));
+    a.undo();
+    a.update((d) => applyGrade(d, ref, "good", at), { rebase: "rerun" });
+    a.undo(); // switches the unsaved grade off: the unsaved edits are replayed without it
+    expect(order(a.workspace)).toBe("CABZ");
+    const card = (a.workspace.pages[1].blocks[0] as { cards: { reps?: number }[] }).cards[0];
+    expect(card.reps).toBeUndefined();
+  });
+
+  it("moves that cancel out are still no change", async () => {
+    const fake = fakeServer(listed());
+    const a = openTab(fake);
+    a.setAgentBusy(true);
+    a.update(toTop("C"));
+    a.undo();
+    expect(order(a.workspace)).toBe("ABCZ");
+    fake.write(toTop("Z")); // the agent reorders the list itself
+    a.setAgentBusy(false);
+    await drain();
+    expect(order(a.workspace)).toBe("ZABC");
+    expect(order(fake.server.workspace)).toBe("ZABC");
+  });
+});
+
+describe("round four: the version is checked when the editor starts", () => {
+  it("an editor opened with an older document (browser back) reads the newer one at once", async () => {
+    const fake = fakeServer();
+    const stale = structuredClone(fake.server.workspace);
+    fake.write(setText("b1", "saved before going back"));
+    const a = new WorkspaceSync("w1", stale, 1, {
+      save: fake.save,
+      fetchState: fake.fetchState,
+      fetchVersion: fake.fetchVersion,
+      storage: new MemoryStorage(),
+    });
+    a.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fake.fetchVersion).toHaveBeenCalledTimes(1);
+    expect(a.version).toBe(2);
+    expect(texts(a.workspace)).toEqual(["saved before going back"]);
+  });
+
+  it("a draft being merged reads the server itself: no separate check", async () => {
+    const fake = fakeServer();
+    const storage = new MemoryStorage();
+    const a = openTab(fake, { storage, tabId: "A" });
+    await vi.advanceTimersByTimeAsync(0); // (A's own check at start)
+    a.update(setText("b1", "laptop text"));
+    crash(a, true);
+    fake.fetchVersion.mockClear();
+    const b = openTab(fake, { storage, tabId: "B" });
+    await drain();
+    expect(fake.fetchVersion).not.toHaveBeenCalled();
+    expect(texts(b.workspace)).toEqual(["laptop text"]);
+  });
+});
+
+describe("round four: a failed save that changed nothing does not leave the status stuck", () => {
+  it("the save made to settle a closed tab's unanswered save fails: the status recovers", async () => {
+    const fake = fakeServer();
+    const storage = new MemoryStorage();
+    // A's save never gets anywhere and never answers; then the tab is closed.
+    const a = openTab(fake, { storage, tabId: "A", deps: { save: () => new Promise<SaveResult>(() => {}) } });
+    a.update(setText("b1", "laptop text"));
+    void a.flush();
+    await vi.advanceTimersByTimeAsync(0);
+    crash(a, true);
+
+    // B saves once on the same version first (to settle A's save); that save fails.
+    const save = vi.fn(fake.save);
+    save.mockRejectedValueOnce(new Error("network"));
+    const b = openTab(fake, { storage, tabId: "B", deps: { save } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(b.getSnapshot().status).toBe("error");
+    await drain(); // the retry finds nothing of B's own to save
+    expect(b.hasUnsavedChanges).toBe(false);
+    expect(b.getSnapshot().status).toBe("saved");
+  });
+});

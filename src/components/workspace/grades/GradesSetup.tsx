@@ -3,41 +3,57 @@
 import { useId, useState } from "react";
 import { Check, Plus } from "lucide-react";
 import { useI18n } from "@/lib/i18n/client";
-import type { Database, GradesColumns, Workspace } from "@/lib/workspace/types";
+import type { Database, GradesBlock, GradesColumns, Workspace } from "@/lib/workspace/types";
 import {
+  ALL_GRADE_COLUMN_KEYS,
   GRADE_COLUMN_KEYS,
   columnFits,
   findGradeDatabase,
   resolveGradeColumns,
   type GradeColumnKey,
 } from "@/lib/grades";
+import { EntryChoice } from "./GradesSettings";
 
 const FIELD =
-  "h-11 w-full min-w-0 rounded-lg border border-line-strong bg-paper px-2 text-sm text-ink outline-none focus:border-lime focus:ring-2 focus:ring-lime/30";
+  "h-11 w-full min-w-0 rounded-lg border border-line-strong bg-paper px-2 text-sm text-ink outline-none focus:border-lime-deep focus:ring-2 focus:ring-lime-deep/30";
+
+type Entry = NonNullable<GradesBlock["entry"]>;
 
 /**
  * Pick the list of graded work and say which column is which. Everything is
  * pre-filled from detection, so the usual setup is one tap; a missing score
- * column can be added right here.
+ * column can be added right here. With German grades the student first says
+ * how grades are entered; module grades need only the grade and credits
+ * columns (one module per row), never weights or "out of".
  */
 export function GradesSetup({
   workspace,
   databaseId,
   columns,
-  onAddScoreColumn,
+  german = false,
+  entry = "percent",
+  onEntry,
+  onAddColumn,
   onSave,
   onCancel,
 }: {
   workspace: Workspace;
   databaseId?: string;
   columns?: GradesColumns;
-  /** Add a number column for scores to `db`; returns its id. */
-  onAddScoreColumn: (db: Database) => string;
+  /** The block's scale is German grades: offer the choice of entry. */
+  german?: boolean;
+  entry?: Entry;
+  onEntry?: (entry: Entry) => void;
+  /** Add a number column named `name` to `db`; returns its id. */
+  onAddColumn: (db: Database, name: string) => string;
   onSave: (databaseId: string, columns: GradesColumns) => void;
   onCancel?: () => void;
 }) {
   const { dict } = useI18n();
   const g = dict.grades;
+  const M = g.modules;
+  const E = dict.tools.gradeCalculator.ects;
+  const modules = german && entry === "grade";
   const uid = useId();
   const initialDb =
     workspace.databases.find((d) => d.id === databaseId)?.id ?? findGradeDatabase(workspace)?.id ?? workspace.databases[0]?.id ?? "";
@@ -53,6 +69,27 @@ export function GradesSetup({
 
   const choose = (key: GradeColumnKey, value: string) =>
     setPicks((p) => ({ ...p, [key]: value === "" ? null : value }));
+  const shown: readonly GradeColumnKey[] = modules ? ["score", "credits"] : GRADE_COLUMN_KEYS;
+  const label = (key: GradeColumnKey) =>
+    key === "credits" ? M.creditsColumn : modules && key === "score" ? E.gradeColumn : g.columns[key];
+  const hint = (key: GradeColumnKey) =>
+    key === "credits" ? M.creditsHint : modules && key === "score" ? M.gradeHint : g.columnHints[key];
+  // A missing column, added right here: the score (or grade), and the credits of modules.
+  const missing = [
+    !resolved.score && {
+      key: "score" as const,
+      text: modules ? M.missingGrade : g.missingScore,
+      action: modules ? M.addGradeColumn : g.addScoreColumn,
+      name: modules ? E.gradeColumn : g.scoreColumnName,
+    },
+    modules &&
+      !resolved.credits && {
+        key: "credits" as const,
+        text: M.missingCredits,
+        action: M.addCreditsColumn,
+        name: E.ectsColumn,
+      },
+  ].filter((m) => !!m);
 
   return (
     <form
@@ -60,14 +97,16 @@ export function GradesSetup({
       onSubmit={(e) => {
         e.preventDefault();
         const ids: GradesColumns = {};
-        for (const key of GRADE_COLUMN_KEYS) ids[key] = resolved[key]?.id ?? null;
+        for (const key of modules ? ALL_GRADE_COLUMN_KEYS : GRADE_COLUMN_KEYS) ids[key] = resolved[key]?.id ?? null;
         onSave(db.id, ids);
       }}
     >
       <div>
         <h3 className="font-display text-base font-bold text-ink">{g.setupTitle}</h3>
-        <p className="mt-1 text-sm text-ink-soft">{g.setupIntro}</p>
+        <p className="mt-1 text-sm text-ink-soft">{modules ? M.setupIntro : g.setupIntro}</p>
       </div>
+
+      {german && onEntry && <EntryChoice value={entry} onChange={onEntry} />}
 
       <label className="flex flex-col gap-1 text-sm">
         <span className="font-semibold text-ink">{g.databaseLabel}</span>
@@ -89,12 +128,12 @@ export function GradesSetup({
       </label>
 
       <div className="grid gap-3 sm:grid-cols-2">
-        {GRADE_COLUMN_KEYS.map((key) => {
+        {shown.map((key) => {
           const options = db.properties.filter((p) => columnFits(db, key, p));
           return (
             <div key={key} className="flex min-w-0 flex-col gap-1 text-sm">
               <label htmlFor={`${uid}-${key}`} className="font-semibold text-ink">
-                {g.columns[key]}
+                {label(key)}
               </label>
               <select
                 id={`${uid}-${key}`}
@@ -111,35 +150,38 @@ export function GradesSetup({
                 ))}
               </select>
               <p id={`${uid}-${key}-hint`} className="text-xs text-ink-soft">
-                {g.columnHints[key]}
+                {hint(key)}
               </p>
             </div>
           );
         })}
       </div>
 
-      {!resolved.score && (
-        <div className="flex flex-col gap-2 rounded-lg border border-line bg-hover/60 p-3 text-sm sm:flex-row sm:items-center">
-          <p className="flex-1 text-ink-soft">{g.missingScore}</p>
+      {missing.map((m) => (
+        <div
+          key={m.key}
+          className="flex flex-col gap-2 rounded-lg border border-line bg-hover/60 p-3 text-sm sm:flex-row sm:items-center"
+        >
+          <p className="flex-1 text-ink-soft">{m.text}</p>
           <button
             type="button"
             onClick={() => {
-              const id = onAddScoreColumn(db);
-              setPicks((p) => ({ ...p, score: id }));
+              const id = onAddColumn(db, m.name);
+              setPicks((p) => ({ ...p, [m.key]: id }));
             }}
             className="flex min-h-11 items-center justify-center gap-1.5 rounded-lg border border-line-strong bg-card px-3 font-semibold text-ink transition hover:bg-hover"
           >
             <Plus className="size-4" aria-hidden />
-            {g.addScoreColumn}
+            {m.action}
           </button>
         </div>
-      )}
+      ))}
 
       <div className="flex flex-wrap gap-2">
         <button
           type="submit"
           disabled={!resolved.score}
-          className="flex min-h-11 items-center gap-1.5 rounded-lg bg-lime px-4 text-sm font-semibold text-lime-on transition hover:bg-lime-deep disabled:opacity-40"
+          className="flex min-h-11 items-center gap-1.5 rounded-lg bg-lime px-4 text-sm font-semibold text-lime-on transition hover:bg-lime-hover disabled:opacity-40"
         >
           <Check className="size-4" aria-hidden />
           {g.saveSetup}

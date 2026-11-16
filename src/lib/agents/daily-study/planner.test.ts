@@ -7,10 +7,19 @@ import type {
   QuizBlock,
   Workspace,
 } from "@/lib/workspace/types";
-import { addDays } from "@/lib/workspace/view-logic";
+import { addDays, dayDiff } from "@/lib/workspace/view-logic";
 import { buildDailyStudyPlan, isReviewDay, planSourcesKey, visiblePlanItems, type PreviousPlan } from "./planner";
-import { classifyExam } from "./classify";
-import type { DailyStudyPlanItem } from "./types";
+import {
+  classifyExam,
+  estimateEffortMinutes,
+  examPrepTotalMinutes,
+  isFormality,
+  rowWeight,
+} from "./classify";
+import { gradesWeightResolver } from "./grades-hook";
+import { itemNotes } from "./present";
+import { getDictionary } from "@/lib/i18n/dictionaries";
+import { isFormalityReason, type DailyStudyPlanItem } from "./types";
 
 const TODAY = "2026-11-12";
 
@@ -370,6 +379,17 @@ describe("planner: exams", () => {
     expect(result.items.some((i) => i.kind === "deadline")).toBe(false);
   });
 
+  // Review round 4: the planner had a stricter rule than the quiz block, so a
+  // quiz whose questions carry a blank extra choice was never planned.
+  it("plans a quiz the quiz block can run, blank extra choices included", () => {
+    const ws = examWorkspace("Biology midterm", 3);
+    const quiz = ws.pages[1].blocks[1] as QuizBlock;
+    quiz.questions = [
+      { id: "q1", kind: "mcq", prompt: "Powerhouse?", choices: ["Mitochondria", "Golgi", ""], answerIndex: 0 },
+    ];
+    expect(plan([ws]).items.find((i) => i.kind === "quiz")?.target.blockId).toBe("bio-quiz");
+  });
+
   it("spaces review days backwards from the exam", () => {
     expect([1, 2, 3, 5, 7, 10, 14, 21].every((d) => isReviewDay(d, false))).toBe(true);
     expect([4, 6, 8, 9, 15].some((d) => isReviewDay(d, false))).toBe(false);
@@ -498,6 +518,20 @@ describe("planner: exams", () => {
     };
     expect(classifyExam(db, db.rows[0], "Sitting 2 (ch. 7–10)", null).isExam).toBe(true);
     expect(classifyExam(db, db.rows[1], "Problem Set 7", null).isExam).toBe(false);
+  });
+
+  // Review round 4: a weight of 1 was read as the fraction 1.0 (100 %), so a
+  // 1 % discussion post became a major exam with 480 minutes of prep.
+  it("reads a weight of 1 as 1 %, not as a fraction of 100 %", () => {
+    const db = assignments([{ id: "d", title: "Discussion post 3", due: addDays(TODAY, 5), weight: 1 }]);
+    const ws = workspace({ pages: [trackerPage()], databases: [db] });
+    expect(rowWeight(db, db.rows[0])).toBe(1);
+    expect(gradesWeightResolver()(ws, db, db.rows[0])).toBe(1);
+    expect(classifyExam(db, db.rows[0], "Discussion post 3", 1).isExam).toBe(false);
+
+    const result = plan([ws]);
+    expect(result.details.exams).toEqual([]);
+    expect(result.items.find((i) => i.target.rowId === "d")).toMatchObject({ kind: "deadline", weight: 1 });
   });
 });
 
@@ -705,3 +739,444 @@ describe("visiblePlanDetails (QA round 2: Today contradicted itself after a tras
     expect(shown.workload).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// German universities: administrative deadlines (Fristen) and module exams
+// (one Klausur decides a module; a semester ends in a Klausurenphase).
+
+const MODULES = [
+  { id: "ana", label: "Analysis I" },
+  { id: "la", label: "Lineare Algebra" },
+  { id: "stat", label: "Statistik" },
+  { id: "prog", label: "Programmierung" },
+  { id: "phys", label: "Experimentalphysik" },
+];
+
+interface GermanRow {
+  id: string;
+  title: string;
+  due: string;
+  course?: string;
+  art?: "klausur" | "frist" | "uebung";
+  ects?: number;
+  hours?: number;
+}
+
+/** A student's "Prüfungen & Fristen" table: module, type, a done checkbox. */
+function fristenDb(rows: GermanRow[], extra: Database["properties"] = []): Database {
+  return {
+    id: "pf",
+    name: "Prüfungen & Fristen",
+    properties: [
+      { id: "title", name: "Titel", type: "text" },
+      { id: "due", name: "Datum", type: "date" },
+      { id: "course", name: "Modul", type: "select", options: MODULES },
+      {
+        id: "art",
+        name: "Art",
+        type: "select",
+        options: [
+          { id: "klausur", label: "Klausur" },
+          { id: "frist", label: "Fristen" },
+          { id: "uebung", label: "Übung" },
+        ],
+      },
+      { id: "done", name: "Erledigt", type: "checkbox" },
+      ...extra,
+    ],
+    rows: rows.map(
+      (r): DatabaseRow => ({
+        id: r.id,
+        cells: {
+          title: r.title,
+          due: r.due,
+          done: false,
+          ...(r.course ? { course: r.course } : {}),
+          ...(r.art ? { art: r.art } : {}),
+          ...(r.ects !== undefined ? { ects: r.ects } : {}),
+          ...(r.hours !== undefined ? { hours: r.hours } : {}),
+        },
+      }),
+    ),
+    views: [{ id: "t", name: "Tabelle", type: "table" }],
+  };
+}
+
+/** The module list with credit points (Experimentalphysik has none written down). */
+function modulesDb(): Database {
+  return {
+    id: "module",
+    name: "Module",
+    properties: [
+      { id: "name", name: "Modul", type: "text" },
+      { id: "ects", name: "ECTS", type: "number" },
+    ],
+    rows: [
+      { id: "m1", cells: { name: "Analysis I", ects: 10 } },
+      { id: "m2", cells: { name: "Lineare Algebra", ects: 9 } },
+      { id: "m3", cells: { name: "Statistik", ects: 5 } },
+      { id: "m4", cells: { name: "Programmierung", ects: 6 } },
+    ],
+    views: [{ id: "t", name: "Tabelle", type: "table" }],
+  };
+}
+
+describe("planner: German administrative deadlines (Fristen)", () => {
+  const db = fristenDb([{ id: "x", title: "x", due: "2027-01-10" }]);
+  const row = db.rows[0];
+  const read = (title: string, art?: GermanRow["art"]) => {
+    const r = { ...row, cells: { ...row.cells, ...(art ? { art } : {}) } };
+    const exam = classifyExam(db, r, title, null);
+    if (isFormality(db, r, title)) {
+      expect(exam, title).toEqual({ isExam: false, major: false });
+      return "formality";
+    }
+    return exam.module ? "module exam" : exam.isExam ? "exam" : "coursework";
+  };
+
+  it("reads registrations, deregistrations and fees as formalities, never as exams", () => {
+    const table: Record<string, string> = {
+      "Prüfungsanmeldung Mathe 1": "formality",
+      Klausuranmeldung: "formality",
+      "Klausur-Anmeldung Analysis": "formality",
+      "Anmeldung Klausur Analysis": "formality",
+      "Abmeldefrist Statistik-Klausur": "formality",
+      "Abmeldung von der Prüfung": "formality",
+      "Rückmeldung Sommersemester": "formality",
+      "Rückmeldung zum Sommersemester": "formality",
+      "Rückmeldung": "formality",
+      "Rückmeldung zum Entwurf": "coursework",
+      "Rückmeldung geben: Referat Gruppe 2": "coursework",
+      "Rueckmeldung SoSe 27": "formality",
+      "Semesterbeitrag überweisen": "formality",
+      "BAföG-Antrag stellen": "formality",
+      "Einschreibung Seminar": "formality",
+      "Klausur Mathe (Anmeldung bis 15.1.)": "module exam",
+      "Klausur Lineare Algebra": "module exam",
+      "Mündliche Prüfung Physik": "module exam",
+      "Probeklausur Analysis": "exam",
+      "Abgabefrist Hausarbeit": "coursework",
+      "Übungsblatt 3": "coursework",
+      "Prüfungsvorleistung Physik": "coursework",
+      "Bewerbungsschreiben analysieren": "coursework",
+      "Exam registration closes": "formality",
+      "Register for final exam": "formality",
+      "Pay semester fee": "formality",
+      "Final exam": "exam",
+      "Final exam, register by Friday": "exam",
+      "Physical intuition worksheet": "coursework",
+    };
+    for (const [title, expected] of Object.entries(table)) expect(read(title), title).toBe(expected);
+  });
+
+  it("a type naming a formality wins over the title; a module type marks a module exam", () => {
+    expect(read("Studierendenausweis verlängern", "frist")).toBe("formality");
+    expect(read("Prüfungsanmeldung", "klausur")).toBe("formality");
+    expect(read("Analysis I", "klausur")).toBe("module exam");
+    // A heavy weight alone marks a module exam; a US-style 35 % final does not.
+    const r = { ...row, cells: { ...row.cells } };
+    expect(classifyExam(db, r, "Endterm", 60)).toEqual({ isExam: true, major: true, module: true });
+    expect(classifyExam(db, r, "Final exam", 35)).toEqual({ isExam: true, major: true });
+  });
+
+  it("gives a formality a fixed ten minutes, whatever else the row says", () => {
+    const withHours = fristenDb(
+      [{ id: "a", title: "Rückmeldung Sommersemester", due: "2027-02-15", hours: 3 }],
+      [{ id: "hours", name: "Aufwand (Stunden)", type: "number" }],
+    );
+    expect(estimateEffortMinutes(withHours, withHours.rows[0], "Rückmeldung Sommersemester", null)).toBe(10);
+    expect(estimateEffortMinutes(db, row, "Semesterbeitrag überweisen", 30)).toBe(10);
+  });
+
+  it("plans a formality as one short item to finish, guaranteed in its last three days", () => {
+    const today = "2027-01-07";
+    const ws = workspace({
+      id: "ws-de",
+      pages: [{ id: "home", title: "Semester", blocks: [{ id: "v", type: "database_view", databaseId: "pf", viewId: "t" }] }],
+      databases: [
+        fristenDb([
+          { id: "anm", title: "Prüfungsanmeldung Wintersemester", due: "2027-01-10" },
+          { id: "far", title: "Rückmeldung Sommersemester", due: "2027-02-15" },
+          // A heavy day of coursework that would otherwise fill all the time.
+          ...Array.from({ length: 14 }, (_, i) => ({ id: `u${i}`, title: `Hausarbeit Kapitel ${i}`, due: "2027-01-08" })),
+        ]),
+      ],
+    });
+    const result = buildDailyStudyPlan({ workspaces: [ws], localDate: today, dailyMinutes: 60 });
+    const item = result.items.find((i) => i.target.rowId === "anm");
+    expect(item).toMatchObject({
+      kind: "deadline",
+      mode: "finish",
+      minutes: 10,
+      reason: { code: "formality_soon", days: 3 },
+    });
+    expect(result.items.reduce((s, i) => s + i.minutes, 0)).toBeLessThanOrEqual(60);
+    // Further out than a week: not on the plan yet. Never an exam countdown.
+    expect(result.items.some((i) => i.target.rowId === "far")).toBe(false);
+    expect(result.details.exams).toEqual([]);
+    // Never shrunk to a restart, however long it waits.
+    const waiting = { ...item!, carry: { from: "2027-01-03", count: 4 } };
+    const notes = itemNotes(waiting, getDictionary("de").today, "de");
+    expect(notes.join(" ")).not.toContain("einzusteigen");
+    expect(notes.join(" ")).toContain("Verschoben");
+
+    // Rebuilding a long day keeps what is done and never stores more than 12 items.
+    const long = buildDailyStudyPlan({ workspaces: [ws], localDate: today, dailyMinutes: 360 });
+    const done = long.items.map((i) => ({ ...i, completed: true }));
+    const rebuilt = buildDailyStudyPlan({ workspaces: [ws], localDate: today, dailyMinutes: 360, current: { items: done } });
+    expect(rebuilt.items.filter((i) => i.completed)).toHaveLength(done.length);
+    expect(rebuilt.items.length).toBe(12);
+  });
+});
+
+describe("planner: module exams and the German Klausurenphase", () => {
+  it("sizes module exam preparation by the estimate, else 6 h per ECTS (10-60 h), else 30 h", () => {
+    const db = fristenDb(
+      [
+        { id: "a", title: "Klausur Analysis I", due: "2027-02-03", course: "ana" },
+        { id: "s", title: "Klausur Statistik", due: "2027-02-11", course: "stat" },
+        { id: "p", title: "Klausur Experimentalphysik", due: "2027-02-21", course: "phys" },
+        { id: "own1", title: "Modulprüfung Ethik", due: "2027-02-21", ects: 1 },
+        { id: "own15", title: "Modulprüfung Großprojekt", due: "2027-02-21", ects: 15 },
+        { id: "est", title: "Staatsexamen Teil 1", due: "2027-03-01", hours: 40 },
+        { id: "us", title: "Final exam", due: "2027-02-21" },
+      ],
+      [
+        { id: "ects", name: "ECTS", type: "number" },
+        { id: "hours", name: "Lernaufwand (Stunden)", type: "number" },
+      ],
+    );
+    const ws = workspace({ id: "ws-de", databases: [db, modulesDb()] });
+    const total = (id: string, title: string, weight: number | null = null) => {
+      const r = db.rows.find((x) => x.id === id)!;
+      return examPrepTotalMinutes(ws, db, r, classifyExam(db, r, title, weight), weight);
+    };
+    expect(total("a", "Klausur Analysis I")).toBe(60 * 60); // 10 ECTS
+    expect(total("s", "Klausur Statistik")).toBe(30 * 60); // 5 ECTS
+    expect(total("p", "Klausur Experimentalphysik")).toBe(30 * 60); // none written down
+    expect(total("own1", "Modulprüfung Ethik")).toBe(10 * 60); // clamped up
+    expect(total("own15", "Modulprüfung Großprojekt")).toBe(60 * 60); // clamped down
+    expect(total("est", "Staatsexamen Teil 1")).toBe(40 * 60); // the student's own estimate
+    // A US-style final keeps its old size.
+    expect(total("us", "Final exam")).toBe(360);
+    expect(total("us", "Final exam", 35)).toBe(480);
+  });
+
+  it("spaces module exam sessions: twice a week from 42 days, every other day from 28, daily in the last 14", () => {
+    const days = Array.from({ length: 50 }, (_, i) => i).filter((d) => isReviewDay(d, true, true));
+    expect(days.filter((d) => d > 28)).toEqual([31, 35, 38, 42]);
+    expect(days.filter((d) => d > 14 && d <= 28)).toEqual([16, 18, 20, 22, 24, 26, 28]);
+    expect(days.filter((d) => d <= 14)).toEqual(Array.from({ length: 15 }, (_, i) => i));
+    // Other exams keep their rhythm.
+    expect([1, 2, 3, 5, 7, 10, 14, 21].every((d) => isReviewDay(d, false))).toBe(true);
+    expect(isReviewDay(28, false)).toBe(false);
+  });
+
+  /**
+   * A winter semester: five Klausuren from 3 to 21 Feb, the exam registration
+   * closing on 10 Jan, deregistration a week before each exam, the
+   * Rückmeldung on 15 Feb, weekly Übungsblätter in January, 4 hours a day.
+   * Walk the calendar day by day, ticking everything off (the registration
+   * only on 9 Jan), the way the student would.
+   */
+  function semesterWorkspace(): Workspace {
+    const klausuren: GermanRow[] = [
+      { id: "k-ana", title: "Klausur Analysis I", due: "2027-02-03", course: "ana" },
+      { id: "k-la", title: "Klausur Lineare Algebra", due: "2027-02-08", course: "la" },
+      { id: "k-stat", title: "Statistik-Klausur", due: "2027-02-11", course: "stat" },
+      { id: "k-prog", title: "Klausur Programmierung", due: "2027-02-16", course: "prog" },
+      { id: "k-phys", title: "Klausur Experimentalphysik", due: "2027-02-21", course: "phys" },
+    ];
+    const fristen: GermanRow[] = [
+      { id: "anm", title: "Prüfungsanmeldung Wintersemester", due: "2027-01-10" },
+      { id: "ab-ana", title: "Abmeldefrist Analysis-Klausur", due: "2027-01-27", course: "ana" },
+      { id: "ab-la", title: "Abmeldung Klausur Lineare Algebra", due: "2027-02-01", course: "la" },
+      { id: "ab-stat", title: "Abmeldefrist Statistik", due: "2027-02-04", course: "stat" },
+      { id: "ab-prog", title: "Abmeldung Programmierung", due: "2027-02-09", course: "prog" },
+      { id: "ab-phys", title: "Abmeldefrist Experimentalphysik", due: "2027-02-14", course: "phys" },
+      { id: "rueck", title: "Rückmeldung Sommersemester", due: "2027-02-15" },
+    ];
+    const blaetter: GermanRow[] = [
+      { id: "ub-9", title: "Übungsblatt 9", due: "2027-01-08", course: "ana" },
+      { id: "ub-10", title: "Übungsblatt 10", due: "2027-01-15", course: "ana" },
+      { id: "ub-11", title: "Übungsblatt 11", due: "2027-01-22", course: "ana" },
+      { id: "la-7", title: "Übungsblatt 7", due: "2027-01-12", course: "la" },
+      { id: "la-8", title: "Übungsblatt 8", due: "2027-01-19", course: "la" },
+    ];
+    return workspace({
+      id: "ws-de",
+      name: "WiSe 26/27",
+      pages: [{ id: "home", title: "Semester", blocks: [{ id: "v", type: "database_view", databaseId: "pf", viewId: "t" }] }],
+      databases: [fristenDb([...klausuren, ...fristen, ...blaetter]), modulesDb()],
+    });
+  }
+
+  const START = "2026-12-20";
+  const END = "2027-02-21";
+  const EXAMS = {
+    "k-ana": "2027-02-03",
+    "k-la": "2027-02-08",
+    "k-stat": "2027-02-11",
+    "k-prog": "2027-02-16",
+    "k-phys": "2027-02-21",
+  } as const;
+  const FRISTEN = ["anm", "ab-ana", "ab-la", "ab-stat", "ab-prog", "ab-phys", "rueck"];
+
+  function walk() {
+    const ws = semesterWorkspace();
+    const db = ws.databases[0];
+    const plans = new Map<string, ReturnType<typeof buildDailyStudyPlan>>();
+    let previous: PreviousPlan | null = null;
+    for (let day = START; day <= END; day = addDays(day, 1)) {
+      const built = buildDailyStudyPlan({ workspaces: [ws], localDate: day, dailyMinutes: 240, previous });
+      plans.set(day, built);
+      // Everything is done, except the registration, which waits until 9 Jan.
+      const items = built.items.map((item) => ({
+        ...item,
+        completed: item.target.rowId !== "anm" || day >= "2027-01-09",
+      }));
+      for (const item of items) {
+        // Finishing an item ticks its row off, as the app does.
+        const rowRef = item.mode === "finish" && item.completed ? db.rows.find((r) => r.id === item.target.rowId) : null;
+        if (rowRef) rowRef.cells.done = true;
+      }
+      previous = { localDate: day, items, progress: built.details.progress };
+    }
+    return plans;
+  }
+  const plans = walk();
+  const each = (fn: (day: string, plan: ReturnType<typeof buildDailyStudyPlan>) => void) => {
+    for (const [day, plan] of plans) fn(day, plan);
+  };
+  const sessionsFor = (plan: ReturnType<typeof buildDailyStudyPlan>, rowId: string) =>
+    plan.items.filter((i) => i.target.rowId === rowId || i.ledgerKey === `ws-de:pf:${rowId}`).filter((i) => i.kind === "exam");
+
+  it("puts the exam registration on the plan from a week before, and every day of its last days until done", () => {
+    const onPlan = (day: string) => plans.get(day)!.items.some((i) => i.target.rowId === "anm");
+    expect(onPlan("2027-01-02")).toBe(false);
+    expect(onPlan("2027-01-03")).toBe(true);
+    for (const day of ["2027-01-07", "2027-01-08", "2027-01-09"]) expect(onPlan(day), day).toBe(true);
+    for (const day of ["2027-01-10", "2027-01-11", "2027-01-20"]) expect(onPlan(day), day).toBe(false);
+  });
+
+  it("never treats a formality as an exam, a work session or a countdown", () => {
+    each((day, plan) => {
+      for (const id of FRISTEN) {
+        expect(plan.details.exams.some((e) => e.target.rowId === id), `${day} ${id}`).toBe(false);
+        for (const item of plan.items.filter((i) => i.target.rowId === id || i.ledgerKey?.endsWith(`:${id}`))) {
+          expect(item, `${day} ${id}`).toMatchObject({ kind: "deadline", mode: "finish", minutes: 10 });
+          expect(isFormalityReason(item.reason.code), `${day} ${id}`).toBe(true);
+        }
+      }
+    });
+  });
+
+  it("plans every module exam from 42 days out at its rhythm, and never exceeds the day's time", () => {
+    each((day, plan) => {
+      expect(plan.items.reduce((s, i) => s + i.minutes, 0), day).toBeLessThanOrEqual(240);
+      for (const [id, date] of Object.entries(EXAMS)) {
+        const days = dayDiff(day, date);
+        const has = sessionsFor(plan, id).length > 0;
+        if (days < 0 || days > 42) expect(has, `${day} ${id} (${days} days)`).toBe(false);
+        else expect(has, `${day} ${id} (${days} days)`).toBe(isReviewDay(days, true, true));
+      }
+    });
+    // A Klausur is a module exam: countdown marked major, review sessions of real length.
+    expect(plans.get("2027-01-20")!.details.exams.find((e) => e.target.rowId === "k-ana")).toMatchObject({ major: true, days: 14 });
+  });
+
+  it("in the last two weeks every exam gets a daily session, and the nearest gets the most", () => {
+    each((day, plan) => {
+      const upcoming = Object.entries(EXAMS)
+        .map(([id, date]) => ({ id, days: dayDiff(day, date) }))
+        .filter((e) => e.days >= 1 && e.days <= 14)
+        .sort((a, b) => a.days - b.days);
+      if (upcoming.length === 0) return;
+      const minutes = upcoming.map((e) => sessionsFor(plan, e.id).reduce((s, i) => s + i.minutes, 0));
+      for (const [i, e] of upcoming.entries()) expect(minutes[i], `${day} ${e.id}`).toBeGreaterThanOrEqual(45);
+      // The nearest takes the longest session (others match it only when the day has room for both).
+      expect(Math.max(...minutes), day).toBe(minutes[0]);
+      expect(minutes[0], day).toBeGreaterThan(45);
+    });
+  });
+
+  it("does not warn about the workload six weeks out", () => {
+    for (const day of ["2026-12-20", "2026-12-23", "2026-12-27"]) {
+      expect(plans.get(day)!.details.workload, day).toBeNull();
+    }
+  });
+});
+
+describe("planner: US-style courses plan as before", () => {
+  // Midterm 25 %, final 35 %, quizzes: no German wording, weights under 50 %.
+  // Expected plans recorded from the planner before module exams and
+  // formalities were added.
+  it("plans a semester of midterms, a final and quizzes exactly as before", () => {
+    const ws = workspace({
+      pages: [trackerPage()],
+      databases: [
+        assignments([
+          { id: "mid", title: "Midterm 1", due: addDays(TODAY, 12), weight: 25, type: "exam" },
+          { id: "fin", title: "Final exam", due: addDays(TODAY, 30), weight: 35, type: "exam" },
+          { id: "q3", title: "Quiz 3", due: addDays(TODAY, 4), weight: 5 },
+          { id: "q4", title: "Quiz 4", due: addDays(TODAY, 18), weight: 5 },
+          { id: "ps6", title: "Problem set 6", due: addDays(TODAY, 6), weight: 10, type: "hw" },
+          { id: "ps7", title: "Problem set 7", due: addDays(TODAY, 13), weight: 10, type: "hw" },
+          { id: "ess", title: "Reflection essay", due: addDays(TODAY, 20), weight: 15, type: "hw" },
+        ]),
+      ],
+    });
+    const db = ws.databases[0];
+    const lines: string[] = [];
+    let previous: PreviousPlan | null = null;
+    for (let i = 0; i <= 30; i += 1) {
+      const day = addDays(TODAY, i);
+      const built = buildDailyStudyPlan({ workspaces: [ws], localDate: day, dailyMinutes: 120, previous });
+      lines.push(
+        `${i}: ${built.items.map((it) => `${it.id.split(":").slice(-2).join(":")}/${it.kind}/${it.minutes}/${it.reason.code}`).join(" ")}` +
+          (built.details.workload ? " !" : ""),
+      );
+      const items = built.items.map((it) => ({ ...it, completed: true }));
+      for (const it of items) {
+        const r = it.mode === "finish" ? db.rows.find((x) => x.id === it.target.rowId) : null;
+        if (r) r.cells.status = "done";
+      }
+      previous = { localDate: day, items, progress: built.details.progress };
+    }
+    expect(lines).toEqual(US_EXPECTED);
+  });
+});
+
+const US_EXPECTED: string[] = [
+  "0: assignments:q3/deadline/55/due_soon assignments:ps6/deadline/20/due_soon assignments:ps7/deadline/15/due_later assignments:ess/deadline/15/due_later assignments:q4/deadline/15/due_later",
+  "1: assignments:q3/deadline/15/due_soon assignments:ps6/deadline/60/due_soon assignments:ps7/deadline/15/due_later assignments:ess/deadline/15/due_later assignments:q4/deadline/15/due_later",
+  "2: mid:notes/exam/35/exam_review assignments:q3/deadline/15/due_soon assignments:ps6/deadline/25/due_soon assignments:ps7/deadline/15/due_later assignments:ess/deadline/15/due_later assignments:q4/deadline/15/due_later",
+  "3: assignments:q3/deadline/15/due_tomorrow assignments:ps6/deadline/15/due_soon assignments:ps7/deadline/60/due_later assignments:ess/deadline/15/due_later assignments:q4/deadline/15/due_later",
+  "4: assignments:ps6/deadline/15/due_soon assignments:ps7/deadline/15/due_later assignments:q4/deadline/15/due_later assignments:ess/deadline/75/due_later",
+  "5: assignments:ps6/deadline/15/due_tomorrow mid:notes/exam/45/exam_review assignments:ps7/deadline/15/due_later assignments:q4/deadline/15/due_later assignments:ess/deadline/30/due_later",
+  "6: mid:notes/exam/45/exam_review assignments:ps7/deadline/15/due_soon assignments:ess/deadline/45/due_later assignments:q4/deadline/15/due_later",
+  "7: mid:notes/exam/45/exam_review assignments:ps7/deadline/15/due_soon assignments:ess/deadline/30/due_later assignments:q4/deadline/15/due_later",
+  "8: mid:notes/exam/45/exam_review assignments:ps7/deadline/15/due_soon assignments:ess/deadline/15/due_later assignments:q4/deadline/15/due_later",
+  "9: mid:notes/exam/45/exam_review fin:notes/exam/25/exam_review assignments:ps7/deadline/15/due_soon assignments:ess/deadline/15/due_later assignments:q4/deadline/15/due_later",
+  "10: mid:notes/exam/45/exam_review assignments:ps7/deadline/15/due_soon assignments:ess/deadline/15/due_later assignments:q4/deadline/15/due_later",
+  "11: mid:notes/exam/45/exam_tomorrow assignments:ps7/deadline/15/due_soon assignments:q4/deadline/15/due_soon assignments:ess/deadline/15/due_later",
+  "12: mid:notes/exam/20/exam_today assignments:ps7/deadline/15/due_tomorrow assignments:q4/deadline/15/due_soon assignments:ess/deadline/15/due_later",
+  "13: assignments:ess/deadline/15/due_soon assignments:q4/deadline/15/due_soon",
+  "14: assignments:ess/deadline/15/due_soon assignments:q4/deadline/15/due_soon",
+  "15: assignments:q4/deadline/15/due_soon assignments:ess/deadline/15/due_soon",
+  "16: assignments:q4/deadline/15/due_soon fin:notes/exam/35/exam_review assignments:ess/deadline/15/due_soon",
+  "17: assignments:q4/deadline/15/due_tomorrow assignments:ess/deadline/15/due_soon",
+  "18: assignments:ess/deadline/15/due_soon",
+  "19: assignments:ess/deadline/15/due_tomorrow",
+  "20: fin:notes/exam/40/exam_review",
+  "21: ",
+  "22: ",
+  "23: fin:notes/exam/45/exam_review",
+  "24: fin:notes/exam/45/exam_review",
+  "25: fin:notes/exam/45/exam_review",
+  "26: fin:notes/exam/45/exam_review",
+  "27: fin:notes/exam/45/exam_review",
+  "28: fin:notes/exam/45/exam_review",
+  "29: fin:notes/exam/45/exam_tomorrow",
+  "30: fin:notes/exam/20/exam_today",
+];

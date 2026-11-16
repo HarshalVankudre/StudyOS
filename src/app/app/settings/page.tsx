@@ -5,14 +5,14 @@ import { auth, currentUser } from "@clerk/nextjs/server";
 import { isPro } from "@/lib/billing";
 import { getCreditBalance } from "@/lib/credits";
 import {
-  CREDIT_PACK_PRICE_USD,
   CREDIT_PACK_SIZE,
   PRO_MONTHLY_CREDITS,
   TRIAL_CREDITS,
 } from "@/lib/price-list";
 import { getI18n } from "@/lib/i18n/server";
 import { DeleteAccountButton } from "@/components/account/DeleteAccountButton";
-import { formatUsd } from "@/lib/plan-pricing";
+import { formatPrice, getCreditPackPricing } from "@/lib/plan-pricing";
+import { pricesTaxBehavior } from "@/lib/checkout-config";
 import { SignOutButton } from "@/components/account/SignOutButton";
 import { DownloadDataButton } from "@/components/account/DownloadDataButton";
 import { CalendarSubscribe } from "@/components/account/CalendarSubscribe";
@@ -27,6 +27,10 @@ import {
 } from "../billing-actions";
 import { isBillingConfigured } from "@/lib/stripe";
 import { ComingSoon } from "@/components/account/ComingSoon";
+import { BrandMark } from "@/components/BrandMark";
+import { ContractNoticeLinks } from "@/components/contract-notices/ContractNoticeLinks";
+import { InviteCard } from "@/components/referral/InviteCard";
+import { inviteCardProps } from "@/lib/referral/card";
 
 export async function generateMetadata(): Promise<Metadata> {
   const { dict } = await getI18n();
@@ -47,9 +51,22 @@ export default async function SettingsPage() {
       // Hidden entirely when push is not configured; never blocks the page.
       getNotificationSettings(userId).catch(() => null),
     ]);
+  // The invite card (lib/referral); left out when it cannot be loaded.
+  const invite = await inviteCardProps(userId, { dict, t, plural, locale });
   const S = dict.settings;
   // Without payments switched on, upgrading and packs are shown as coming soon.
   const billing = isBillingConfigured();
+  // The pack's price as its checkout charges it (lib/plan-pricing.ts). With
+  // billing on, a pack its Stripe Price cannot sell right now shows no price
+  // and no button, only that it is not available.
+  const { price: packPrice, offered: packOffered } = await getCreditPackPricing();
+  // With Stripe Tax on, whether the price includes VAT (as on the pricing page).
+  const taxBehavior = pricesTaxBehavior();
+  const vatNote = taxBehavior
+    ? taxBehavior === "inclusive"
+      ? dict.checkout.vatIncluded
+      : dict.checkout.vatExcluded
+    : null;
 
   const email = user?.emailAddresses?.[0]?.emailAddress;
   const name =
@@ -66,8 +83,8 @@ export default async function SettingsPage() {
             href="/"
             className="flex items-center gap-1.5 font-display text-lg font-extrabold tracking-tight"
           >
+            <BrandMark />
             StudyOS
-            <span className="mb-2 h-1.5 w-1.5 rounded-full bg-lime" aria-hidden />
           </Link>
           <Link
             href="/app"
@@ -111,7 +128,7 @@ export default async function SettingsPage() {
           <div className="flex items-center justify-between">
             <h2 className="font-display text-lg font-bold">{S.subscription}</h2>
             <span
-              className={`rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide ${
+              className={`rounded-full px-2.5 py-1 text-xs font-bold ${
                 pro ? "bg-ink text-paper" : "bg-ink/10 text-ink"
               }`}
             >
@@ -159,6 +176,8 @@ export default async function SettingsPage() {
               </>
             )}
           </div>
+          {/* The statutory withdrawal function and cancellation button (lib/contract-notices). */}
+          {billing && <ContractNoticeLinks messages={dict.contractNotices} className="mt-5 border-t border-line pt-4" />}
         </section>
 
         {/* Credits */}
@@ -180,18 +199,32 @@ export default async function SettingsPage() {
               : S.creditsDescFree}
           </p>
           <div className="mt-5 flex flex-wrap gap-3">
-            {billing ? (
-              <form action={buyCreditsAction}>
-                <button
-                  type="submit"
-                  className="rounded-lg bg-ink px-5 py-2.5 text-sm font-semibold text-paper transition hover:bg-ink/90"
-                >
-                  {t(S.buyPack, {
-                    count: CREDIT_PACK_SIZE.toLocaleString(locale),
-                    price: formatUsd(CREDIT_PACK_PRICE_USD, locale),
-                  })}
-                </button>
-              </form>
+            {billing && !packOffered ? (
+              <div data-testid="pack-unavailable" className="w-full sm:max-w-sm">
+                <ComingSoon
+                  messages={{ comingSoon: dict.credits.unavailable, purchasesComingSoon: dict.credits.packUnavailableNote }}
+                  note
+                />
+              </div>
+            ) : billing ? (
+              <div className="flex flex-col gap-1">
+                <form action={buyCreditsAction}>
+                  <button
+                    type="submit"
+                    className="rounded-lg bg-ink px-5 py-2.5 text-sm font-semibold text-paper transition hover:bg-ink/90"
+                  >
+                    {t(S.buyPack, {
+                      count: CREDIT_PACK_SIZE.toLocaleString(locale),
+                      price: formatPrice(packPrice.amount, packPrice.currency, locale),
+                    })}
+                  </button>
+                </form>
+                {vatNote && (
+                  <p className="text-xs text-ink-soft" data-testid="vat-note">
+                    {vatNote}
+                  </p>
+                )}
+              </div>
             ) : (
               <ComingSoon messages={dict.spend} className="w-full sm:max-w-sm" />
             )}
@@ -204,7 +237,15 @@ export default async function SettingsPage() {
           </div>
         </section>
 
-        {/* Notifications (Web Push) */}
+        {/* Invite friends (lib/referral) */}
+        {invite && (
+          <section id="invite" className="mt-6 scroll-mt-20 rounded-2xl border border-ink/10 bg-card/60 p-6">
+            <h2 className="font-display text-lg font-bold">{dict.referral.title}</h2>
+            <InviteCard {...invite} className="mt-3" />
+          </section>
+        )}
+
+        {/* Notifications (Web Push and email) */}
         {notifications?.configured && (
           <section
             id="notifications"
@@ -218,8 +259,8 @@ export default async function SettingsPage() {
           </section>
         )}
 
-        {/* Calendar sync */}
-        <section className="mt-6 rounded-2xl border border-ink/10 bg-card/60 p-6">
+        {/* Calendar sync (the agenda links here: #calendar) */}
+        <section id="calendar" className="mt-6 scroll-mt-20 rounded-2xl border border-ink/10 bg-card/60 p-6">
           <h2 className="font-display text-lg font-bold">{dict.calendar.title}</h2>
           <p className="mt-3 text-sm text-ink-soft">
             {dict.calendar.description}

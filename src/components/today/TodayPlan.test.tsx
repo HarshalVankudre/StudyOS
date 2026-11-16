@@ -5,6 +5,8 @@ import { I18nProvider } from "@/lib/i18n/client";
 import { en } from "@/lib/i18n/dictionaries/en";
 import { de } from "@/lib/i18n/dictionaries/de";
 import type { DailyStudyPlanItem, TodayPlanView } from "@/lib/agents/daily-study/types";
+import { FocusLauncherContext, type FocusLauncher } from "@/components/focus/launcher";
+import { summarizeFocus } from "@/lib/study/focus";
 
 const mocks = vi.hoisted(() => ({
   setTodayItemAction: vi.fn(),
@@ -220,9 +222,24 @@ describe("TodayPlan", () => {
     expect(mocks.rebuildTodayAction).toHaveBeenCalledWith(expect.objectContaining({ minutes: undefined }));
   });
 
+  it("says so when planning fails to reach the server, and the page stays", async () => {
+    const user = userEvent.setup();
+    mocks.toast.mockClear();
+    mocks.rebuildTodayAction.mockRejectedValue(new TypeError("Failed to fetch"));
+    renderToday(null);
+    await user.click(screen.getByRole("button", { name: "Plan my day" }));
+    await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith(en.today.saveFailed));
+    expect(await screen.findByRole("button", { name: "Plan my day" })).toBeEnabled();
+  });
+
   it("celebrates a finished day quietly", () => {
     renderToday(plan({ items: [{ ...todo, completed: true }] }));
     expect(screen.getByText("That’s today done")).toBeInTheDocument();
+  });
+
+  it("links to the next two weeks in the agenda", () => {
+    renderToday();
+    expect(screen.getByRole("link", { name: en.agenda.seeNext })).toHaveAttribute("href", "/app/agenda");
   });
 
   it("re-renders the whole plan in the student's language", () => {
@@ -273,5 +290,73 @@ describe("TodayPlan: QA round 2", () => {
     const bounded = { ...deck, reason: { code: "cards_due" as const, count: 33, readyCount: 60 }, dueCount: 33, progress: undefined };
     renderToday(plan({ items: [bounded] }));
     expect(screen.getByText(/33 of the 60 cards ready today\. The rest can wait for another day\./)).toBeInTheDocument();
+  });
+});
+
+describe("TodayPlan: focus timer", () => {
+  const focus = summarizeFocus(
+    [
+      { localDate: "2026-11-12", seconds: 1500 },
+      { localDate: "2026-11-11", seconds: 3000 },
+      { localDate: "2026-11-10", seconds: 600 },
+    ],
+    "2026-11-12",
+  );
+
+  function renderWithTimer(launcher: FocusLauncher, p: TodayPlanView | null = plan()) {
+    return render(
+      <I18nProvider locale="en" dictionary={en}>
+        <FocusLauncherContext.Provider value={launcher}>
+          <TodayPlan plan={p} dailyMinutes={60} focus={focus} />
+        </FocusLauncherContext.Provider>
+      </I18nProvider>,
+    );
+  }
+
+  it("shows today's focus time, the streak and the last week", () => {
+    renderWithTimer({ open: vi.fn(), activeItemKey: null });
+    expect(screen.getByText("Focused today: 25 min")).toBeInTheDocument();
+    expect(screen.getByText("3 days of focus in a row")).toBeInTheDocument();
+    const week = screen.getByRole("list", { name: en.focus.weekLabel });
+    const days = within(week).getAllByRole("listitem");
+    expect(days).toHaveLength(7);
+    expect(days[6]).toHaveTextContent("Thu: 25 min");
+    expect(days[5]).toHaveTextContent("Wed: 50 min");
+  });
+
+  it("starts a session from the Today area and from each open item, with its title and course", async () => {
+    const user = userEvent.setup();
+    const open = vi.fn();
+    renderWithTimer({ open, activeItemKey: null });
+    await user.click(screen.getByRole("button", { name: en.focus.start }));
+    expect(open).toHaveBeenCalledWith();
+
+    await user.click(screen.getByRole("button", { name: "Start a focus session on “History essay”, Semester HQ" }));
+    expect(open).toHaveBeenLastCalledWith({
+      label: "History essay",
+      course: "Semester HQ",
+      workspaceId: "ws",
+      itemKey: "deadline:ws:db:essay",
+    });
+    await user.click(screen.getByRole("button", { name: "Start a focus session on “Review Cell biology”, Semester HQ" }));
+    expect(open).toHaveBeenLastCalledWith(expect.objectContaining({ label: "Review Cell biology", itemKey: "flashcards:ws:bio:deck" }));
+  });
+
+  it("marks the item being focused on, and offers no focus on items already done", () => {
+    renderWithTimer({ open: vi.fn(), activeItemKey: "deadline:ws:db:essay" }, plan({ items: [essay, { ...todo, completed: true }] }));
+    expect(screen.getByRole("button", { name: en.focus.expand })).toHaveTextContent(en.focus.itemActive);
+    expect(screen.queryByRole("button", { name: /Email the tutor/ })).not.toBeInTheDocument();
+  });
+
+  it("offers focus with no plan yet, as a quiet secondary button", () => {
+    renderWithTimer({ open: vi.fn(), activeItemKey: null }, null);
+    expect(screen.getByRole("button", { name: "Plan my day" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: en.focus.start })).not.toHaveClass("bg-lime");
+  });
+
+  it("has no focus controls where there is no timer", () => {
+    renderToday();
+    expect(screen.queryByRole("button", { name: /Start a focus session/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Focused today/)).not.toBeInTheDocument();
   });
 });

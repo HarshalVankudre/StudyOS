@@ -6,7 +6,6 @@ import { Check } from "lucide-react";
 import { isPro } from "@/lib/billing";
 import { getCreditBalance } from "@/lib/credits";
 import {
-  CREDIT_PACK_PRICE_USD,
   CREDIT_PACK_SIZE,
   creditExamples,
   FREE_FAILURES_PER_DAY,
@@ -21,8 +20,10 @@ import {
 import { MAX_SECTIONS_PER_RUN, SECTION_TARGET_CHARS } from "@/lib/materials/limits";
 import { modelForPlan } from "@/lib/ai/plans";
 import { agentSandboxEnabled } from "@/lib/flags";
-import { formatPrice, formatUsd, getProPricing, type PriceAmount } from "@/lib/plan-pricing";
+import { formatPrice, getCreditPackPricing, getProPricing, type PriceAmount } from "@/lib/plan-pricing";
+import { pricesTaxBehavior } from "@/lib/checkout-config";
 import { supportEmail } from "@/lib/site";
+import { SiteFooterLinks } from "@/components/SiteFooterLinks";
 import {
   buyCreditsAction,
   manageBillingAction,
@@ -38,10 +39,22 @@ import {
   BillingNotice,
   parseBillingNotice,
 } from "@/components/account/BillingNotice";
+import { BrandMark } from "@/components/BrandMark";
 
 export async function generateMetadata(): Promise<Metadata> {
   const { dict } = await getI18n();
-  return { title: dict.meta.pricingTitle, description: dict.meta.pricingDescription };
+  const title = dict.meta.pricingTitle;
+  const description = dict.meta.pricingDescription;
+  return {
+    title,
+    description,
+    // Objects merge shallowly, so these replace the root layout's whole
+    // openGraph/twitter blocks. The share image comes from the
+    // opengraph-image.tsx and twitter-image.tsx files next to this page.
+    alternates: { canonical: "/pricing" },
+    openGraph: { title, description, url: "/pricing", siteName: "StudyOS", type: "website" },
+    twitter: { card: "summary_large_image", title, description },
+  };
 }
 
 /*
@@ -72,6 +85,19 @@ export default async function PricingPage({
   const price = (p: PriceAmount) => formatPrice(p.amount, p.currency, locale);
   const monthlyPrice = price(pricing.monthly);
   const annual = pricing.annual;
+  const pack = await getCreditPackPricing();
+  const packPrice = price(pack.price);
+  // With billing on, a product whose Stripe Price cannot be sold right now
+  // shows no price and no button, only that it is not available.
+  const proUnavailable = billing && !pricing.offered.month;
+  const packUnavailable = billing && !pack.offered;
+  // With Stripe Tax on, whether these prices include VAT (lib/checkout-config.ts).
+  const taxBehavior = pricesTaxBehavior();
+  const vatNote = taxBehavior
+    ? taxBehavior === "inclusive"
+      ? dict.checkout.vatIncluded
+      : dict.checkout.vatExcluded
+    : null;
   const email = supportEmail();
   const models = { free: modelForPlan("free"), pro: modelForPlan("pro") };
   const sameModel = models.free === models.pro;
@@ -164,15 +190,15 @@ export default async function PricingPage({
   }));
 
   return (
-    <div className="min-h-screen overflow-x-clip bg-paper text-ink antialiased">
-      <header className="border-b border-line bg-paper/85 backdrop-blur-md">
+    <div className="site-scale min-h-screen overflow-x-clip bg-paper text-ink antialiased">
+      <header className="border-b border-line bg-paper/80 backdrop-blur-md">
         <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-3 sm:px-7">
           <Link
             href="/"
             className="flex min-h-10 items-center gap-1.5 font-display text-lg font-extrabold tracking-tight"
           >
+            <BrandMark />
             StudyOS
-            <span className="mb-2 h-1.5 w-1.5 rounded-full bg-lime" aria-hidden />
           </Link>
           <div className="flex items-center gap-2 sm:gap-3">
             <ThemeToggle />
@@ -191,7 +217,7 @@ export default async function PricingPage({
                 </Link>
                 <Link
                   href="/sign-up"
-                  className="flex min-h-10 items-center whitespace-nowrap rounded-md bg-ink px-3 text-sm font-semibold text-paper shadow-card transition hover:opacity-90 sm:px-4"
+                  className="flex min-h-10 items-center whitespace-nowrap rounded-full bg-lime px-4 text-sm font-semibold text-lime-on transition hover:bg-lime-hover sm:px-4"
                 >
                   {P.free.ctaSignedOut}
                 </Link>
@@ -203,7 +229,7 @@ export default async function PricingPage({
 
       <main id="main-content" className="mx-auto max-w-5xl px-4 py-14 sm:px-7 sm:py-20">
         <div className="text-center">
-          <p className="font-mono text-[11.5px] uppercase tracking-[0.18em] text-ink-faint">{P.badge}</p>
+          <p className="text-sm font-medium text-ink-faint">{P.badge}</p>
           <h1 className="mt-4 font-display text-4xl font-extrabold tracking-tight text-balance sm:text-5xl">
             {P.title}
           </h1>
@@ -221,8 +247,8 @@ export default async function PricingPage({
 
         {/* Plans */}
         <div className="mt-12 grid items-start gap-5 md:grid-cols-2">
-          <section aria-labelledby="plan-free" className="flex flex-col rounded-md border border-line bg-card p-6 shadow-card sm:p-8">
-            <h2 id="plan-free" className="font-mono text-[12px] uppercase tracking-wide text-ink-soft">
+          <section aria-labelledby="plan-free" className="flex flex-col rounded-3xl border border-line bg-card p-6 sm:p-8">
+            <h2 id="plan-free" className="text-sm font-medium text-ink-soft">
               {P.free.name}
             </h2>
             <p className="mt-3.5 flex items-baseline gap-1 font-display text-5xl font-extrabold tracking-tight">
@@ -232,7 +258,7 @@ export default async function PricingPage({
             <div className="mt-6">
               <Link
                 href={signedIn ? "/app" : "/sign-up"}
-                className="flex min-h-12 items-center justify-center rounded-md border border-line-strong bg-surface-2 px-5 text-center text-sm font-semibold text-ink transition hover:bg-hover"
+                className="flex min-h-12 items-center justify-center rounded-full border border-line-strong bg-card px-5 text-center text-sm font-semibold text-ink transition hover:bg-hover"
               >
                 {signedIn ? P.free.ctaSignedIn : P.free.ctaSignedOut}
               </Link>
@@ -241,22 +267,22 @@ export default async function PricingPage({
             <BulletList items={freeBullets} />
           </section>
 
-          <section aria-labelledby="plan-pro" className="relative flex flex-col rounded-md border-[1.5px] border-lime bg-card p-6 shadow-pop sm:p-8">
-            <h2 id="plan-pro" className="mb-3.5 font-mono text-[12px] uppercase tracking-wide text-ink-soft">
+          <section aria-labelledby="plan-pro" className="relative flex flex-col rounded-3xl border border-transparent bg-matcha p-6 sm:p-8">
+            <h2 id="plan-pro" className="mb-3.5 text-sm font-medium text-ink-soft">
               {P.pro.name}
             </h2>
             {pro ? (
               // A subscriber keeps the Stripe price they subscribed at, so
               // today's list price is not shown as theirs.
               <div className="space-y-3">
-                <p className="rounded-md bg-lime-faint px-4 py-3 text-center text-sm font-semibold text-ink ring-1 ring-inset ring-lime/30">
+                <p className="rounded-md bg-lime-faint px-4 py-3 text-center text-sm font-semibold text-ink ring-1 ring-inset ring-lime-deep/30">
                   {P.pro.currentPlan}
                 </p>
                 <p className="text-sm text-ink-soft">{P.pro.currentPrice}</p>
                 <form action={manageBillingAction}>
                   <button
                     type="submit"
-                    className="min-h-12 w-full rounded-md border border-line-strong bg-surface-2 px-5 text-sm font-semibold text-ink transition hover:bg-hover"
+                    className="min-h-12 w-full rounded-full border border-line-strong bg-card px-5 text-sm font-semibold text-ink transition hover:bg-hover"
                   >
                     {P.pro.manageBilling}
                   </button>
@@ -274,6 +300,10 @@ export default async function PricingPage({
                   </p>
                 )}
                 <ComingSoon messages={dict.spend} />
+              </div>
+            ) : proUnavailable ? (
+              <div data-testid="pro-unavailable">
+                <ComingSoon messages={{ comingSoon: dict.credits.unavailable, purchasesComingSoon: P.pro.unavailableNote }} note />
               </div>
             ) : (
               <ProPriceSwitch
@@ -304,6 +334,11 @@ export default async function PricingPage({
             <BulletList items={proBullets} strong />
           </section>
         </div>
+        {vatNote && (
+          <p className="mt-4 text-center text-sm text-ink-soft" data-testid="vat-note">
+            {vatNote}
+          </p>
+        )}
         {sameModel && <p className="mt-4 text-center text-sm text-ink-soft">{P.sameModel}</p>}
 
         {/* What AI actions cost */}
@@ -315,7 +350,7 @@ export default async function PricingPage({
               {P.costs.realCost}
             </p>
           )}
-          <div className="mt-6 overflow-hidden rounded-md border border-line bg-card">
+          <div className="mt-6 overflow-hidden rounded-3xl border border-line bg-card">
             <table className="w-full border-collapse text-start text-sm">
               <thead className="hidden sm:table-header-group">
                 <tr className="border-b border-line bg-surface text-start">
@@ -330,7 +365,7 @@ export default async function PricingPage({
                     <th scope="row" className="block px-5 pt-4 text-start font-semibold text-ink sm:table-cell sm:py-4">
                       {row.action}
                     </th>
-                    <td className="block px-5 pt-1 font-mono text-sm text-lime-deep sm:table-cell sm:px-3 sm:py-4">
+                    <td className="block px-5 pt-1 text-sm tabular-nums text-ink-soft sm:table-cell sm:px-3 sm:py-4">
                       <span className="sr-only sm:hidden">{P.costs.cost}: </span>
                       {row.cost}
                     </td>
@@ -348,7 +383,7 @@ export default async function PricingPage({
           <p className="mt-3 max-w-3xl text-ink-soft">{t(E.intro, { count: n(PRO_MONTHLY_CREDITS) })}</p>
           <ul className="mt-6 grid gap-3 sm:grid-cols-3">
             {[counts(month).builds, counts(month).parts, counts(month).messages].map((line, i) => (
-              <li key={line} className="rounded-md border border-line bg-card p-5">
+              <li key={line} className="rounded-3xl border border-line bg-card p-5">
                 {i > 0 && <span className="sr-only">{E.or} </span>}
                 <span className="font-display text-lg font-bold text-ink">{line}</span>
               </li>
@@ -361,7 +396,7 @@ export default async function PricingPage({
         {/* Free and Pro side by side */}
         <section aria-labelledby="limits" className="mt-20">
           <h2 id="limits" className="font-display text-2xl font-bold tracking-tight sm:text-3xl">{P.limits.title}</h2>
-          <div className="mt-6 overflow-hidden rounded-md border border-line bg-card">
+          <div className="mt-6 overflow-hidden rounded-3xl border border-line bg-card">
             <table className="w-full border-collapse text-sm">
               <thead>
                 <tr className="border-b border-line bg-surface">
@@ -387,7 +422,7 @@ export default async function PricingPage({
 
         {/* Credit pack */}
         <section id="credits" aria-labelledby="credits-title" className="mt-20 scroll-mt-20">
-          <div className="grid gap-8 rounded-md border border-line bg-card p-6 shadow-card sm:grid-cols-[1.3fr_1fr] sm:items-center sm:p-10">
+          <div className="grid gap-8 rounded-3xl border border-line bg-card p-6 sm:grid-cols-[1.3fr_1fr] sm:items-center sm:p-10">
             <div>
               <h2 id="credits-title" className="font-display text-2xl font-bold tracking-tight sm:text-3xl">{P.credits.heading}</h2>
               <p className="mt-3 text-ink-soft">{P.credits.intro}</p>
@@ -398,11 +433,16 @@ export default async function PricingPage({
                 </p>
               )}
             </div>
-            <div className="rounded-md border border-line-strong bg-surface-2 p-6 text-center shadow-card">
-              <p className="font-mono text-[11px] uppercase tracking-wide text-ink-soft">{P.credits.pack}</p>
+            <div className="rounded-3xl bg-oat p-6 text-center ">
+              <p className="text-sm font-medium text-ink-soft">{P.credits.pack}</p>
               <p className="mt-2 font-display text-4xl font-extrabold">{n(CREDIT_PACK_SIZE)}</p>
               <p className="text-sm text-ink-soft">{P.credits.unit}</p>
-              <p className="mt-3 font-display text-2xl font-bold">{formatUsd(CREDIT_PACK_PRICE_USD, locale)}</p>
+              {!packUnavailable && (
+                <>
+                  <p className="mt-3 font-display text-2xl font-bold" data-testid="pack-price">{packPrice}</p>
+                  {vatNote && <p className="mt-1 text-xs text-ink-soft">{vatNote}</p>}
+                </>
+              )}
               <p className="mt-1 text-xs text-ink-soft">
                 {t(dict.credits.buysApprox, {
                   gens: n(creditExamples(CREDIT_PACK_SIZE, q).builds),
@@ -412,16 +452,20 @@ export default async function PricingPage({
               <div className="mt-5">
                 {!billing ? (
                   <ComingSoon messages={dict.spend} />
+                ) : packUnavailable ? (
+                  <div data-testid="pack-unavailable">
+                    <ComingSoon messages={{ comingSoon: dict.credits.unavailable, purchasesComingSoon: dict.credits.packUnavailableNote }} note />
+                  </div>
                 ) : signedIn ? (
                   <form action={buyCreditsAction}>
-                    <button type="submit" className="min-h-12 w-full rounded-md bg-ink px-5 text-sm font-semibold text-paper transition hover:opacity-90">
+                    <button type="submit" className="min-h-12 w-full rounded-full bg-lime px-5 text-sm font-semibold text-lime-on transition hover:bg-lime-hover">
                       {t(P.credits.buy, { count: n(CREDIT_PACK_SIZE) })}
                     </button>
                   </form>
                 ) : (
                   <Link
                     href="/sign-up"
-                    className="flex min-h-12 items-center justify-center rounded-md bg-ink px-5 text-sm font-semibold text-paper transition hover:opacity-90"
+                    className="flex min-h-12 items-center justify-center rounded-full bg-lime px-5 text-sm font-semibold text-lime-on transition hover:bg-lime-hover"
                   >
                     {P.credits.signUpToBuy}
                   </Link>
@@ -437,7 +481,7 @@ export default async function PricingPage({
           <h2 id="faq" className="text-center font-display text-2xl font-bold tracking-tight sm:text-3xl">{P.faqTitle}</h2>
           <div className="mx-auto mt-8 grid max-w-4xl gap-4 md:grid-cols-2">
             {faq.map((item) => (
-              <div key={item.q} className="rounded-md border border-line bg-card p-5">
+              <div key={item.q} className="rounded-3xl border border-line bg-card p-5">
                 <h3 className="font-display text-base font-bold text-ink">{item.q}</h3>
                 <p className="mt-2 text-sm leading-relaxed text-ink-soft">{item.a}</p>
               </div>
@@ -469,14 +513,14 @@ export default async function PricingPage({
       <footer>
         <div className="mx-auto flex max-w-5xl flex-col items-center justify-between gap-3 px-4 py-8 sm:flex-row sm:px-7">
           <Link href="/" className="flex min-h-10 items-center gap-1.5 font-display font-bold text-ink">
+            <BrandMark />
             StudyOS
-            <span className="mb-2 h-1 w-1 rounded-full bg-lime" aria-hidden />
           </Link>
-          <nav aria-label={dict.legal.contact} className="flex flex-wrap items-center justify-center gap-x-5 text-sm text-ink-faint">
-            <Link href="/terms" className="flex min-h-10 items-center transition hover:text-ink">{dict.legal.terms}</Link>
-            <Link href="/privacy" className="flex min-h-10 items-center transition hover:text-ink">{dict.legal.privacy}</Link>
-            <a href={`mailto:${email}`} className="flex min-h-10 items-center transition hover:text-ink">{dict.landing.footer.support}</a>
-          </nav>
+          <SiteFooterLinks
+            dict={dict}
+            pricing={false}
+            className="flex flex-wrap items-center justify-center gap-x-5 text-sm text-ink-faint"
+          />
           <span className="text-center text-sm text-ink-soft">{t(P.footerTagline, { year: new Date().getFullYear() })}</span>
         </div>
       </footer>

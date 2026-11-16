@@ -235,6 +235,7 @@ const gradesColumns = z.object({
   maxScore: z.string().nullable().optional(),
   weight: z.string().nullable().optional(),
   due: z.string().nullable().optional(),
+  credits: z.string().nullable().optional(),
 });
 
 const gradeBand = z.object({
@@ -256,6 +257,11 @@ const gradesBlock = z.object({
     .refine((t) => Object.keys(t).length <= MAX_GRADE_TARGETS, "too many targets")
     .optional(),
   defaultTarget: z.number().min(-1000).max(1000).optional(),
+  // "grade" without scale "de_grade" is accepted and read as "percent"
+  // (lib/grades/modules.ts isGradeEntry), so a stored workspace never fails
+  // to load over it; the agent's set_grades_block refuses the combination.
+  entry: z.enum(["percent", "grade"]).optional(),
+  targetGrade: z.number().min(1).max(5).optional(),
 });
 
 /**

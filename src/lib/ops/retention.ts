@@ -25,11 +25,21 @@
  *    (the earliest reminder is 14 days ahead, the daily cap is per day), so
  *    rows older than 60 days go. Push subscriptions are not aged out here:
  *    the dispatch deletes the ones a push service reports gone.
+ *  - ErrorEvent (the operator console's error counts, one row per kind of
+ *    error): a kind not seen for 30 days goes; the server log keeps every
+ *    error in full anyway.
+ *  - AccountDeletionReason (why a deleted account left, anonymous): kept two
+ *    years, long enough to compare one school year with the next.
+ *  - ContractNotice (withdrawals and cancellations declared online, legal
+ *    records kept even after the account is deleted): three years after
+ *    receipt, the regular limitation period (§ 195 BGB), whatever its status.
  */
 import { prisma } from "@/lib/db";
 import { EXPORT_KIND } from "@/lib/account/export-user-data";
 import { USAGE_LIMITS } from "@/lib/usage-limits";
 import { AGENT_FREE_FAILURE_KIND } from "@/lib/ai/agent-charging";
+import { SHARE_ENABLE_KIND } from "@/lib/share/config";
+import { TEST_EMAIL_KIND } from "@/lib/notifications/config";
 import { runBillingMaintenance, type BillingMaintenanceResult } from "@/lib/billing";
 import { reportError } from "@/lib/ops/report-error";
 
@@ -46,6 +56,9 @@ export const RETENTION = {
   agentChatMessageDays: 180,
   agentChatMaxPerWorkspace: 200,
   notificationLogDays: 60,
+  errorEventDays: 30,
+  deletionReasonDays: 730,
+  contractNoticeDays: 1096,
 } as const;
 
 /** UsageEvent kinds used only for rate-limit windows. */
@@ -54,6 +67,9 @@ export const RATE_LIMIT_KINDS: readonly string[] = [
   ...Object.keys(USAGE_LIMITS),
   EXPORT_KIND,
   AGENT_FREE_FAILURE_KIND,
+  SHARE_ENABLE_KIND,
+  // "Send a test email" (one day window).
+  TEST_EMAIL_KIND,
 ];
 export const STUDY_EVENT_KIND = "evt:study_reviewed";
 
@@ -68,6 +84,9 @@ export interface RetentionResult {
   agentChatMessagesExpired: number;
   agentChatMessagesOverCap: number;
   notificationLogs: number;
+  errorEvents: number;
+  deletionReasons: number;
+  contractNotices: number;
   /** The billing sweep (null when it failed; reported, retried next run). */
   billing: BillingMaintenanceResult | null;
 }
@@ -150,6 +169,18 @@ export async function runRetention(now = new Date()): Promise<RetentionResult> {
     where: { createdAt: { lt: ago(now, RETENTION.notificationLogDays) } },
   });
 
+  const errorEvents = await prisma.errorEvent.deleteMany({
+    where: { lastSeen: { lt: ago(now, RETENTION.errorEventDays) } },
+  });
+
+  const deletionReasons = await prisma.accountDeletionReason.deleteMany({
+    where: { createdAt: { lt: ago(now, RETENTION.deletionReasonDays) } },
+  });
+
+  const contractNotices = await prisma.contractNotice.deleteMany({
+    where: { receivedAt: { lt: ago(now, RETENTION.contractNoticeDays) } },
+  });
+
   // Billing jobs Stripe failed part-way and stopped retrying (a refund, a
   // deleted account's or lost dispute's cancellation), abandoned credit holds
   // (and settles that failed), the one-off repair of rows the previous code
@@ -171,6 +202,9 @@ export async function runRetention(now = new Date()): Promise<RetentionResult> {
     agentChatMessagesExpired: agentChatMessagesExpired.count,
     agentChatMessagesOverCap: Number(agentChatMessagesOverCap),
     notificationLogs: notificationLogs.count,
+    errorEvents: errorEvents.count,
+    deletionReasons: deletionReasons.count,
+    contractNotices: contractNotices.count,
     billing,
   };
 }

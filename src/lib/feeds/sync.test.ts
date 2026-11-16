@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { repairWorkspace } from "@/lib/workspace/repair";
 import { safeParseWorkspace } from "@/lib/workspace/schema";
 import type { Database, DatabaseRow, Workspace } from "@/lib/workspace/types";
-import { courseCode, detectMapping, matchCourse, type FeedMapping } from "./mapping";
+import { courseCode, courseLabel, detectMapping, matchCourse, type FeedMapping } from "./mapping";
 import { readFeed, type FeedEvent, type FeedSnapshot } from "./normalize";
 import { applyFeedEvents, classifyEvents, isDefaultSelected, pendingUpdates, rowsMissingFromFile, type ApplyOptions } from "./sync";
 
@@ -107,6 +107,17 @@ describe("mapping", () => {
     expect(matchCourse("eng 102", labels)).toBe(2);
     expect(matchCourse("Introduction to Psychology (PSY 100)", labels)).toBe(1);
     expect(matchCourse("HIST 210", labels)).toBe(-1);
+  });
+
+  // Review round 4: "Year 12" was read as a course code, so every Year 12
+  // course matched the first one's option and their deadlines were merged.
+  it("never reads a year, grade or term as a course code", () => {
+    expect(courseCode("Year 12 Biology")).toBeNull();
+    expect(courseCode("Fall 2026 Statistics")).toBeNull();
+    expect(courseCode("Grade 10 English")).toBeNull();
+    expect(courseCode("Year 12 BIO101")).toBe("BIO 101");
+    expect(courseLabel("Year 12 Chemistry")).toBe("Year 12 Chemistry");
+    expect(matchCourse("Year 12 Chemistry", ["Year 12 Biology"])).toBe(-1);
   });
 });
 

@@ -220,13 +220,17 @@ export interface WallTime {
 export function wallTimeToUtc(wall: WallTime, ref: ZoneRef): number {
   const naive = Date.UTC(wall.year, wall.month - 1, wall.day, wall.hour, wall.minute, wall.second);
   if ("offsetMinutes" in ref) return naive - ref.offsetMinutes * 60_000;
-  const first = zoneOffsetMs(naive, ref.zone);
-  let utc = naive - first;
-  const second = zoneOffsetMs(utc, ref.zone);
-  if (second !== first) {
-    const retry = naive - second;
-    // Keep whichever candidate actually shows this wall time in the zone.
-    utc = zoneOffsetMs(retry, ref.zone) === second ? retry : utc;
-  }
-  return utc;
+  // The offsets a day either side are the ones before and after any change
+  // near this wall time (no zone changes twice within two days). Comparing
+  // the offset at a candidate instant with the one it was built from was not
+  // enough: east of UTC that picked the later of two times and moved a time
+  // in a gap backward, onto the previous day for a change at midnight.
+  const before = zoneOffsetMs(naive - 86_400_000, ref.zone);
+  const after = zoneOffsetMs(naive + 86_400_000, ref.zone);
+  if (before === after) return naive - before;
+  const shows = (offset: number) => zoneOffsetMs(naive - offset, ref.zone) === offset;
+  const valid = [before, after].filter(shows).map((offset) => naive - offset);
+  // Twice: the earlier. Not at all: the offset before the change, which
+  // moves it forward by the gap.
+  return valid.length > 0 ? Math.min(...valid) : naive - before;
 }

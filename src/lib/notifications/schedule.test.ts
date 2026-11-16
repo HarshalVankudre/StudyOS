@@ -10,6 +10,7 @@ import {
   nextSlotAfter,
   safeTimeZone,
   slotsForDay,
+  weekdayOf,
   zonedInstant,
   type ScheduleSettings,
 } from "./schedule";
@@ -179,5 +180,133 @@ describe("preferences", () => {
     expect(minuteToTime(7 * 60 + 5)).toBe("07:05");
     expect(timeToMinute("18:30")).toBe(1110);
     expect(timeToMinute("25:00")).toBeNull();
+  });
+});
+
+describe("weekly recap: once a week, on the chosen local day and time", () => {
+  /** Only the recap on, so each test sees its slot alone. */
+  const weekly = (overrides: Partial<ScheduleSettings> = {}) =>
+    settings({
+      dailyEnabled: false,
+      deadlineEnabled: false,
+      streakEnabled: false,
+      weeklyEnabled: true,
+      ...overrides,
+    });
+  // 15 November 2026 is a Sunday.
+  const SUNDAY = "2026-11-15";
+
+  it("reads the weekday from the local day itself", () => {
+    expect(weekdayOf(SUNDAY)).toBe(0);
+    expect(weekdayOf("2026-11-16")).toBe(1);
+    expect(weekdayOf("2026-11-12")).toBe(4);
+    expect(weekdayOf("2024-02-29")).toBe(4);
+    expect(weekdayOf("2026-11-21")).toBe(6);
+  });
+
+  it("is off by default, Sunday at 18:00 once turned on", () => {
+    expect(DEFAULT_PREFERENCES).toMatchObject({ weeklyEnabled: false, weeklyDay: 0, weeklyMinute: 18 * 60 });
+    // Existing students keep exactly the moments they had.
+    expect(slotsForDay(SUNDAY, settings()).map((s) => s.kind)).toEqual(["daily", "deadline", "streak"]);
+    const slots = slotsForDay(SUNDAY, weekly({ timeZone: "Europe/Berlin" }));
+    expect(slots.map((s) => [s.kind, s.localDate, iso(s.at)])).toEqual([["weekly", SUNDAY, "2026-11-15T17:00:00.000Z"]]);
+  });
+
+  it("happens only on the chosen weekday", () => {
+    const s = weekly({ timeZone: "Europe/Berlin" });
+    for (const day of ["2026-11-09", "2026-11-10", "2026-11-11", "2026-11-12", "2026-11-13", "2026-11-14"]) {
+      expect(slotsForDay(day, s), day).toEqual([]);
+    }
+    // A Wednesday at 07:30 in Tokyo: the evening before in UTC.
+    const wednesday = weekly({ timeZone: "Asia/Tokyo", weeklyDay: 3, weeklyMinute: 7 * 60 + 30 });
+    expect(slotsForDay(SUNDAY, wednesday)).toEqual([]);
+    expect(iso(slotsForDay("2026-11-18", wednesday)[0].at)).toBe("2026-11-17T22:30:00.000Z");
+  });
+
+  it("follows the student's own week, not the server's: Sunday evening in Los Angeles is Monday in UTC", () => {
+    const la = weekly({ timeZone: "America/Los_Angeles" });
+    expect(iso(nextSlotAfter(la, new Date("2026-11-15T12:00:00Z")))).toBe("2026-11-16T02:00:00.000Z");
+    // Monday 01:00 UTC is still Sunday 17:00 there: not yet.
+    expect(dueSlots(la, new Date("2026-11-16T01:00:00Z"))).toEqual([]);
+    expect(dueSlots(la, new Date("2026-11-16T02:00:00Z")).map((x) => [x.kind, x.localDate])).toEqual([["weekly", SUNDAY]]);
+    // UTC+14: Sunday 18:00 is Sunday 04:00 UTC.
+    expect(iso(slotsForDay(SUNDAY, weekly({ timeZone: "Pacific/Kiritimati" }))[0].at)).toBe("2026-11-15T04:00:00.000Z");
+  });
+
+  it("keeps the local time across daylight saving changes", () => {
+    // New York leaves EDT on Sunday 1 Nov 2026: 18:00 is 22:00Z the Sunday before, 23:00Z on the day.
+    const ny = weekly({ timeZone: "America/New_York" });
+    expect(iso(slotsForDay("2026-10-25", ny)[0].at)).toBe("2026-10-25T22:00:00.000Z");
+    expect(iso(nextSlotAfter(ny, new Date("2026-10-25T22:00:00Z")))).toBe("2026-11-01T23:00:00.000Z");
+    // Berlin enters CEST on Sunday 29 Mar 2026.
+    const berlin = weekly({ timeZone: "Europe/Berlin" });
+    expect(iso(nextSlotAfter(berlin, new Date("2026-03-22T17:00:00Z")))).toBe("2026-03-29T16:00:00.000Z");
+    // A recap set inside the skipped hour (02:30 on 8 Mar 2026 in New York) arrives just after it.
+    const early = weekly({ timeZone: "America/New_York", weeklyMinute: 2 * 60 + 30, quietEnabled: false });
+    expect(iso(slotsForDay("2026-03-08", early)[0].at)).toBe("2026-03-08T07:30:00.000Z");
+  });
+
+  it("finds next week's recap once this week's has passed", () => {
+    const s = weekly({ timeZone: "Europe/Berlin" });
+    expect(iso(nextSlotAfter(s, new Date("2026-11-15T16:59:00Z")))).toBe("2026-11-15T17:00:00.000Z");
+    expect(iso(nextSlotAfter(s, new Date("2026-11-15T17:00:00Z")))).toBe("2026-11-22T17:00:00.000Z");
+    // With the daily note on too, the next moment is tomorrow morning.
+    expect(iso(nextSlotAfter({ ...s, dailyEnabled: true }, new Date("2026-11-15T17:00:00Z")))).toBe("2026-11-16T07:00:00.000Z");
+  });
+
+  it("is still sent late the same evening after a missed run, but never after local midnight", () => {
+    const s = weekly({ timeZone: "Europe/Berlin", quietEnabled: false });
+    // 21:30 in Berlin: three and a half hours late, beyond the usual grace.
+    expect(Date.parse("2026-11-15T20:30:00Z") - Date.parse("2026-11-15T17:00:00Z")).toBeGreaterThan(GRACE_MS);
+    expect(dueSlots(s, new Date("2026-11-15T20:30:00Z")).map((x) => x.kind)).toEqual(["weekly"]);
+    expect(dueSlots(s, new Date("2026-11-15T22:59:00Z")).map((x) => x.kind)).toEqual(["weekly"]);
+    // 00:01 on Monday in Berlin.
+    expect(dueSlots(s, new Date("2026-11-15T23:01:00Z"))).toEqual([]);
+    // The daily note keeps its usual grace period.
+    const daily = settings({ timeZone: "Europe/Berlin", quietEnabled: false, deadlineEnabled: false, streakEnabled: false });
+    expect(dueSlots(daily, new Date("2026-11-15T10:30:00Z"))).toEqual([]);
+  });
+
+  it("follows quiet hours like the other notes: waits for their end, or is skipped", () => {
+    const morning = weekly({ timeZone: "UTC", weeklyMinute: 6 * 60 });
+    expect(iso(slotsForDay(SUNDAY, morning)[0].at)).toBe("2026-11-15T07:00:00.000Z");
+    const late = weekly({ timeZone: "UTC", weeklyMinute: 23 * 60 });
+    expect(slotsForDay(SUNDAY, late)).toEqual([]);
+    expect(nextSlotAfter(late, new Date("2026-11-12T12:00:00Z"))).toBeNull();
+  });
+});
+
+describe("weekly recap preferences", () => {
+  it("validates the switch, the weekday and the time", () => {
+    expect(preferencesInputSchema.parse({ weeklyEnabled: true, weeklyDay: 3, weeklyMinute: 450 })).toEqual({
+      weeklyEnabled: true,
+      weeklyDay: 3,
+      weeklyMinute: 450,
+    });
+    expect(preferencesInputSchema.safeParse({ weeklyDay: 0 }).success).toBe(true);
+    expect(preferencesInputSchema.safeParse({ weeklyDay: 6 }).success).toBe(true);
+    for (const bad of [
+      { weeklyDay: 7 },
+      { weeklyDay: -1 },
+      { weeklyDay: 2.5 },
+      { weeklyDay: "sunday" },
+      { weeklyMinute: 1440 },
+      { weeklyMinute: -1 },
+      { weeklyEnabled: "yes" },
+      { weeklyEnabled: 1 },
+    ]) {
+      expect(preferencesInputSchema.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
+    }
+  });
+
+  it("round-trips through the stored row and reads damaged or older rows as off", () => {
+    const next = mergePreferences(DEFAULT_PREFERENCES, preferencesInputSchema.parse({ weeklyEnabled: true, weeklyDay: 5, weeklyMinute: 1200 }));
+    expect(fromRow(toRow(next))).toEqual(next);
+    const damaged = { ...toRow(next), weeklyDay: 9, weeklyMinute: -5 };
+    expect(fromRow(damaged)).toMatchObject({ weeklyEnabled: true, weeklyDay: 0, weeklyMinute: 18 * 60 });
+    // A row written before the recap existed has none of its columns.
+    const older: Record<string, unknown> = { ...toRow(next) };
+    for (const column of ["weeklyEnabled", "weeklyDay", "weeklyMinute"]) delete older[column];
+    expect(fromRow(older as unknown as ReturnType<typeof toRow>)).toMatchObject({ weeklyEnabled: false, weeklyDay: 0, weeklyMinute: 1080 });
   });
 });

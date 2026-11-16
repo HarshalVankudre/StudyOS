@@ -44,6 +44,7 @@ model Workspace {
   agentMessages AgentChatMessage[]
   materials StudyMaterial[]
   feeds     CalendarFeed[]
+  shares    PageShare[]
 
   @@index([ownerId])
   @@index([ownerId, deletedAt])
@@ -171,6 +172,8 @@ model AgentRun {
   completedAt DateTime?
 
   @@index([userId, startedAt])
+  // The operator console's "Recent failed runs" (status + time window).
+  @@index([status, startedAt])
 }
 
 // One row per user (Clerk user id) tracking their Stripe subscription.
@@ -243,6 +246,8 @@ model BillingEvent {
   @@unique([kind, stripeObjectId])
   @@index([paymentIntentId])
   @@index([userId])
+  // The operator console's billing window (last 30 days).
+  @@index([createdAt])
 }
 
 // Tombstone written when a user deletes their account, so a late Stripe
@@ -342,6 +347,30 @@ model StudyDay {
   @@index([userId, localDate])
 }
 
+// One focus-timer block a student ran (src/app/app/focus-actions.ts): how many
+// seconds they actually focused, on their LOCAL calendar day (YYYY-MM-DD, the
+// day the block started). `workspaceId` and `itemKey` (the Today plan item it
+// was started from) are optional: a session can be about nothing in
+// particular. `clientId` is the browser's random id for the block, so a
+// retried request never counts it twice. `completed` = the block ran to the
+// end (false: stopped early). Rows outlive a deleted workspace, like StudyDay.
+model FocusSession {
+  id          String   @id @default(cuid())
+  userId      String
+  workspaceId String?
+  itemKey     String?
+  label       String?
+  clientId    String
+  localDate   String
+  startedAt   DateTime
+  seconds     Int
+  completed   Boolean
+  createdAt   DateTime @default(now())
+
+  @@unique([userId, clientId])
+  @@index([userId, localDate])
+}
+
 // A per-user unguessable capability token for the read-only ICS calendar feed.
 // The feed URL (/api/calendar/<token>) is fetched by calendar apps that can't
 // authenticate, so the token IS the credential. One active token per user;
@@ -394,6 +423,9 @@ model CreditAccount {
   balance   Int      @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // The operator console's new-account counts per window.
+  @@index([createdAt])
 }
 
 // Append-only audit trail of every credit change (grant, purchase, usage).
@@ -407,6 +439,72 @@ model CreditLedger {
   createdAt      DateTime @default(now())
 
   @@index([userId])
+  // The operator console's spending and active-student windows.
+  @@index([createdAt])
+}
+
+// A student's invite link (/r/<code>, lib/referral), made the first time
+// they open their invite card. `code`: 8 characters from an unambiguous
+// alphabet (no 0/O or 1/I/L), drawn from the OS CSPRNG. Exported and erased
+// with the account.
+model ReferralCode {
+  userId    String   @id
+  code      String   @unique
+  createdAt DateTime @default(now())
+}
+
+// A friend who set up a NEW account through someone's invite link, at most
+// one row per friend (lib/referral/attribution.ts). `status`:
+//   pending   attributed; rewarded once the friend's first workspace build is
+//             charged (`qualifiedAt`) and their email is verified;
+//   rewarded  decided (`rewardedAt`): the friend got the bonus, and
+//             `referrerOutcome` says what the inviter got: granted |
+//             capped_total | capped_daily | referrer_deleted;
+//   rejected  never rewarded; `rejectReason`: self_referral |
+//             referrer_deleted | account_not_new | cookie_expired |
+//             bad_signature | same_email | mailbox_reused.
+// `lastTriedAt`: the maintenance job's last attempt (it retries the least
+// recently tried first). The credits themselves are CreditLedger rows
+// (reasons referral_referee and referral_referrer, keyed by the friend's id).
+// When the INVITER deletes their account, their rows are erased; when the
+// FRIEND does, their row is anonymised instead (`refereeId` cleared, status,
+// outcome and dates kept: the operator console's evidence about the inviter).
+// Credits already granted to the other side stay. A unique index ignores
+// NULLs, so any number of anonymised rows can coexist.
+model Referral {
+  id              String    @id @default(cuid())
+  referrerId      String
+  refereeId       String?   @unique
+  code            String
+  status          String    @default("pending")
+  rejectReason    String?
+  qualifiedAt     DateTime?
+  rewardedAt      DateTime?
+  referrerOutcome String?
+  lastTriedAt     DateTime?
+  createdAt       DateTime  @default(now())
+
+  @@index([referrerId, status])
+  @@index([status, createdAt])
+}
+
+// The invite program's pseudonymous mailbox register (lib/referral/mailbox.ts):
+// one row per invite credit granted, naming only an HMAC-SHA256 of the
+// mailbox it went to (lower case, no +tag, Gmail dots and googlemail.com
+// folded), keyed by a server-derived key, and the side it was for (`role`:
+// friend | inviter). No user id, no address. It is what stops one mailbox
+// farming invites across accounts: a friend's mailbox earns the friend bonus
+// once ever, and the inviter's caps count per mailbox across all of their
+// accounts. Kept when an account is erased (that is the point; it identifies
+// no one without the server key and the address itself).
+model ReferralMailbox {
+  id        String   @id @default(cuid())
+  hash      String
+  role      String
+  createdAt DateTime @default(now())
+
+  @@index([hash, role, createdAt])
+  @@index([role, createdAt])
 }
 
 // An owner-scoped binary asset (e.g. a sandbox-rendered image). Bytes live in
@@ -481,6 +579,15 @@ model PushSubscription {
 // due for this student (null = nothing to do: no device, or everything off);
 // the dispatch only ever reads rows whose `nextCheckAt` has passed, through
 // its index, and `leaseUntil` stops two overlapping runs handling one student.
+// The weekly recap is opt-in (off by default): `weeklyDay` is the local
+// weekday it arrives on (0 = Sunday … 6 = Saturday), `weeklyMinute` the time.
+// Email is a second channel for the same reminders, opt-in (`emailEnabled`).
+// The address is never stored here: it is read from Clerk at send time.
+// `emailBouncedAt` is set when the mail server refused the address for good,
+// with `emailBouncedHash`, a keyed hash (HMAC) of the refused address (never
+// the address itself): the stop applies to THAT address only, so a student
+// whose primary address has changed since is emailed again (and the flag is
+// cleared). Turning email on again clears it too.
 model NotificationPreference {
   userId          String    @id
   timeZone        String    @default("UTC")
@@ -492,9 +599,15 @@ model NotificationPreference {
   deadlineLeads   String    @default("[7,2,1]")
   examLeads       String    @default("[14,7,2,1]")
   streakEnabled   Boolean   @default(true)
+  weeklyEnabled   Boolean   @default(false)
+  weeklyDay       Int       @default(0)
+  weeklyMinute    Int       @default(1080)
   quietEnabled    Boolean   @default(true)
   quietStart      Int       @default(1320)
   quietEnd        Int       @default(420)
+  emailEnabled    Boolean   @default(false)
+  emailBouncedAt  DateTime?
+  emailBouncedHash String?
   nextCheckAt     DateTime?
   leaseUntil      DateTime?
   createdAt       DateTime  @default(now())
@@ -523,4 +636,168 @@ model NotificationLog {
   @@unique([userId, dedupeKey])
   @@index([userId, localDate])
   @@index([createdAt])
+}
+
+// A message a student sent from the in-app "Send feedback" dialog
+// (src/app/app/feedback-actions.ts), read in the operator console
+// (/app/admin). `kind`: bug | idea | question | other. `pagePath` is the path
+// they were on (never a query string or hash). `contactOk` = they agreed to
+// be emailed about it; only then does the console look up their address.
+// `status`: new | read | done. Exported with the account and erased with it.
+model Feedback {
+  id        String   @id @default(cuid())
+  userId    String
+  kind      String
+  message   String
+  pagePath  String?
+  locale    String?
+  contactOk Boolean  @default(false)
+  status    String   @default("new")
+  createdAt DateTime @default(now())
+
+  @@index([status, createdAt])
+  @@index([userId, createdAt])
+}
+
+// Why a student deleted their account: the optional question in the delete
+// confirmation (components/account/DeleteAccountButton, lib/account/
+// deletion-reason.ts). Anonymous by design: no user id, the account's age only
+// as a rough bucket, so a row outlives the account it came from. The operator
+// console counts the reasons; rows go after two years (lib/ops/retention.ts).
+model AccountDeletionReason {
+  id        String   @id @default(cuid())
+  // One of DELETION_REASONS.
+  reason    String
+  // Optional free text, at most 500 characters.
+  note      String?
+  // "free" or "pro" when the account was deleted.
+  plan      String
+  // How long the account existed: "week" | "month" | "quarter" | "year" | "older".
+  tenure    String
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+// A withdrawal or cancellation a consumer declared with the statutory online
+// functions (/withdraw: "Withdraw from contract here", § 356a BGB; /cancel:
+// "Cancel contracts here", § 312k BGB; lib/contract-notices). A legal record,
+// not ordinary user content: `receivedAt` is the moment the confirm button
+// was used (what decides whether it came in time), set by the server.
+// `kind`: withdrawal | cancellation. `contractKind`: pro | pack | other, with
+// `contractRef` (the Stripe subscription or checkout session id) when the
+// signed-in sender picked a contract of their own. Cancellations carry
+// `cancelType` (ordinary | extraordinary), `reason` (extraordinary only) and
+// `requestedEnd` (YYYY-MM-DD; null = the earliest possible date).
+// `status`: open | done (`handledAt`); the operator processes open ones in
+// the console (/app/admin). `ackStatus`: pending | sent | failed |
+// not_configured (the acknowledgement of receipt emailed to `email`);
+// `operatorNotified`: the operator's own email went out. `stripeOutcome`
+// (cancellations only; null = Stripe not touched): scheduled |
+// already_scheduled | no_live_subscription | failed, with `proEndsAt`.
+// Exported with the account. On account deletion the row is KEPT with
+// `userId` cleared (the operator must be able to prove receipt and refund);
+// deleted three years after receipt (lib/ops/retention.ts).
+model ContractNotice {
+  id               String    @id @default(cuid())
+  kind             String
+  userId           String?
+  name             String
+  email            String
+  contractKind     String
+  contractRef      String?
+  details          String?
+  cancelType       String?
+  reason           String?
+  requestedEnd     String?
+  locale           String
+  receivedAt       DateTime  @default(now())
+  status           String    @default("open")
+  handledAt        DateTime?
+  ackStatus        String    @default("pending")
+  operatorNotified Boolean   @default(false)
+  stripeOutcome    String?
+  proEndsAt        DateTime?
+
+  @@index([status, receivedAt])
+  @@index([userId])
+  @@index([receivedAt])
+}
+
+// A public, read-only link to ONE page of a workspace (/s/<token>), made from
+// the page's "Share" dialog (src/app/app/share-actions.ts, lib/share). The
+// token is the capability: 192 random bits, base64url. Private by default
+// (no row = not shared); turning sharing off sets `revokedAt` and the link
+// dies for good, turning it on again issues a new token. At most one active
+// (revokedAt null) share per page. Visitors see the page's CURRENT content,
+// never the workspace's other pages, grades or calendar. `viewCount` is a
+// hint (at most one view per address and link per hour, counted in memory),
+// not analytics. Removed with the workspace (ON DELETE CASCADE), exported
+// (without the token) and erased with the account. Moving the workspace to
+// the trash, or deleting the page, revokes its shares (restoring does not
+// bring them back). `disabledByOperatorAt`: an operator turned this link off
+// after a report (/app/admin); that page cannot be shared again, and a user
+// with several such links cannot share any page.
+model PageShare {
+  id                   String        @id @default(cuid())
+  token                String        @unique
+  userId               String
+  workspaceId          String
+  pageId               String
+  createdAt            DateTime      @default(now())
+  revokedAt            DateTime?
+  disabledByOperatorAt DateTime?
+  viewCount            Int           @default(0)
+  lastViewedAt         DateTime?
+  workspace            Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  reports      ShareReport[]
+
+  @@index([userId])
+  @@index([workspaceId, pageId])
+}
+
+// "Report this page" from a visitor of a shared page (/s/<token>), read in
+// the operator console (/app/admin). No reporter identity is stored (visitors
+// need not be signed in); the form is rate limited per address in memory.
+// `reason`: spam | copyright | harmful | personal | other. `status`: new |
+// done (set when an operator disables the link or dismisses the reports).
+// At most SHARE_REPORTS_OPEN_CAP open reports are kept per share (lib/share/config.ts). Removed with its share
+// (ON DELETE CASCADE) and erased with the page owner's account; not part of
+// the owner's export (they are other people's messages about the page).
+model ShareReport {
+  id        String    @id @default(cuid())
+  shareId   String
+  reason    String
+  message   String?
+  createdAt DateTime  @default(now())
+  status    String    @default("new")
+  share     PageShare @relation(fields: [shareId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@index([shareId])
+}
+
+// Server errors grouped by kind for the operator console's "Errors" panel
+// (/app/admin). reportError (lib/ops/report-error.ts) still writes every error
+// to the log in full; it also counts it here, buffered in memory and written
+// at most every 30 seconds (lib/ops/error-events.ts). Operational data only:
+// no user ids, emails or content. `message` and `sample` (the first stack
+// frames) are scrubbed like the log line, with ids replaced. `fingerprint` is
+// a hash of source + route + the message with numbers and ids normalized, so
+// one kind of error is one row; `count` is every occurrence since
+// `firstSeen`. `release` is the DEPLOYMENT_VERSION it was last seen in.
+// Rows not seen for 30 days are deleted by the maintenance job; the console
+// can clear one sooner.
+model ErrorEvent {
+  fingerprint String   @id
+  source      String
+  route       String?
+  message     String
+  sample      String?
+  count       Int
+  firstSeen   DateTime
+  lastSeen    DateTime
+  release     String?
+
+  @@index([lastSeen])
 }

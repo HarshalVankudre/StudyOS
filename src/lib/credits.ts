@@ -695,6 +695,24 @@ export async function releaseCreditHold(hold: Pick<CreditHold, "id">): Promise<b
 }
 
 /**
+ * What the work behind a hold was charged (read only): its charge once
+ * settled; while it is still held, the charge a failed settle recorded
+ * (`pendingCharge`, which the release or the expiry sweep completes, never
+ * gives away); 0 for a hold given back, or none. Lets a caller whose settle
+ * failed tell whether the work was in fact charged.
+ */
+export async function creditHoldCharge(hold: Pick<CreditHold, "id">): Promise<number> {
+  const row = await prisma.creditHold.findUnique({
+    where: { id: hold.id },
+    select: { state: true, charged: true, pendingCharge: true },
+  });
+  if (!row) return 0;
+  if (row.state === "settled") return row.charged ?? 0;
+  if (row.state === "held") return row.pendingCharge ?? 0;
+  return 0;
+}
+
+/**
  * Close holds left open past their expiry (all users, or one): give them
  * back, or complete the charge a failed settle recorded. Returns how many
  * were closed. A hold that cannot be closed now stays for the next run.

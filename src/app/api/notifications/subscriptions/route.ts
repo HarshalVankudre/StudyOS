@@ -12,6 +12,7 @@ export const dynamic = "force-dynamic";
 /**
  * Devices with notifications on.
  *   POST   { subscription, timeZone?, locale? }  add (or refresh) this browser
+ *          { ..., refresh: true, replaces? }     refresh only: never adds a device
  *   DELETE { endpoint } | { all: true }          turn one device, or all, off
  * The endpoint is a capability URL: it is stored, never logged, never returned.
  */
@@ -24,15 +25,25 @@ export async function POST(req: Request) {
   const body = (await readJsonBody(req)) as Record<string, unknown> | null;
   const check = checkSubscription(body?.subscription);
   if (!check.ok) return Response.json({ error: check.reason }, { status: 400 });
+  // A refresh (the browser keeping a device current) never turns a device on:
+  // only the student's own "Turn on" does (see addPushSubscription).
+  const refreshOnly = body?.refresh === true;
+  const replaces = typeof body?.replaces === "string" && body.replaces.length <= 2_000 ? body.replaces : undefined;
   try {
-    const added = await addPushSubscription(userId, check, {
-      timeZone: typeof body?.timeZone === "string" ? body.timeZone : undefined,
-      locale: typeof body?.locale === "string" ? body.locale : undefined,
-      label: deviceLabel(req.headers.get("user-agent")),
-    });
+    const added = await addPushSubscription(
+      userId,
+      check,
+      {
+        timeZone: typeof body?.timeZone === "string" ? body.timeZone : undefined,
+        locale: typeof body?.locale === "string" ? body.locale : undefined,
+        label: deviceLabel(req.headers.get("user-agent")),
+      },
+      refreshOnly ? { refreshOnly, replaces } : {},
+    );
     // Another student's device record: the browser re-subscribes (a fresh
     // endpoint) and tries again; see addPushSubscription.
     if (added === "taken") return Response.json({ error: "endpoint_taken" }, { status: 409 });
+    if (added === "unknown") return Response.json({ error: "not_registered" }, { status: 404 });
     const settings = await getNotificationSettings(userId);
     return Response.json({ ok: true, devices: settings.devices, preferences: settings.preferences });
   } catch (error) {

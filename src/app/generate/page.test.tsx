@@ -6,9 +6,12 @@ const mocks = vi.hoisted(() => ({
   balance: vi.fn(),
   plan: vi.fn(),
   models: { free: "z-ai/glm-5.2", pro: "z-ai/glm-5.2" } as Record<string, string>,
+  cookies: new Set<string>(),
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }));
+vi.mock("next/headers", () => ({ cookies: async () => ({ has: (name: string) => mocks.cookies.has(name) }) }));
+vi.mock("@/components/referral/ReferralClaim", () => ({ ReferralClaim: () => <div data-testid="referral-claim" /> }));
 vi.mock("@/lib/credits", () => ({ getCreditBalance: mocks.balance }));
 vi.mock("@/lib/billing", () => ({ getUserPlan: mocks.plan }));
 vi.mock("@/lib/ai/plans", () => ({ modelForPlan: (plan: string) => mocks.models[plan] }));
@@ -39,6 +42,7 @@ import GeneratePage from "./page";
 import { buildQuote, TRIAL_CREDITS } from "@/lib/price-list";
 
 beforeEach(() => {
+  mocks.cookies.clear();
   mocks.auth.mockResolvedValue({ userId: "user-1" });
   mocks.balance.mockResolvedValue(500);
   mocks.plan.mockResolvedValue("free");
@@ -98,5 +102,26 @@ describe("generate page", () => {
     vi.stubEnv("STRIPE_PRICE_PRO", "price_month");
     render(await GeneratePage({ searchParams: Promise.resolve({}) }));
     expect(generator()).toHaveAttribute("data-billing", "true");
+  });
+
+  test("records an invited friend's invite here too, when the generator is their first stop", async () => {
+    let view = render(await GeneratePage({ searchParams: Promise.resolve({}) }));
+    expect(screen.queryByTestId("referral-claim")).toBeNull();
+    view.unmount();
+
+    mocks.cookies.add("studyos_ref");
+    view = render(await GeneratePage({ searchParams: Promise.resolve({}) }));
+    expect(screen.getByTestId("referral-claim")).toBeInTheDocument();
+    view.unmount();
+
+    // Not while invites are paused, nor for a signed-out visitor.
+    vi.stubEnv("STUDYOS_REFERRALS", "off");
+    view = render(await GeneratePage({ searchParams: Promise.resolve({}) }));
+    expect(screen.queryByTestId("referral-claim")).toBeNull();
+    view.unmount();
+    vi.unstubAllEnvs();
+    mocks.auth.mockResolvedValue({ userId: null });
+    render(await GeneratePage({ searchParams: Promise.resolve({}) }));
+    expect(screen.queryByTestId("referral-claim")).toBeNull();
   });
 });

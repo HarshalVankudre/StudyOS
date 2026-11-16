@@ -8,6 +8,13 @@
  *          (USAGE_LIMITS) and a higher per-message ceiling (TURN_CREDIT_CAP).
  *   Both   every feature. Studying (flashcard reviews, quizzes, Today, the
  *          grade tracker, editing, export) never uses credits on any plan.
+ *   Invite REFERRAL_CREDITS each to a friend who signed up through a
+ *          student's invite link and to that student, once the friend's
+ *          first workspace build is charged (lib/referral); the student
+ *          earns for at most REFERRAL_MAX_REWARDS friends, and
+ *          REFERRAL_MAX_PER_DAY in any 24 hours (counted per account and
+ *          per mailbox); at most REFERRAL_MAX_FRIEND_GRANTS_PER_DAY friend
+ *          bonuses go out in any 24 hours across everyone.
  *
  * AI actions have fixed, published prices (ACTION_PRICES). A run is reserved
  * at, and charged, its price; a failure that delivered nothing is free; a
@@ -57,6 +64,7 @@ export type LimitedKind =
   | "generate_failed"
   | "study_kit_failed"
   | "workspace_duplicate"
+  | "notion_import"
   | "syllabus_upload"
   | "daily_plan";
 
@@ -93,6 +101,9 @@ const DEFAULT_USAGE_LIMITS: UsageLimits = {
   study_kit_failed: { free: 3, pro: 6, windowMs: DAY },
   // Workspace copies (each up to 2 MB of storage).
   workspace_duplicate: { free: 20, pro: 40, windowMs: HOUR },
+  // Notion imports (POST /api/import/notion): like a copy, a new workspace of
+  // up to 2 MB, plus reading a zip of up to 50 MB in process. No model call.
+  notion_import: { free: 10, pro: 20, windowMs: HOUR },
   // Syllabus file uploads (POST /api/import/syllabus): each starts a capped
   // extraction process. A student uploads a handful; retries fit easily.
   syllabus_upload: { free: 20, pro: 60, windowMs: HOUR },
@@ -109,7 +120,11 @@ export interface PriceListConfig {
   proMonthlyCredits: number;
   /** Pro prices shown while billing is off (USD). With billing on, the Stripe Prices are shown. */
   proFallbackUsd: { month: number; year: number };
-  /** The buyable credit pack, and what its checkout charges. */
+  /**
+   * The buyable credit pack, and what its checkout charges (USD) unless
+   * STRIPE_PRICE_CREDIT_PACK names a Stripe Price (lib/plan-pricing.ts
+   * getCreditPackPricing, which every page showing the price reads).
+   */
   creditPack: { credits: number; usd: number };
   /** Published credit price of each AI action. */
   actions: {
@@ -127,6 +142,15 @@ export interface PriceListConfig {
   /** Uncharged failed assistant messages per student per day. */
   freeFailuresPerDay: number;
   usageLimits: UsageLimits;
+  /**
+   * The invite program (lib/referral): the credits each side gets when an
+   * invited friend's first workspace build is charged, and how many invited
+   * friends one student can earn for, in total and in any 24 hours (past
+   * either, the friend still gets theirs and the student does not), and the
+   * most friend bonuses granted across all students in any 24 hours (past
+   * it, rewards wait and the operator is alerted: a farming alarm).
+   */
+  referral: { credits: number; maxRewards: number; maxPerDay: number; maxFriendGrantsPerDay: number };
 }
 
 export const DEFAULT_PRICE_LIST: PriceListConfig = {
@@ -138,6 +162,7 @@ export const DEFAULT_PRICE_LIST: PriceListConfig = {
   turnCreditCap: { free: 30, pro: 100 },
   freeFailuresPerDay: 3,
   usageLimits: DEFAULT_USAGE_LIMITS,
+  referral: { credits: 100, maxRewards: 20, maxPerDay: 5, maxFriendGrantsPerDay: 200 },
 };
 
 /**
@@ -323,6 +348,10 @@ export function createPriceList(config: PriceListConfig) {
     TURN_CREDIT_CAP: config.turnCreditCap,
     FREE_FAILURES_PER_DAY: config.freeFailuresPerDay,
     USAGE_LIMITS: config.usageLimits,
+    REFERRAL_CREDITS: config.referral.credits,
+    REFERRAL_MAX_REWARDS: config.referral.maxRewards,
+    REFERRAL_MAX_PER_DAY: config.referral.maxPerDay,
+    REFERRAL_MAX_FRIEND_GRANTS_PER_DAY: config.referral.maxFriendGrantsPerDay,
     buildQuote,
     buildTypicalUsd,
     messageQuote,
@@ -353,6 +382,10 @@ export const {
   TURN_CREDIT_CAP,
   FREE_FAILURES_PER_DAY,
   USAGE_LIMITS,
+  REFERRAL_CREDITS,
+  REFERRAL_MAX_REWARDS,
+  REFERRAL_MAX_PER_DAY,
+  REFERRAL_MAX_FRIEND_GRANTS_PER_DAY,
   buildQuote,
   buildTypicalUsd,
   messageQuote,

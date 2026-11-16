@@ -17,11 +17,14 @@ import { completionField, isDayKey, isRowComplete } from "@/lib/workspace/view-l
 import {
   assignRow,
   buildGradeReport,
+  buildModuleReport,
   convertCategoryRows,
   formatGrade,
   formatPercent,
   formatPoints,
+  isGradeEntry,
   keepCategoryRows,
+  looksLikeModuleGrades,
   parseLocaleNumber,
   parseScoreInput,
   removeCategory,
@@ -30,6 +33,7 @@ import {
   type GradeReport,
   type ItemResult,
 } from "@/lib/grades";
+import { parseGermanGrade } from "@/lib/grades/german";
 import { dotClass } from "@/lib/workspace/colors";
 import { cn } from "@/lib/utils";
 import { formatDay } from "../database/shared";
@@ -37,6 +41,7 @@ import { useWorkspace } from "../WorkspaceContext";
 import { CategoryEditor } from "./CategoryEditor";
 import { GradesSettings } from "./GradesSettings";
 import { GradesSetup } from "./GradesSetup";
+import { ModuleGrades } from "./ModuleGrades";
 import { DraftInput } from "../editor/DraftInput";
 import { ScoreInput } from "./ScoreInput";
 import { TargetPicker } from "./TargetPicker";
@@ -65,6 +70,10 @@ export interface CategoryActions {
  * list (one list, never a copy); "what if" tries scores without saving them.
  * A share of the grade many items have in common ("Problem sets 20%") is a
  * grading category of the list, never a row of it.
+ *
+ * With German grades a student can instead type module grades (1,0 to 5,0),
+ * one module per row, and see the credit-weighted Notenschnitt
+ * (ModuleGrades, lib/grades/modules.ts).
  */
 export function GradesBlock({ pageId, block }: { pageId: string; block: GradesBlockData }) {
   const { workspace, update, undo } = useWorkspace();
@@ -101,6 +110,16 @@ export function GradesBlock({ pageId, block }: { pageId: string; block: GradesBl
   };
   const whatIf = useMemo(() => parsePercents(whatIfText), [whatIfText]);
   const whatIfFill = useMemo(() => parsePercents(fillText), [fillText]);
+  const gradeEntry = isGradeEntry(block);
+  // Module grades: what-if grades for open modules, typed as "1,7" (never saved).
+  const whatIfGrades = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const [id, text] of Object.entries(whatIfText)) {
+      const grade = parseGermanGrade(text);
+      if (grade !== null) out[id] = grade;
+    }
+    return out;
+  }, [whatIfText]);
 
   const report = useMemo(
     () =>
@@ -111,6 +130,10 @@ export function GradesBlock({ pageId, block }: { pageId: string; block: GradesBl
       }),
     [workspace, block, whatIf, whatIfFill, whatIfOn, g.uk],
   );
+  const moduleReport = useMemo(
+    () => (gradeEntry ? buildModuleReport(workspace, block, { whatIf: whatIfOn ? whatIfGrades : undefined }) : null),
+    [gradeEntry, workspace, block, whatIfOn, whatIfGrades],
+  );
 
   const mutateBlock = (fn: (b: GradesBlockData) => void) =>
     update((d) => {
@@ -118,11 +141,11 @@ export function GradesBlock({ pageId, block }: { pageId: string; block: GradesBl
       if (b?.type === "grades") fn(b);
     });
 
-  const addScoreColumn = (db: Database): string => {
+  const addColumn = (db: Database, name: string): string => {
     const id = crypto.randomUUID();
     update((d) => {
       const target = d.databases.find((x) => x.id === db.id);
-      target?.properties.push({ id, name: g.scoreColumnName, type: "number" });
+      target?.properties.push({ id, name, type: "number" });
     });
     return id;
   };
@@ -155,7 +178,7 @@ export function GradesBlock({ pageId, block }: { pageId: string; block: GradesBl
             type="button"
             aria-pressed={whatIfOn}
             onClick={() => setWhatIfOn((v) => !v)}
-            className={cn(SECONDARY, whatIfOn && "border-lime bg-lime-faint text-lime-deep")}
+            className={cn(SECONDARY, whatIfOn && "border-lime-deep bg-lime-faint text-lime-deep")}
           >
             <FlaskConical className="size-4" aria-hidden />
             {g.whatIf}
@@ -187,7 +210,10 @@ export function GradesBlock({ pageId, block }: { pageId: string; block: GradesBl
           workspace={workspace}
           databaseId={block.databaseId}
           columns={block.columns}
-          onAddScoreColumn={addScoreColumn}
+          german={block.scale === "de_grade"}
+          entry={gradeEntry ? "grade" : "percent"}
+          onEntry={(entry) => mutateBlock((b) => void (b.entry = entry))}
+          onAddColumn={addColumn}
           onSave={saveSetup}
           onCancel={
             editingColumns && !needsSetup
@@ -274,6 +300,28 @@ export function GradesBlock({ pageId, block }: { pageId: string; block: GradesBl
     return true;
   };
 
+  /** Module grades: "1,7", "1.7" or "2" is saved as the number; anything else is refused. */
+  const commitGrade = (rowId: string, text: string): boolean => {
+    const typed = text.trim();
+    const grade = typed === "" ? null : parseGermanGrade(typed);
+    if (typed !== "" && grade === null) {
+      setNotice(t(dict.tools.gradeCalculator.ects.invalidGrade, { text: typed }));
+      return false;
+    }
+    setNotice("");
+    update((d) => {
+      const db = d.databases.find((x) => x.id === r.database.id);
+      const row = db?.rows.find((x) => x.id === rowId);
+      const scoreProp = columns.score;
+      if (!db || !row || !scoreProp) return;
+      row.cells[scoreProp.id] = grade;
+      // A grade means the module's exam is graded: mark the row done.
+      const done = completionField(db);
+      if (grade !== null && done && !isRowComplete(db, row, done)) row.cells[done.property.id] = done.doneValue;
+    });
+    return true;
+  };
+
   const setTarget = (key: string, target: number | null) =>
     mutateBlock((b) => {
       const targets = { ...(b.targets ?? {}) };
@@ -310,6 +358,8 @@ export function GradesBlock({ pageId, block }: { pageId: string; block: GradesBl
             scale={r.scale}
             customBands={!!block.bands?.length}
             defaultTarget={block.defaultTarget ?? null}
+            entry={gradeEntry ? "grade" : "percent"}
+            onEntry={(entry) => mutateBlock((b) => void (b.entry = entry))}
             onScale={(preset) =>
               mutateBlock((b) => {
                 b.scale = preset;
@@ -336,7 +386,7 @@ export function GradesBlock({ pageId, block }: { pageId: string; block: GradesBl
         </div>
       )}
 
-      {r.categoryRows.length > 0 && (
+      {!gradeEntry && r.categoryRows.length > 0 && (
         <section
           aria-label={g.cleanup.title}
           className="flex flex-col gap-2 border-b border-line bg-amber-400/10 px-3 py-3 text-sm sm:px-4"
@@ -397,7 +447,7 @@ export function GradesBlock({ pageId, block }: { pageId: string; block: GradesBl
       {whatIfOn && (
         <div className="flex flex-wrap items-center gap-2 border-b border-line bg-lime-faint/60 px-3 py-2 text-sm text-ink sm:px-4">
           <FlaskConical className="size-4 shrink-0 text-lime-deep" aria-hidden />
-          <p className="min-w-0 flex-1">{g.whatIfOn}</p>
+          <p className="min-w-0 flex-1">{gradeEntry ? g.modules.whatIfOn : g.whatIfOn}</p>
           {hasWhatIf && (
             <button
               type="button"
@@ -414,70 +464,108 @@ export function GradesBlock({ pageId, block }: { pageId: string; block: GradesBl
         </div>
       )}
 
-      {/* Overall */}
-      <section aria-label={g.overall} className="flex flex-wrap items-end gap-x-4 gap-y-1 px-3 pt-4 sm:px-4">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-ink-soft">{g.overall}</p>
-          <p className="font-display text-3xl font-bold tabular-nums text-ink" data-testid="grades-overall">
-            {overall ?? "—"}
-          </p>
+      {looksLikeModuleGrades(block, r) && (
+        <div
+          className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2 text-sm text-ink-soft sm:px-4"
+          data-testid="grades-looks-like-grades"
+        >
+          <p className="min-w-0 flex-1">{g.modules.looksLikeGrades}</p>
+          <button type="button" onClick={() => mutateBlock((b) => void (b.entry = "grade"))} className={SECONDARY}>
+            {g.modules.readAsGrades}
+          </button>
         </div>
-        <div className="min-w-0 flex-1 pb-1 text-xs text-ink-soft">
-          {summary.average === null ? (
-            <p>{g.overallNone}</p>
-          ) : (
-            <>
-              <p>
-                {r.scale.display !== "percent" && `${formatPercent(summary.average, locale)} · `}
-                {t(g.coursesCounted, { count: summary.counted, total: graded.length })}
-                {" · "}
-                {summary.weighting === "credits" ? plural(g.creditWeighted, summary.credits) : g.equalWeighted}
-              </p>
-              {summary.missingCredits.length > 0 && (
-                <p>
-                  {t(g.missingCredits, {
-                    courses: summary.missingCredits.map((k) => named.get(k) ?? k).join(", "),
-                  })}
-                </p>
-              )}
-            </>
-          )}
-        </div>
-      </section>
+      )}
 
-      <ul className="flex flex-col gap-3 px-3 py-4 sm:px-4">
-        {r.courses.map((course) => (
-          <CourseCard
-            key={course.key}
-            course={course}
-            report={r}
-            block={block}
-            whatIfOn={whatIfOn}
-            whatIfText={whatIfText}
-            fill={fillText[course.key] ?? ""}
-            setFill={(text) =>
-              setFillText((prev) => {
-                const next = { ...prev };
-                if (text.trim() === "") delete next[course.key];
-                else next[course.key] = text;
-                return next;
-              })
-            }
-            setWhatIf={(id, text) =>
-              setWhatIfText((prev) => {
-                const next = { ...prev };
-                if (text.trim() === "") delete next[id];
-                else next[id] = text;
-                return next;
-              })
-            }
-            onScore={commitScore}
-            onTarget={(target) => setTarget(course.key, target)}
-            actions={categoryActions}
-          />
-        ))}
-        {r.courses.length === 0 && <li className="text-sm text-ink-soft">{g.noItems}</li>}
-      </ul>
+      {gradeEntry && moduleReport ? (
+        <ModuleGrades
+          report={moduleReport}
+          targetGrade={block.targetGrade}
+          whatIfOn={whatIfOn}
+          whatIfText={whatIfText}
+          setWhatIf={(id, text) =>
+            setWhatIfText((prev) => {
+              const next = { ...prev };
+              if (text.trim() === "") delete next[id];
+              else next[id] = text;
+              return next;
+            })
+          }
+          onGrade={commitGrade}
+          onTarget={(target) =>
+            mutateBlock((b) => {
+              if (target === null) delete b.targetGrade;
+              else b.targetGrade = target;
+            })
+          }
+        />
+      ) : (
+        <>
+          {/* Overall */}
+          <section aria-label={g.overall} className="flex flex-wrap items-end gap-x-4 gap-y-1 px-3 pt-4 sm:px-4">
+            <div>
+              <p className="text-xs font-semibold text-ink-soft">{g.overall}</p>
+              <p className="font-display text-3xl font-bold tabular-nums text-ink" data-testid="grades-overall">
+                {overall ?? "—"}
+              </p>
+            </div>
+            <div className="min-w-0 flex-1 pb-1 text-xs text-ink-soft">
+              {summary.average === null ? (
+                <p>{g.overallNone}</p>
+              ) : (
+                <>
+                  <p>
+                    {r.scale.display !== "percent" && `${formatPercent(summary.average, locale)} · `}
+                    {t(g.coursesCounted, { count: summary.counted, total: graded.length })}
+                    {" · "}
+                    {summary.weighting === "credits" ? plural(g.creditWeighted, summary.credits) : g.equalWeighted}
+                  </p>
+                  {summary.missingCredits.length > 0 && (
+                    <p>
+                      {t(g.missingCredits, {
+                        courses: summary.missingCredits.map((k) => named.get(k) ?? k).join(", "),
+                      })}
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+          </section>
+
+          <ul className="flex flex-col gap-3 px-3 py-4 sm:px-4">
+            {r.courses.map((course) => (
+              <CourseCard
+                key={course.key}
+                course={course}
+                report={r}
+                block={block}
+                whatIfOn={whatIfOn}
+                whatIfText={whatIfText}
+                fill={fillText[course.key] ?? ""}
+                setFill={(text) =>
+                  setFillText((prev) => {
+                    const next = { ...prev };
+                    if (text.trim() === "") delete next[course.key];
+                    else next[course.key] = text;
+                    return next;
+                  })
+                }
+                setWhatIf={(id, text) =>
+                  setWhatIfText((prev) => {
+                    const next = { ...prev };
+                    if (text.trim() === "") delete next[id];
+                    else next[id] = text;
+                    return next;
+                  })
+                }
+                onScore={commitScore}
+                onTarget={(target) => setTarget(course.key, target)}
+                actions={categoryActions}
+              />
+            ))}
+            {r.courses.length === 0 && <li className="text-sm text-ink-soft">{g.noItems}</li>}
+          </ul>
+        </>
+      )}
 
       <p role="status" aria-live="polite" className="px-3 pb-3 text-xs text-ink-soft empty:hidden sm:px-4">
         {notice}
@@ -632,7 +720,7 @@ function CourseCard({
 
         {categorized && !editing && (
           <section aria-label={c.title} className="flex flex-col gap-2" data-testid="grades-breakdown">
-            <h4 className="text-xs font-semibold uppercase tracking-wide text-ink-soft">{c.title}</h4>
+            <h4 className="text-xs font-semibold text-ink-soft">{c.title}</h4>
             <ul className="flex flex-col divide-y divide-line rounded-lg border border-line bg-card">
               {course.categories.map((cat) => {
                 const res = resultOf.get(cat.id);
@@ -786,7 +874,7 @@ function CourseCard({
                   value={fill}
                   aria-label={t(g.fillRestAria, { course: label })}
                   onChange={(e) => setFill(e.target.value)}
-                  className="h-11 w-20 rounded-lg border border-dashed border-lime bg-paper px-2 text-end font-mono text-sm text-ink outline-none focus:ring-2 focus:ring-lime/30"
+                  className="h-11 w-20 rounded-lg border border-dashed border-lime-deep bg-paper px-2 text-end font-mono text-sm text-ink outline-none focus:ring-2 focus:ring-lime-deep/30"
                 />
                 %
               </span>
@@ -795,7 +883,7 @@ function CourseCard({
           {sections.map((section) => (
             <div key={section.key}>
               {section.title && (
-                <p className="border-b border-line bg-hover/40 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-ink-soft">
+                <p className="border-b border-line bg-hover/40 px-3 py-1.5 text-xs font-semibold text-ink-soft">
                   {section.title}
                 </p>
               )}
@@ -827,7 +915,7 @@ function CourseCard({
                             placeholder="—"
                             aria-label={t(g.whatIfAria, { item: name })}
                             onChange={(e) => setWhatIf(item.id, e.target.value)}
-                            className="h-11 w-20 rounded-lg border border-dashed border-lime bg-paper px-2 text-end font-mono text-sm text-ink outline-none focus:ring-2 focus:ring-lime/30"
+                            className="h-11 w-20 rounded-lg border border-dashed border-lime-deep bg-paper px-2 text-end font-mono text-sm text-ink outline-none focus:ring-2 focus:ring-lime-deep/30"
                           />
                           <span className="text-sm text-ink-soft">%</span>
                         </span>

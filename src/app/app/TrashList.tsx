@@ -65,7 +65,9 @@ export function TrashList({ items }: { items: TrashItem[] }) {
                   <p dir="auto" className="truncate text-sm font-semibold text-ink">{item.name}</p>
                   <p className="font-mono text-[11px] text-ink-faint">
                     {t(S.purgeOn, {
-                      date: new Date(item.purgeAt).toLocaleDateString(locale, { dateStyle: "medium" }),
+                      // A fixed zone: the server's and the browser's local
+                      // days can differ, and the two renders must match.
+                      date: new Date(item.purgeAt).toLocaleDateString(locale, { dateStyle: "medium", timeZone: "UTC" }),
                     })}
                   </p>
                 </div>

@@ -260,6 +260,22 @@ describe("time zones and all-day dates around midnight", () => {
     expect(new Date(winter).toISOString()).toBe("2026-12-02T04:59:00.000Z");
   });
 
+  // Review round 4: east of UTC a time in a gap moved backward (onto the
+  // previous day where the change is at midnight) and a repeated time took
+  // the later of the two.
+  it("moves a missing time forward and takes the earlier of a repeated time, east of UTC too", () => {
+    const at = (zone: string, month: number, day: number, hour: number, minute: number) =>
+      new Date(wallTimeToUtc({ year: 2026, month, day, hour, minute, second: 0 }, { zone })).toISOString();
+    // Beirut and Cairo skip midnight to 01:00: the deadline stays on its own day.
+    expect(at("Asia/Beirut", 3, 29, 0, 30)).toBe("2026-03-28T22:30:00.000Z"); // 01:30 EEST on the 29th
+    expect(at("Africa/Cairo", 4, 24, 0, 15)).toBe("2026-04-23T22:15:00.000Z"); // 01:15 EEST on the 24th
+    // Berlin: 02:30 does not exist on 29 March (03:30 CEST) and occurs twice on 25 October.
+    expect(at("Europe/Berlin", 3, 29, 2, 30)).toBe("2026-03-29T01:30:00.000Z");
+    expect(at("Europe/Berlin", 10, 25, 2, 30)).toBe("2026-10-25T00:30:00.000Z"); // the CEST one
+    // West of UTC the repeated hour also takes the earlier (EDT) time.
+    expect(at("America/New_York", 11, 1, 1, 30)).toBe("2026-11-01T05:30:00.000Z");
+  });
+
   it("a TZID deadline at 23:30 stays on its day for students in that zone, not for students east of it", () => {
     const feed = read(cal(vevent("UID:z", "SUMMARY:Late lab", "DTSTART;TZID=America/Los_Angeles:20261120T233000")));
     const late = byTitle(feed, "Late lab");

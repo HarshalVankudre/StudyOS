@@ -67,3 +67,7 @@ next-env.d.ts
 
 # The documented variable list is committed (names only, no values).
 !.env.example
+
+# Anthropic's typefaces: local only, shipping them needs a licence (see globals.css)
+public/fonts/anthropic
+

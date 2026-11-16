@@ -13,6 +13,7 @@ import {
   type GradeNote,
   type ScaleDefinition,
 } from "@/lib/grades";
+import { formatGermanGrade, type GermanAverage, type GermanNeeded } from "@/lib/grades/german";
 
 type T = (template: string, vars?: Record<string, string | number>) => string;
 type G = Dictionary["grades"];
@@ -80,6 +81,67 @@ export function outlookText(
         target: goal,
         short: formatPercent(target - o.final, locale),
       });
+  }
+}
+
+type E = Dictionary["tools"]["gradeCalculator"]["ects"];
+
+/**
+ * The German grade average's answer to "what do my open modules need?", as
+ * the free calculator and the module-grade tracker both say it. `counted`
+ * is how many modules take part; `target` the target average or null.
+ */
+export function germanOutlookText(
+  average: Pick<GermanAverage, "openEcts">,
+  needed: GermanNeeded | null,
+  target: number | null,
+  counted: number,
+  locale: string,
+  e: E,
+  t: T,
+): string {
+  if (counted === 0) return e.empty;
+  if (!needed) return e.outlook.pick;
+  const grade = (n: number) => formatGermanGrade(n, locale);
+  const credits = (n: number) => new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }).format(n);
+  const goal = target === null ? "" : grade(target);
+  switch (needed.kind) {
+    case "needed":
+      return t(e.outlook.needed, { target: goal, grade: grade(needed.grade), open: credits(average.openEcts) });
+    case "secured":
+      return t(e.outlook.secured, { target: goal });
+    case "unreachable":
+      return t(e.outlook.unreachable, { target: goal, best: grade(needed.best) });
+    case "missingEcts":
+      return t(e.outlook.missingEcts, { count: needed.count });
+    case "complete":
+      return needed.shown === null
+        ? e.outlook.nonePassed
+        : t(needed.reached ? e.outlook.met : e.outlook.missed, { average: grade(needed.shown), target: goal });
+    default:
+      return e.empty;
+  }
+}
+
+/** The short answer in the "needed in open modules" tile ("2,3", "Secured", "—"). */
+export function germanNeededValue(
+  needed: GermanNeeded | null,
+  counted: number,
+  locale: string,
+  calc: Dictionary["tools"]["gradeCalculator"],
+): string {
+  if (counted === 0 || !needed) return "—";
+  switch (needed.kind) {
+    case "needed":
+      return formatGermanGrade(needed.grade, locale);
+    case "secured":
+      return calc.securedValue;
+    case "unreachable":
+      return calc.unreachableValue;
+    case "complete":
+      return needed.shown === null ? "—" : needed.reached ? calc.metValue : calc.missedValue;
+    default:
+      return "—";
   }
 }
 

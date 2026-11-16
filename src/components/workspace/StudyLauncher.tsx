@@ -161,7 +161,7 @@ export function StudyLauncher() {
       {dueCount > 0 && (
         <button
           onClick={() => (catchUp ? setHubOpen(true) : start("review"))}
-          className="flex min-h-11 items-center gap-1.5 rounded-md border border-lime bg-lime-faint px-2 text-xs font-semibold text-ink transition hover:bg-lime/20 sm:min-h-0 sm:px-3 sm:py-1.5"
+          className="flex min-h-11 items-center gap-1.5 rounded-md border border-lime-deep bg-lime-faint px-2 text-xs font-semibold text-ink transition hover:bg-lime/20 sm:min-h-0 sm:px-3 sm:py-1.5"
         >
           <Layers className="size-4" aria-hidden />
           {t(S.dueAcrossWorkspace, { count: dueCount })}
@@ -190,7 +190,7 @@ export function StudyLauncher() {
               {dueCount > 0 && !catchUp && (
                 <button
                   onClick={() => start("review")}
-                  className="flex min-h-12 flex-1 items-center justify-center gap-2 rounded-lg bg-lime px-4 text-sm font-semibold text-lime-on transition hover:bg-lime-deep"
+                  className="flex min-h-12 flex-1 items-center justify-center gap-2 rounded-lg bg-lime px-4 text-sm font-semibold text-lime-on transition hover:bg-lime-hover"
                 >
                   <Play className="size-4" aria-hidden />
                   {t(T.reviewAllDecks, { count: dueCount })}

@@ -59,7 +59,7 @@ export function TargetPicker({
       aria-label={label}
       value={value === null ? "" : String(value)}
       onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}
-      className="h-11 w-full min-w-0 rounded-lg border border-line-strong bg-paper px-2 text-sm text-ink outline-none focus:border-lime focus:ring-2 focus:ring-lime/30 sm:w-auto"
+      className="h-11 w-full min-w-0 rounded-lg border border-line-strong bg-paper px-2 text-sm text-ink outline-none focus:border-lime-deep focus:ring-2 focus:ring-lime-deep/30 sm:w-auto"
     >
       <option value="">{inheritedLabel ?? g.noTarget}</option>
       {value !== null && !matches && <option value={String(value)}>{formatPercent(value, locale)}</option>}

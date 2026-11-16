@@ -8,6 +8,12 @@ export const OPEN_SHORTCUTS_EVENT = "studyos:open-shortcuts";
 export const OPEN_STUDY_HUB_EVENT = "studyos:open-study-hub";
 export const SHOW_GETTING_STARTED_EVENT = "studyos:show-getting-started";
 export const OPEN_EXPORT_EVENT = "studyos:open-export";
+/** Opens the focus timer (FocusTimerProvider, in the /app layout). */
+export const START_FOCUS_EVENT = "studyos:start-focus";
+/** The "Send feedback" dialog (FeedbackHost, in the /app layout). */
+export const OPEN_FEEDBACK_EVENT = "studyos:open-feedback";
+/** The "Import from Notion" dialog (NotionImportHost, in the /app layout). */
+export const OPEN_NOTION_IMPORT_EVENT = "studyos:open-notion-import";
 
 export function emit(name: string) {
   window.dispatchEvent(new Event(name));

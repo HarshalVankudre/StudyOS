@@ -464,6 +464,8 @@ export interface GradesColumns {
   weight?: string | null;
   /** date: when the work is due. */
   due?: string | null;
+  /** number: the module's credits (ECTS, "LP"); read in module-grade entry. */
+  credits?: string | null;
 }
 
 export type GradeScalePreset = "percent" | "us_letter" | "us_gpa" | "uk_degree" | "de_grade";
@@ -496,6 +498,16 @@ export interface GradesBlock extends BaseBlock {
   targets?: Record<string, number>;
   /** Target percentage for courses without their own. */
   defaultTarget?: number;
+  /**
+   * How grades are entered. "percent" (the default): weighted work scored in
+   * percent or points, mapped to the scale. "grade": every row is a module
+   * and its score cell holds the German grade itself (1,0 to 5,0), averaged
+   * by credits (the Notenschnitt). "grade" only applies with `scale:
+   * "de_grade"`; with any other scale the block reads percentages as before.
+   */
+  entry?: "percent" | "grade";
+  /** Module-grade entry: the target average, a German grade (2.0). */
+  targetGrade?: number;
 }
 
 /** Discriminated union of every block kind (switch on `block.type`). */

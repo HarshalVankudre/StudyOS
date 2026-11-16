@@ -11,10 +11,13 @@ import type {
   DatabaseRow,
   Workspace,
 } from "@/lib/workspace/types";
+import { pageForDatabase } from "@/lib/workspace/deep-link";
 import { titleProperty } from "@/lib/workspace/helpers";
-import { isDayKey } from "@/lib/workspace/view-logic";
+import { completionField, isDayKey, isRowComplete } from "@/lib/workspace/view-logic";
 import { findRow } from "@/lib/workspace/row-lookup";
 import { matchCategory } from "@/lib/grades/categories";
+import { isCreditsColumnName, rowCredits } from "@/lib/grades/workspace";
+import type { PlanTarget } from "./types";
 
 const MAX_TEXT = 180;
 
@@ -91,8 +94,60 @@ const EXAM_WORDS = [
   "امتحان", "اختبار", "الامتحان", "الاختبار",
 ];
 
-/** Words that never make a row an exam even when combined ("test plan", "final draft"). */
-const NOT_EXAM_WORDS = ["draft", "entwurf", "borrador", "brouillon", "bozza", "rascunho", "concept"];
+/**
+ * Words that never make a row an exam even when combined ("test plan", "final
+ * draft"). A "Prüfungsvorleistung" is the coursework that admits a student to
+ * the exam (problem sets, a lab), not the exam itself.
+ */
+const NOT_EXAM_WORDS = ["draft", "entwurf", "borrador", "brouillon", "bozza", "rascunho", "concept", "vorleistung"];
+
+/**
+ * Exams that decide (most of) a module, the German way: one Klausur or oral
+ * exam at the end of the semester is the whole module grade. Practice and
+ * mock exams are not ("Probeklausur").
+ */
+const MODULE_EXAM_WORDS = [
+  "klausur", "modulprüfung", "modulabschlussprüfung", "staatsexamen", "abschlussprüfung",
+  "mündliche prüfung",
+];
+const PRACTICE_EXAM_WORDS = ["probeklausur", "übungsklausur", "testklausur", "zwischenklausur"];
+
+/**
+ * Administrative deadlines (German "Fristen"): exam registration and
+ * deregistration, re-registration and the semester fee, enrolment,
+ * applications, BAföG. Minutes of work that cannot be made up afterwards
+ * (a missed registration window costs a semester), so the plan treats them as
+ * one short thing to finish, never as coursework or exam prep.
+ *
+ * Stems match inside a word ("Prüfungsanmeldung", "Abmeldefrist",
+ * "Klausuranmeldung"); `FORMALITY_WORDS` must be the whole word. Generic
+ * words ("Frist", "deadline") are not here: "Abgabefrist Hausarbeit" is
+ * coursework. A "Prüfungsvorleistung" is coursework too.
+ */
+const FORMALITY_STEMS = [
+  // de
+  "anmeld", "abmeld", "rückmeld", "rueckmeld", "semesterbeitrag", "semesterbeiträg", "einschreib",
+  "immatrikul", "exmatrikul", "bewerbung", "kursbelegung", "modulbelegung", "belegungsfrist", "belegfrist",
+  "bafög", "bafoeg", "zulassungsantr", "zulassungsfrist",
+  // en
+  "registration", "enrolment", "enrollment",
+  // es, fr, it, pt, nl: exam registration and enrolment
+  "inscripción", "matrícula", "inscription", "iscrizion", "inscrição", "inschrijv",
+];
+const FORMALITY_WORDS = ["register", "deregister", "enrol", "enroll", "tuition", "zulassung", "belegung"];
+/** Two-word formalities ("semester fee", "application deadline"). */
+const FORMALITY_PAIRS: [string, string[]][] = [
+  ["semester", ["fee", "fees", "contribution"]],
+  ["application", ["deadline", "deadlines"]],
+];
+/** Words that contain a stem but are coursework ("Bewerbungsschreiben analysieren"). */
+const NOT_FORMALITY_WORDS = ["bewerbungsschreiben", "bewerbungsgespräch", "zulassungsarbeit"];
+/** Type/category labels that file a row as a formality ("Fristen", "Organisatorisches"). */
+const FORMALITY_TYPE_WORDS = [
+  "frist", "fristen", "organisatorisches", "organisatorisch", "formalität", "formalitäten", "formalitaet",
+  "formalitaeten", "verwaltung", "admin", "administrative", "administration", "formality", "formalities",
+  "paperwork",
+];
 
 const TYPE_PROPERTY_WORDS = [
   "type", "kind", "category", "tipo", "typ", "art", "catégorie", "categoria", "soort",
@@ -178,8 +233,23 @@ function optionLabel(property: DatabaseProperty, value: CellValue | undefined): 
   return ids.map((id) => property.options?.find((o) => o.id === id)?.label ?? id);
 }
 
-/** The row's due day: the first date column, preferring ones named like a deadline. */
-export function rowDueDate(database: Database, row: DatabaseRow): string | null {
+/** A date cell with a wall-clock time and no zone ("2026-11-14T09:30", "2026-11-14 09:30:00"). */
+const FLOATING_TIME = /^\d{4}-\d{2}-\d{2}[T ]([01]\d|2[0-3]):([0-5]\d)(?::[0-5]\d(?:\.\d+)?)?$/;
+
+export interface RowDue {
+  /** Calendar day, YYYY-MM-DD. */
+  day: string;
+  /**
+   * The time written with the date ("09:30"), when the cell holds one without
+   * a zone (the student's own clock, as written). A time with a zone is not
+   * read: its day is already taken as written, like everywhere else. Midnight
+   * reads as no time, the way date pickers store a plain day.
+   */
+  time: string | null;
+}
+
+/** The row's due day (and time, if written): the first date column, preferring ones named like a deadline. */
+export function rowDue(database: Database, row: DatabaseRow): RowDue | null {
   const dates = sortPreferred(
     database.properties.filter((p) => p.type === "date"),
     DUE_PROPERTY_WORDS,
@@ -189,9 +259,17 @@ export function rowDueDate(database: Database, row: DatabaseRow): string | null 
     if (typeof value !== "string") continue;
     // Tolerate a full ISO timestamp by taking its calendar day.
     const day = value.slice(0, 10);
-    if (isDayKey(day)) return day;
+    if (!isDayKey(day)) continue;
+    const clock = FLOATING_TIME.exec(value);
+    const time = clock ? `${clock[1]}:${clock[2]}` : null;
+    return { day, time: time === "00:00" ? null : time };
   }
   return null;
+}
+
+/** The row's due day: the first date column, preferring ones named like a deadline. */
+export function rowDueDate(database: Database, row: DatabaseRow): string | null {
+  return rowDue(database, row)?.day ?? null;
 }
 
 /** The row's name: its title column, else the first text column with a value. */
@@ -219,9 +297,9 @@ export function rowWeight(database: Database, row: DatabaseRow): number | null {
   if (!property) return null;
   const value = row.cells[property.id];
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return null;
-  // A weight written as a fraction (0.25) means 25%.
-  const percent = value <= 1 ? value * 100 : value;
-  return Math.min(100, Math.round(percent * 10) / 10);
+  // Weights are percent everywhere in the app (the grade calculator, the
+  // syllabus import, the generator): 1 is a 1 % item, never 100 %.
+  return Math.min(100, Math.round(value * 10) / 10);
 }
 
 /** Labels of the row's type/category selects (e.g. "Exam", "Homework"). */
@@ -246,11 +324,100 @@ const NON_EXAM_TYPE_WORDS = [
 
 /** A weight at or above this (percent) marks a row as a major assessment. */
 export const MAJOR_WEIGHT = 20;
+/** A weight at or above this (percent) marks the exam that decides a module. */
+export const MODULE_WEIGHT = 50;
 
 export interface ExamInfo {
   isExam: boolean;
   /** Finals, midterms and heavily weighted assessments get longer prep. */
   major: boolean;
+  /**
+   * The exam that decides (most of) a module (see `MODULE_EXAM_WORDS`):
+   * prepared over weeks, sized by `examPrepTotalMinutes`. Only present when
+   * true. A module exam is always major too.
+   */
+  module?: true;
+}
+
+/** True when a token holds one of the exam words (the `hasWord` rule, per token). */
+function isExamToken(token: string): boolean {
+  return EXAM_WORDS.some((word) =>
+    NO_SPACE_SCRIPT.test(word) || word.length >= 6 ? token.includes(word) : token === word,
+  );
+}
+
+/** What follows "Rückmeldung" when it means feedback ("Rückmeldung zum Entwurf", "Rückmeldung geben"). */
+const FEEDBACK_AFTER = ["zu", "zum", "zur", "von", "vom", "auf", "an", "geben", "einholen", "bekommen", "erhalten"];
+/** Words that make "Rückmeldung" the re-enrolment whatever follows it. */
+const SEMESTER_WORDS = ["semester", "sose", "wise", "beitrag", "hochschule", "universität", "uni"];
+
+/**
+ * German "Rückmeldung" is the re-enrolment for the next semester, and also
+ * plain feedback. It is read as feedback (coursework, not a formality) when
+ * a word that only fits feedback follows it and nothing in the title speaks
+ * of a semester: "Rückmeldung zum Entwurf", but not "Rückmeldung zum
+ * Sommersemester".
+ */
+function isFeedbackRueckmeldung(toks: string[], i: number): boolean {
+  if (!/r(ü|ue)ckmeld/.test(toks[i])) return false;
+  const next = toks[i + 1];
+  if (next === undefined || !FEEDBACK_AFTER.includes(next)) return false;
+  return !toks.some((token) => SEMESTER_WORDS.some((word) => token.includes(word)));
+}
+
+/** True when the token at `i` names a formality (alone or with the next token). */
+function isFormalityToken(toks: string[], i: number): boolean {
+  const token = toks[i];
+  if (NOT_FORMALITY_WORDS.some((word) => token.startsWith(word))) return false;
+  if (FORMALITY_WORDS.includes(token)) return true;
+  if (isFeedbackRueckmeldung(toks, i)) return false;
+  if (FORMALITY_STEMS.some((stem) => token.includes(stem))) return true;
+  const next = toks[i + 1];
+  return next !== undefined && FORMALITY_PAIRS.some(([first, seconds]) => token === first && seconds.includes(next));
+}
+
+/**
+ * Whether a title names an administrative deadline rather than the exam or
+ * work it mentions. A title is about its first noun, and a compound about its
+ * last part: German "Prüfungsanmeldung" and "Klausuranmeldung" are
+ * registrations, "Anmeldung Klausur Analysis" too, but "Klausur Mathe
+ * (Anmeldung bis 15.1.)" is the exam. English writes the compound as separate
+ * words ("Exam registration closes"). So: take the first run of consecutive
+ * words that name an exam or a formality, within the first part of the
+ * title that names one (parts end at a comma, colon, bracket, slash or a
+ * spaced dash); the title is a formality when any word of that run names
+ * one. "Register for final exam" (run: "register"), "Final exam
+ * registration" and "Klausur-Anmeldung" (run: both) are formalities; "Final
+ * exam, register by Friday" (run: "final exam") is the exam.
+ */
+export function titleIsFormality(title: string): boolean {
+  for (const part of title.split(/[,;:()[\]{}/|]|\s[-–—]\s/)) {
+    const toks = tokens(part);
+    const marks = toks.map((token, i) => (isFormalityToken(toks, i) ? 2 : isExamToken(token) ? 1 : 0));
+    const start = marks.findIndex((mark) => mark > 0);
+    if (start < 0) continue;
+    for (let i = start; i < marks.length && marks[i] > 0; i += 1) {
+      if (marks[i] === 2) return true;
+    }
+    return false;
+  }
+  return false;
+}
+
+/**
+ * Whether a row is an administrative deadline (see `FORMALITY_STEMS`): its
+ * type/category says so ("Fristen", "Organisatorisches", "Anmeldung"), or its
+ * title does (`titleIsFormality`). A type naming a formality wins over the
+ * title; a title naming one wins over a type naming other work, since the
+ * student wrote exactly what it is ("Prüfungsanmeldung", filed under "Klausur").
+ */
+export function isFormality(database: Database, row: DatabaseRow, title: string): boolean {
+  const labels = rowTypeLabels(database, row);
+  const byType = labels.some((label) => {
+    const toks = tokens(label);
+    return toks.some((token, i) => FORMALITY_TYPE_WORDS.includes(token) || isFormalityToken(toks, i));
+  });
+  return byType || titleIsFormality(title);
 }
 
 /**
@@ -283,6 +450,8 @@ export function classifyExam(
   title: string,
   weight: number | null,
 ): ExamInfo {
+  // An exam registration is a deadline about an exam, never the exam.
+  if (isFormality(database, row, title)) return { isExam: false, major: false };
   const labels = rowTypeLabels(database, row);
   const byType = labels.some((label) => hasWord(label, EXAM_WORDS));
   // A type the student (or the generator) set that names other work
@@ -296,7 +465,18 @@ export function classifyExam(
   const heavy = weight !== null && weight >= MAJOR_WEIGHT;
   const isExam = byType || byTitle || byScheme || (heavy && !otherType);
   const finalWords = ["final", "finals", "midterm", "midterms", "期末", "期中", "abschlussprüfung", "examen final"];
-  return { isExam, major: isExam && (heavy || hasWord(title, finalWords)) };
+  // The exam that decides a module: half the grade or more, German module
+  // wording, or a preparation time the student wrote down themselves.
+  const decidesModule =
+    isExam &&
+    ((weight !== null && weight >= MODULE_WEIGHT) ||
+      (hasWord([title, ...labels].join(" "), MODULE_EXAM_WORDS) && !hasWord(title, PRACTICE_EXAM_WORDS)) ||
+      rowEstimateMinutes(database, row) !== null);
+  return {
+    isExam,
+    major: isExam && (decidesModule || heavy || hasWord(title, finalWords)),
+    ...(decidesModule ? { module: true as const } : {}),
+  };
 }
 
 /** The course a row belongs to: a course/subject select or relation, if any. */
@@ -319,10 +499,35 @@ export function rowCourse(workspace: Workspace, database: Database, row: Databas
   return null;
 }
 
+/** Minutes an administrative deadline takes (a registration, a transfer). */
+export const FORMALITY_MINUTES = 10;
+
 /**
- * Estimated total minutes of work for a row: an estimate column when the
- * student keeps one, else a rough class by title (projects and essays take
- * longer than readings). Heavily weighted work gets more time.
+ * The student's own estimate for a row, in minutes, from a number column
+ * named like an estimate ("Aufwand", "Lernaufwand", "Stunden", "Estimate
+ * (hours)"; hours when the name says so), or null when there is none. Weight
+ * and credit columns ("Credit hours", "ECTS") are not estimates.
+ */
+export function rowEstimateMinutes(database: Database, row: DatabaseRow): number | null {
+  const estimate = database.properties.find(
+    (p) =>
+      p.type === "number" &&
+      hasWord(p.name, ESTIMATE_WORDS) &&
+      !hasWord(p.name, WEIGHT_WORDS) &&
+      !isCreditsColumnName(p.name),
+  );
+  if (!estimate) return null;
+  const value = row.cells[estimate.id];
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return null;
+  const hours = hasWord(estimate.name, HOUR_WORDS);
+  return Math.min(6_000, Math.max(1, Math.round(hours ? value * 60 : value)));
+}
+
+/**
+ * Estimated total minutes of work for a row: a fixed few minutes for a
+ * formality, an estimate column when the student keeps one, else a rough
+ * class by title (projects and essays take longer than readings). Heavily
+ * weighted work gets more time.
  */
 export function estimateEffortMinutes(
   database: Database,
@@ -330,25 +535,127 @@ export function estimateEffortMinutes(
   title: string,
   weight: number | null,
 ): number {
-  const estimate = database.properties.find(
-    (p) => p.type === "number" && hasWord(p.name, ESTIMATE_WORDS) && !hasWord(p.name, WEIGHT_WORDS),
-  );
-  if (estimate) {
-    const value = row.cells[estimate.id];
-    if (typeof value === "number" && Number.isFinite(value) && value > 0) {
-      const hours = hasWord(estimate.name, HOUR_WORDS);
-      return Math.min(6_000, Math.round(hours ? value * 60 : value));
-    }
-  }
+  // A formality takes minutes, whatever else the row says.
+  if (isFormality(database, row, title)) return FORMALITY_MINUTES;
+  const estimate = rowEstimateMinutes(database, row);
+  if (estimate !== null) return estimate;
   const text = [title, ...rowTypeLabels(database, row)].join(" ");
   const base = EFFORT_CLASSES.find((c) => hasWord(text, c.words))?.minutes ?? DEFAULT_EFFORT;
   return weight !== null && weight >= MAJOR_WEIGHT ? Math.round(base * 1.5) : base;
 }
 
-/** Total prep minutes for an exam, spread over the days before it. */
+/** A row with a due date and a name, read the way the daily plan reads it. */
+export interface DatedRow {
+  row: DatabaseRow;
+  /** Due day, YYYY-MM-DD. */
+  due: string;
+  /** Time written with the due date ("09:30"), when there is one (see `RowDue`). */
+  time: string | null;
+  title: string;
+  /** Grade weight in percent, when known. */
+  weight: number | null;
+  exam: ExamInfo;
+  /** An administrative deadline (`isFormality`): never an exam, a few minutes to finish. */
+  formality: boolean;
+  /** The row is marked done (only ever true with `includeDone`). */
+  done: boolean;
+  /** The exact row, for a deep link (workspaceHref). */
+  target: PlanTarget;
+  /** `workspace:database:row`. */
+  ledgerKey: string;
+}
+
+/**
+ * Every row of `database` that has a due date and a name, with its title,
+ * weight and exam reading: the one reading of dated coursework that the
+ * daily plan and the agenda share, so the two always agree on what is due
+ * when and what is an exam. Rows marked done are left out unless
+ * `includeDone`. `weightOf` (the grades module) overrides the row's own
+ * weight column when it returns a number.
+ */
+export function datedRows(
+  workspace: Workspace,
+  database: Database,
+  options: {
+    weightOf?: (workspace: Workspace, database: Database, row: DatabaseRow) => number | null | undefined;
+    includeDone?: boolean;
+  } = {},
+): DatedRow[] {
+  if (!database.properties.some((p) => p.type === "date")) return [];
+  const field = completionField(database);
+  const pageId = pageForDatabase(workspace, database.id);
+  const out: DatedRow[] = [];
+  for (const row of database.rows) {
+    const done = isRowComplete(database, row, field);
+    if (done && !options.includeDone) continue;
+    const due = rowDue(database, row);
+    if (!due) continue;
+    const title = rowTitle(database, row) ?? cleanText(database.name);
+    if (!title) continue;
+    const weight = options.weightOf?.(workspace, database, row) ?? rowWeight(database, row);
+    out.push({
+      row,
+      due: due.day,
+      time: due.time,
+      title,
+      weight,
+      exam: classifyExam(database, row, title, weight),
+      formality: isFormality(database, row, title),
+      done,
+      target: {
+        workspaceId: workspace.id,
+        ...(pageId ? { pageId } : {}),
+        databaseId: database.id,
+        rowId: row.id,
+      },
+      ledgerKey: `${workspace.id}:${database.id}:${row.id}`,
+    });
+  }
+  return out;
+}
+
+/** Total prep minutes for a quiz, midterm or final, spread over the days before it. */
 export function examPrepMinutes(major: boolean, weight: number | null): number {
   if (weight !== null && weight >= 35) return 480;
   return major ? 360 : 180;
+}
+
+/**
+ * Module exam preparation. German module handbooks budget about 30 hours of
+ * exam preparation ("Prüfungsvorbereitung 30 h") for a 5 ECTS module, i.e.
+ * 6 hours per credit point, within a module's 25-30 hours of work per credit.
+ * Clamped so a 1-credit module still gets real preparation and a 20-credit
+ * one does not swallow the semester break.
+ */
+export const MODULE_PREP_MINUTES_PER_CREDIT = 6 * 60;
+export const MODULE_PREP_MIN_MINUTES = 10 * 60;
+export const MODULE_PREP_MAX_MINUTES = 60 * 60;
+/** Without credits or an estimate: the handbook's 30 hours for a 5 ECTS module. */
+export const MODULE_PREP_DEFAULT_MINUTES = 30 * 60;
+
+/**
+ * Total preparation for an exam. A module exam: the student's own estimate
+ * column when the row has one, else 6 hours per ECTS credit of its course
+ * (clamped to 10-60 hours), else 30 hours. Any other exam: `examPrepMinutes`.
+ */
+export function examPrepTotalMinutes(
+  workspace: Workspace,
+  database: Database,
+  row: DatabaseRow,
+  exam: ExamInfo,
+  weight: number | null,
+): number {
+  if (!exam.module) return examPrepMinutes(exam.major, weight);
+  const estimate = rowEstimateMinutes(database, row);
+  if (estimate !== null) return estimate;
+  const credits = rowCredits(workspace, database, row);
+  if (credits !== null) {
+    return Math.min(
+      MODULE_PREP_MAX_MINUTES,
+      Math.max(MODULE_PREP_MIN_MINUTES, Math.round(credits * MODULE_PREP_MINUTES_PER_CREDIT)),
+    );
+  }
+  return MODULE_PREP_DEFAULT_MINUTES;
 }
 
 const COURSE_STOP_WORDS = new Set([

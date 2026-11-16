@@ -17,7 +17,28 @@ const target = (id: string) => ({ workspaceId: "sample", pageId: id });
 /** Today's sample plan: two items carried over from a missed day. */
 export function sampleTodayItems(S: Samples, today: string): DailyStudyPlanItem[] {
   const twoDaysAgo = shiftDay(today, -2);
+  // An exam registration closing in two days: the one item that takes
+  // minutes and cannot be made up. Shown where the dictionary names one (the
+  // German page: registration windows are a German university matter).
+  const registration: DailyStudyPlanItem[] = S.items.registration
+    ? [
+        {
+          id: "registration",
+          kind: "deadline",
+          mode: "finish",
+          title: S.items.registration,
+          workspaceName: S.workspace,
+          section: S.exams,
+          target: target("exams"),
+          minutes: 10,
+          reason: { code: "formality_soon", days: 2 },
+          dueDate: shiftDay(today, 2),
+          completed: false,
+        },
+      ]
+    : [];
   return [
+    ...registration,
     {
       id: "lab",
       kind: "deadline",
@@ -115,6 +136,24 @@ export function sampleGrade(S: Samples): SampleGrade {
     { target },
   );
   return { rows, grade, target };
+}
+
+/**
+ * A German semester for the grades sample: two modules graded, one still
+ * open, and a target average of 2,0 (a common Master's threshold).
+ */
+export function sampleGermanModules(S: Samples): {
+  modules: { name: string; ects: number; grade: number | null }[];
+  target: number;
+} {
+  return {
+    modules: [
+      { name: S.courses.bio, ects: 9, grade: 1.7 },
+      { name: S.courses.stats, ects: 6, grade: 2.3 },
+      { name: S.courses.history, ects: 6, grade: null },
+    ],
+    target: 2.0,
+  };
 }
 
 /** "Friday" in the visitor's language, `n` days from `today`. */

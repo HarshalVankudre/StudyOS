@@ -17,7 +17,8 @@
  *   Google       Free-form SUMMARY; a "[CS 101]" suffix or "CS 101: " prefix
  *                is still read as the course.
  */
-import { dayKeyOf } from "@/lib/workspace/view-logic";
+import { titleIsFormality } from "@/lib/agents/daily-study/classify";
+import { addDays, dayKeyOf } from "@/lib/workspace/view-logic";
 import {
   ICS_LIMITS,
   IcsBudgetError,
@@ -247,8 +248,13 @@ const TRAILING_BRACKET = /\s*\[([^\[\]]{1,120})\]\s*$/;
 /** "CS101", "CS 101", "CHEM-101-001", "MATH2410H" — a course-code prefix. */
 const CODE_PREFIX = /^([A-Z]{2,6}[\s_-]?\d{2,4}[A-Z]?(?:[\s_-]\d{1,4}[A-Z]?)?)\s*(?::|-|–|—|\|)\s+(.+)$/;
 
-const MOODLE_SUFFIX = /\s+(is due|is due\.|due|closes|should be completed|deadline)\s*$/i;
-const MOODLE_OPENS = /\s+(opens|is open|starts)\s*$/i;
+// Moodle writes these in the site's language. The German ones are the
+// language pack's own (mod_assign calendardue "{$a} ist fällig.", mod_quiz
+// quizeventcloses "{$a} endet" / quizeventopens "{$a} beginnt").
+const MOODLE_SUFFIX = /\s+(is due|is due\.|due|closes|should be completed|deadline|ist fällig\.?|endet)\s*$/i;
+const MOODLE_OPENS = /\s+(opens|is open|starts|beginnt)\s*$/i;
+/** German words that make a plain calendar entry a deadline ("Abgabe Hausarbeit", "Abmeldefrist"). */
+const GERMAN_DEADLINE = /(abgabe|fällig|frist|einreich)/i;
 const D2L_SUFFIX = /\s+[-–]\s+(Due|Availability Ends|End Date|Ends)\s*$/i;
 const D2L_OPENS = /\s+[-–]\s+(Availability Starts|Start Date|Starts)\s*$/i;
 
@@ -305,7 +311,9 @@ export function cleanTitle(
   if (!course && platform !== "google" && platform !== "apple" && platform !== "outlook") {
     course = extras.categories[0];
   }
-  if (role === "event" && /\b(due|deadline|submission|submit)\b/i.test(summary)) role = "deadline";
+  if (role === "event" && (/\b(due|deadline|submission|submit)\b/i.test(summary) || GERMAN_DEADLINE.test(summary))) {
+    role = "deadline";
+  }
   return { title: title || tidy(summary), course: course ? course.slice(0, 120) : undefined, role };
 }
 
@@ -353,6 +361,12 @@ function whenOf(time: ICalTime): FeedWhen {
     return { local: `${wallDay(w)}T${p(w.hour)}:${p(w.minute)}:${p(w.second)}` };
   }
   return { at: instantOf(time) };
+}
+
+/** The last day an event of `span` days covers (the day it closes). */
+function lastDayOf(start: ICalTime, span: number): FeedWhen {
+  if (start.kind === "date" || start.kind === "floating") return { date: addDays(wallDay(start.wall), span - 1) };
+  return { at: instantOf(start) + (span - 1) * DAY_MS };
 }
 
 // ---------------------------------------------------------------------------
@@ -426,16 +440,22 @@ function readFeedWithin(
       key = safeUid(key, secrets);
       if (series) series = safeUid(series, secrets);
     }
+    const span = c.spanDays && c.spanDays > 1 ? c.spanDays : 1;
+    // A registration or re-enrolment WINDOW ("Prüfungsanmeldung", 1 Dec to
+    // 15 Jan, as universities publish their semester dates): what a student
+    // must not miss is the day it closes, so it becomes a deadline on its
+    // last day instead of a multi-day event nobody imports.
+    const closes = span > 1 && titleIsFormality(title);
     events.push({
       key: key.slice(0, 500),
       title: title.slice(0, 300),
-      when: whenOf(occ.start),
+      when: closes ? lastDayOf(occ.start, span) : whenOf(occ.start),
       ...(link ? { link } : {}),
       ...(course ? { course } : {}),
-      role: cleaned.role,
+      role: closes ? "deadline" : cleaned.role,
       ...(series ? { series: series.slice(0, 400) } : {}),
       ...(c.completed ? { completed: true } : {}),
-      ...(c.spanDays && c.spanDays > 1 ? { days: c.spanDays } : {}),
+      ...(!closes && span > 1 ? { days: span } : {}),
     });
   }
   events.sort((a, b) => sortInstant(a.when) - sortInstant(b.when));

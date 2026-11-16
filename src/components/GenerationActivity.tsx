@@ -111,7 +111,7 @@ export function GenerationActivity({
           <div className="grid min-h-[360px] grid-cols-[150px_1fr] sm:grid-cols-[190px_1fr]">
             {/* Sidebar — pages appear as they're planned */}
             <div className="border-r border-ink/10 bg-paper/40 p-3">
-              <p className="px-2 pb-2 text-[10px] font-semibold uppercase tracking-wider text-ink-soft/60">
+              <p className="px-2 pb-2 text-[11.5px] font-semibold text-ink-soft/60">
                 {dict.genActivity.pagesLabel}
               </p>
               <div className="space-y-0.5">
@@ -315,7 +315,7 @@ function ListBuild({ cp }: { cp: ComponentProgress }) {
             key={i}
             className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 transition-all duration-500 ${
               on ? "border-ink/10 bg-card opacity-100" : "border-transparent opacity-45"
-            } ${writing ? "ring-1 ring-lime/40" : ""}`}
+            } ${writing ? "ring-1 ring-lime-deep/40" : ""}`}
           >
             <span
               className={`h-4 w-4 shrink-0 rounded transition-colors duration-500 ${

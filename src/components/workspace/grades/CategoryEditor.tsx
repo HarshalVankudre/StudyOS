@@ -7,7 +7,7 @@ import type { GradeCategory } from "@/lib/workspace/types";
 import { ScoreInput } from "./ScoreInput";
 
 const FIELD =
-  "h-11 min-w-0 rounded-lg border border-line-strong bg-paper px-2 text-sm text-ink outline-none focus:border-lime focus:ring-2 focus:ring-lime/30";
+  "h-11 min-w-0 rounded-lg border border-line-strong bg-paper px-2 text-sm text-ink outline-none focus:border-lime-deep focus:ring-2 focus:ring-lime-deep/30";
 const SECONDARY =
   "flex min-h-11 items-center gap-1.5 rounded-lg border border-line-strong bg-card px-3 text-sm font-semibold text-ink transition hover:bg-hover";
 

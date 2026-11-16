@@ -8,6 +8,9 @@ const mocks = vi.hoisted(() => ({
   workspaceDeleteMany: vi.fn(),
   chatDeleteMany: vi.fn(),
   notificationLogDeleteMany: vi.fn(),
+  errorEventDeleteMany: vi.fn(),
+  deletionReasonDeleteMany: vi.fn(),
+  contractNoticeDeleteMany: vi.fn(),
   billing: vi.fn(),
 }));
 
@@ -20,6 +23,9 @@ vi.mock("@/lib/db", () => ({
     workspace: { deleteMany: mocks.workspaceDeleteMany },
     agentChatMessage: { deleteMany: mocks.chatDeleteMany },
     notificationLog: { deleteMany: mocks.notificationLogDeleteMany },
+    errorEvent: { deleteMany: mocks.errorEventDeleteMany },
+    accountDeletionReason: { deleteMany: mocks.deletionReasonDeleteMany },
+    contractNotice: { deleteMany: mocks.contractNoticeDeleteMany },
   },
 }));
 
@@ -42,6 +48,9 @@ beforeEach(() => {
   mocks.workspaceDeleteMany.mockResolvedValue({ count: 6 });
   mocks.chatDeleteMany.mockResolvedValue({ count: 7 });
   mocks.notificationLogDeleteMany.mockResolvedValue({ count: 8 });
+  mocks.deletionReasonDeleteMany.mockResolvedValue({ count: 10 });
+  mocks.errorEventDeleteMany.mockResolvedValue({ count: 9 });
+  mocks.contractNoticeDeleteMany.mockResolvedValue({ count: 11 });
   mocks.billing.mockResolvedValue(BILLING);
 });
 
@@ -68,7 +77,9 @@ describe("data retention", () => {
     const usageCalls = mocks.usageDeleteMany.mock.calls.map((c) => c[0].where);
     // Rate-limit kinds: 7 days.
     expect(usageCalls[0]).toEqual({
-      kind: { in: [...Object.keys(USAGE_LIMITS), "data_export", "agent_free_failure"] },
+      kind: {
+        in: [...Object.keys(USAGE_LIMITS), "data_export", "agent_free_failure", "share_enable", "notification_test_email"],
+      },
       createdAt: { lt: daysBefore(7) },
     });
     // Study streak: at least 400 days are kept.
@@ -96,7 +107,24 @@ describe("data retention", () => {
       agentChatMessagesExpired: 7,
       agentChatMessagesOverCap: 4,
       notificationLogs: 8,
+      errorEvents: 9,
+      deletionReasons: 10,
+      contractNotices: 11,
       billing: BILLING,
+    });
+    // Withdrawal and cancellation notices (legal records): three years after receipt.
+    expect(RETENTION.contractNoticeDays).toBeGreaterThanOrEqual(3 * 365);
+    expect(mocks.contractNoticeDeleteMany).toHaveBeenCalledWith({
+      where: { receivedAt: { lt: daysBefore(RETENTION.contractNoticeDays) } },
+    });
+    // Why deleted accounts left (anonymous): two years.
+    expect(mocks.deletionReasonDeleteMany).toHaveBeenCalledWith({
+      where: { createdAt: { lt: daysBefore(730) } },
+    });
+    // Error counts (operator console): a kind not seen for 30 days goes.
+    expect(RETENTION.errorEventDays).toBe(30);
+    expect(mocks.errorEventDeleteMany).toHaveBeenCalledWith({
+      where: { lastSeen: { lt: daysBefore(30) } },
     });
     // Notification sent-log: kept well past the longest reminder lead (14 days).
     expect(RETENTION.notificationLogDays).toBeGreaterThan(14);

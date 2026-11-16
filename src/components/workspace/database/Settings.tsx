@@ -210,7 +210,7 @@ export function DatabaseSettings({
 
   return (
     <details data-print="hide" className="mb-3 rounded-md border border-line bg-surface">
-      <summary className="min-h-9 cursor-pointer select-none px-3 py-2.5 font-mono text-[10px] uppercase tracking-wider text-ink-soft hover:text-ink">
+      <summary className="min-h-9 cursor-pointer select-none px-3 py-2.5 text-[11.5px] text-ink-soft hover:text-ink">
         {dict.dbSettings.customize}
       </summary>
       <div className="border-t border-line p-3">
@@ -244,7 +244,7 @@ export function DatabaseSettings({
 
         <div className="mt-4">
           <div className="mb-2 flex items-center justify-between">
-            <span className="font-mono text-[10px] uppercase tracking-wider text-ink-soft">
+            <span className="text-[11.5px] text-ink-soft">
               {dict.dbSettings.fields}
             </span>
             <button onClick={addProperty} className="min-h-8 px-1 text-xs font-medium text-ink-soft hover:text-ink">
@@ -360,7 +360,7 @@ export function DatabaseSettings({
 
         <div className="mt-5">
           <div className="mb-2 flex items-center justify-between">
-            <span className="font-mono text-[10px] uppercase tracking-wider text-ink-soft">
+            <span className="text-[11.5px] text-ink-soft">
               {dict.dbSettings.views}
             </span>
             <button onClick={addView} className="min-h-8 px-1 text-xs font-medium text-ink-soft hover:text-ink">

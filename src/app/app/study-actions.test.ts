@@ -9,6 +9,7 @@ const m = vi.hoisted(() => ({
   studyDayUpdate: vi.fn(),
   studyDayFindMany: vi.fn(),
   usageEventFindMany: vi.fn(),
+  transaction: vi.fn(),
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({ auth: async () => ({ userId: m.userId }) }));
@@ -17,6 +18,7 @@ vi.mock("@/lib/db", () => ({
     workspace: { findMany: m.workspaceFindMany },
     studyDay: { upsert: m.studyDayUpsert, update: m.studyDayUpdate, findMany: m.studyDayFindMany },
     usageEvent: { findMany: m.usageEventFindMany },
+    $transaction: m.transaction,
   },
 }));
 
@@ -33,9 +35,11 @@ const row = (localDate: string, o: Partial<ReturnType<typeof zeroCounts>> = {}) 
 
 beforeEach(() => {
   m.userId = "user_1";
-  for (const fn of [m.workspaceFindMany, m.studyDayUpsert, m.studyDayUpdate, m.studyDayFindMany, m.usageEventFindMany]) {
+  for (const fn of [m.workspaceFindMany, m.studyDayUpsert, m.studyDayUpdate, m.studyDayFindMany, m.usageEventFindMany, m.transaction]) {
     fn.mockReset();
   }
+  // The array form: every write succeeds or the whole call rejects.
+  m.transaction.mockImplementation(async (ops: Promise<unknown>[]) => Promise.all(ops));
   m.workspaceFindMany.mockResolvedValue([{ id: "w1" }]);
   m.studyDayUpsert.mockResolvedValue({});
   m.studyDayFindMany.mockResolvedValue([]);
@@ -109,13 +113,28 @@ describe("recordReviewsAction", () => {
     expect(m.studyDayUpsert.mock.calls[1][0].create).toMatchObject({ reviews: 1, quizAnswers: 0 });
   });
 
-  it("falls back to an update when two tabs create the same day at once", async () => {
-    m.studyDayUpsert.mockRejectedValueOnce(new Error("Unique constraint failed"));
-    m.studyDayUpdate.mockResolvedValue({});
+  it("writes every batch in one transaction", async () => {
     expect(
-      await recordReviewsAction([{ workspaceId: "w1", localDate: utcToday, counts: counts({ reviews: 2 }) }]),
+      await recordReviewsAction([
+        { workspaceId: "w1", localDate: utcToday, counts: counts({ reviews: 2 }) },
+        { workspaceId: "w1", localDate: shiftDay(utcToday, -1), counts: counts({ reviews: 1 }) },
+      ]),
     ).toEqual({ ok: true });
-    expect(m.studyDayUpdate.mock.calls[0][0].data.reviews).toEqual({ increment: 2 });
+    expect(m.transaction).toHaveBeenCalledTimes(1);
+    expect(m.transaction.mock.calls[0][0]).toHaveLength(2);
+    expect(m.studyDayUpdate).not.toHaveBeenCalled();
+  });
+
+  it("a failed write (e.g. two tabs creating the same day) records nothing and says so, so the client retries", async () => {
+    m.transaction.mockRejectedValueOnce(new Error("Unique constraint failed"));
+    expect(
+      await recordReviewsAction([
+        { workspaceId: "w1", localDate: utcToday, counts: counts({ reviews: 2 }) },
+        { workspaceId: "w1", localDate: shiftDay(utcToday, -1), counts: counts({ reviews: 1 }) },
+      ]),
+    ).toEqual({ ok: false });
+    // No write outside the transaction: the retry cannot count anything twice.
+    expect(m.studyDayUpdate).not.toHaveBeenCalled();
   });
 });
 

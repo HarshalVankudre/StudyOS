@@ -145,6 +145,23 @@ describe("FlashcardsBlock — review session", () => {
     expect(screen.getByText(en.study.doneTitle)).toBeInTheDocument();
   });
 
+  it("answers the server did not record (ok: false) are sent again with the next batch", async () => {
+    const user = userEvent.setup();
+    setDeck([{ id: "c1", front: "Q", back: "A" }]);
+    h.recordReviewsAction.mockResolvedValueOnce({ ok: false });
+    const view = render(<Harness />);
+    await user.click(screen.getByRole("button", { name: "Study 1 due" }));
+    await user.keyboard(" ");
+    await user.keyboard("3"); // good: the learning step brings it back
+    expect(h.recordReviewsAction).toHaveBeenCalledTimes(1);
+    await user.keyboard(" ");
+    await user.keyboard("3");
+    // Leaving sends what is pending, the refused answer included.
+    view.unmount();
+    await vi.waitFor(() => expect(h.recordReviewsAction).toHaveBeenCalledTimes(2));
+    expect(h.recordReviewsAction.mock.calls[1][0][0].counts).toMatchObject({ reviews: 2 });
+  });
+
   it("closes the review session with Escape", async () => {
     const user = userEvent.setup();
     setDeck([{ id: "c1", front: "Q", back: "A" }]);

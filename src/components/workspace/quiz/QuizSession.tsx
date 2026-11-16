@@ -486,7 +486,7 @@ export function QuizSession({
             <p className="max-w-sm text-sm text-ink-soft">{Q.noPlayable}</p>
             <button
               onClick={onClose}
-              className="min-h-12 rounded-lg bg-lime px-6 text-sm font-semibold text-lime-on transition hover:bg-lime-deep"
+              className="min-h-12 rounded-lg bg-lime px-6 text-sm font-semibold text-lime-on transition hover:bg-lime-hover"
             >
               {Q.done}
             </button>
@@ -581,7 +581,7 @@ export function QuizSession({
                 )}
                 <button
                   onClick={trySubmit}
-                  className="min-h-12 flex-1 rounded-lg bg-lime px-6 text-sm font-semibold text-lime-on transition hover:bg-lime-deep"
+                  className="min-h-12 flex-1 rounded-lg bg-lime px-6 text-sm font-semibold text-lime-on transition hover:bg-lime-hover"
                 >
                   {confirmSubmit ? Q.submitAnyway : Q.submit}
                 </button>
@@ -623,7 +623,7 @@ function ExamSetup({
               onClick={() => onTimer(m)}
               className={cn(
                 "min-h-11 rounded-lg border px-2 text-sm font-semibold transition",
-                timer === m ? "border-lime bg-lime-faint text-ink" : "border-line bg-card text-ink-soft hover:bg-hover",
+                timer === m ? "border-lime-deep bg-lime-faint text-ink" : "border-line bg-card text-ink-soft hover:bg-hover",
               )}
             >
               {m === null ? Q.timerOff : t(Q.timerMinutes, { n: m })}
@@ -633,7 +633,7 @@ function ExamSetup({
       </div>
       <button
         onClick={onStart}
-        className="min-h-12 rounded-lg bg-lime px-8 text-sm font-semibold text-lime-on transition hover:bg-lime-deep"
+        className="min-h-12 rounded-lg bg-lime px-8 text-sm font-semibold text-lime-on transition hover:bg-lime-hover"
       >
         {Q.startExam}
       </button>

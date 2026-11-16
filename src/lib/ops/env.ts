@@ -19,6 +19,10 @@
  */
 import { modelForPlan } from "@/lib/ai/plans";
 import { apiKeyEnvVar, providerForModel } from "@/lib/ai/provider";
+import { checkoutConfig, isValidTaxBehavior, unreadableSwitches } from "@/lib/checkout-config";
+import { emailConfig, parseMailbox, smtpUrlProblem } from "@/lib/email/config";
+import { legalNoticeConfigured } from "@/lib/legal/operator";
+import { isPlausibleEmail } from "@/lib/site";
 
 type Env = Record<string, string | undefined>;
 
@@ -33,6 +37,7 @@ export type FeatureKey =
   | "maintenance"
   | "webFetch"
   | "notifications"
+  | "email"
   | "dev";
 
 export interface EnvVarSpec {
@@ -58,9 +63,21 @@ export const ENV_VARS: readonly EnvVarSpec[] = [
   { name: "NEXT_PUBLIC_CLERK_SIGN_UP_URL", required: false, feature: "core", secret: false, description: "Path of the sign-up page (e.g. /sign-up)." },
   { name: "NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL", required: false, feature: "core", secret: false, description: "Where Clerk sends users after sign-in." },
   { name: "NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL", required: false, feature: "core", secret: false, description: "Where Clerk sends users after sign-up." },
-  { name: "APP_URL", required: false, feature: "core", secret: false, description: "Canonical public URL (SEO, ICS links). Falls back to NEXT_PUBLIC_APP_URL, then the Cloud Run URL." },
-  { name: "NEXT_PUBLIC_APP_URL", required: false, feature: "core", secret: false, description: "Public URL fallback for APP_URL." },
+  { name: "APP_URL", required: false, feature: "core", secret: false, description: "Canonical public URL (SEO, ICS links, the links in reminder emails). Falls back to NEXT_PUBLIC_APP_URL, then the Cloud Run URL. On the app deployment it must be the APP's own origin, one that answers without a redirect: the one-click unsubscribe link of every reminder email is built from it, and mail apps post to that link without following redirects (where STUDYOS_APP_ORIGIN is set, that origin is used for email links instead)." },
+  { name: "NEXT_PUBLIC_APP_URL", required: false, feature: "core", secret: false, description: "Public URL fallback for APP_URL (the same rules apply, the email unsubscribe link included)." },
+  { name: "STUDYOS_APP_ORIGIN", required: false, feature: "core", secret: false, description: "Set ONLY on the website deployment (public pages, e.g. on Vercel): the origin of the app deployment, e.g. https://app.example.com. App-only paths are redirected there and the database and AI keys are not required (lib/ops/site-split.ts)." },
   { name: "STUDYOS_SUPPORT_EMAIL", required: false, feature: "core", secret: false, description: "Public support address shown on the landing, pricing and legal pages (lib/site.ts). Falls back to the owner's address." },
+  { name: "STUDYOS_SECURITY_EMAIL", required: false, feature: "core", secret: false, description: "Where vulnerability reports go, published in /.well-known/security.txt (lib/security-txt.ts). Falls back to STUDYOS_SUPPORT_EMAIL." },
+  { name: "STUDYOS_ADMIN_USER_IDS", required: false, feature: "core", secret: false, description: "Comma-separated Clerk user ids allowed into the operator console (/app/admin, lib/ops/admin.ts). Unset or empty = nobody; everyone else gets a 404 there." },
+  // Legal notice (/legal-notice, lib/legal/operator.ts). Public pages: set them
+  // on the website deployment too. The notice exists once name AND address are set.
+  { name: "STUDYOS_OPERATOR_NAME", required: false, feature: "core", secret: false, description: "Legal notice: the person or company operating StudyOS. With STUDYOS_OPERATOR_ADDRESS it switches /legal-notice and its footer links on (required in Germany and the EU, § 5 DDG)." },
+  { name: "STUDYOS_OPERATOR_ADDRESS", required: false, feature: "core", secret: false, description: "Legal notice: postal address of the operator, lines separated by \\n or |." },
+  { name: "STUDYOS_OPERATOR_EMAIL", required: false, feature: "core", secret: false, description: "Legal notice: contact email. Falls back to STUDYOS_SUPPORT_EMAIL." },
+  { name: "STUDYOS_OPERATOR_PHONE", required: false, feature: "core", secret: false, description: "Legal notice: phone number (optional)." },
+  { name: "STUDYOS_OPERATOR_REGISTER", required: false, feature: "core", secret: false, description: "Legal notice: commercial register entry, e.g. register court and number (optional)." },
+  { name: "STUDYOS_OPERATOR_VAT_ID", required: false, feature: "core", secret: false, description: "Legal notice: VAT identification number (optional)." },
+  { name: "STUDYOS_OPERATOR_RESPONSIBLE", required: false, feature: "core", secret: false, description: "Legal notice: person responsible for the content (optional)." },
   // AI
   { name: "OPENROUTER_API_KEY", required: "ai", feature: "ai", secret: true, description: "OpenRouter key; required when a plan model is an OpenRouter slug (the default)." },
   { name: "ANTHROPIC_API_KEY", required: "ai", feature: "ai", secret: true, description: "Anthropic key; required when a plan model is a bare claude-* id." },
@@ -69,12 +86,20 @@ export const ENV_VARS: readonly EnvVarSpec[] = [
   { name: "AGENT_FETCH_ALLOWLIST", required: false, feature: "webFetch", secret: false, description: "Comma-separated hosts the agent may read; empty = no web reading." },
   // Billing
   { name: "STRIPE_SECRET_KEY", required: false, feature: "billing", secret: true, description: "Stripe secret key; billing is disabled without it." },
-  { name: "STRIPE_PRICE_PRO", required: false, feature: "billing", secret: false, description: "Stripe price id of the Pro subscription; with billing on, the pricing page shows its amount and currency (lib/plan-pricing.ts)." },
-  { name: "STRIPE_PRICE_PRO_ANNUAL", required: false, feature: "billing", secret: false, description: "Stripe price id of annual Pro billing; annual is shown and sold only when it is set AND is an active yearly price (lib/plan-pricing.ts)." },
+  { name: "STRIPE_PRICE_PRO", required: false, feature: "billing", secret: false, description: "Stripe price id of the Pro subscription; with billing on, the pricing page shows its amount and currency (lib/plan-pricing.ts). It must be a single-currency Price (no extra currencies under currency_options): one with several is not sold, since the page shows one currency and Checkout could charge another." },
+  { name: "STRIPE_PRICE_PRO_ANNUAL", required: false, feature: "billing", secret: false, description: "Stripe price id of annual Pro billing; annual is shown and sold only when it is set AND is an active, single-currency yearly price (lib/plan-pricing.ts)." },
   { name: "STRIPE_WEBHOOK_SECRET", required: false, feature: "billing", secret: true, description: "Signing secret of the Stripe webhook (/api/stripe/webhook)." },
   { name: "STUDYOS_PRO_MONTHLY_PRICE", required: false, feature: "billing", secret: false, description: "USD a month shown for monthly Pro (default 7.99, lib/price-list.ts) only while billing is off. With billing configured the page shows what the Stripe price STRIPE_PRICE_PRO charges, in its currency (lib/plan-pricing.ts)." },
   { name: "STUDYOS_PRO_ANNUAL_PRICE", required: false, feature: "billing", secret: false, description: "USD a year shown for annual Pro (default 39.99, lib/price-list.ts) only while billing is off. With billing configured, annual Pro is shown and sold exactly when STRIPE_PRICE_PRO_ANNUAL is an active yearly Stripe price, at that price (lib/plan-pricing.ts)." },
   { name: "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY", required: false, feature: "billing", secret: false, description: "Stripe publishable key (passed as a build arg; currently unused by the client)." },
+  // Selling in the EU (lib/checkout-config.ts). Each is off until set, so an
+  // account not set up for it on Stripe is not affected. The switches take
+  // 1/true/yes/on or 0/false/no/off; any other value is off, with a warning.
+  { name: "STRIPE_PRICE_CREDIT_PACK", required: false, feature: "billing", secret: false, description: "Optional Stripe price id of the credit pack: an active, flat, one-time price in a single currency (any currency, but no extra ones under currency_options). When set, the pack's checkout charges it and every page that names the pack's price shows its amount and currency (lib/plan-pricing.ts); while it cannot be read or is not such a price, the pack is not sold. Unset: the price list's USD price (lib/price-list.ts), charged as an inline price." },
+  { name: "STRIPE_AUTOMATIC_TAX", required: false, feature: "billing", secret: false, description: "1 = Stripe Tax on both checkouts: tax from a required billing address, the address and name saved to the Stripe customer, and VAT ID collection for businesses (Stripe Tax applies the reverse charge). Set up Stripe Tax in the Dashboard first (origin address, registrations, default product tax code and default tax behavior), or checkout creation fails. Applies to new checkouts only: existing subscriptions keep their tax settings. The pricing pages then say whether prices include VAT (STRIPE_TAX_BEHAVIOR)." },
+  { name: "STRIPE_TAX_BEHAVIOR", required: false, feature: "billing", secret: false, description: "inclusive (default, the EU consumer norm: the price shown is the price paid) or exclusive (tax added at checkout). With STRIPE_AUTOMATIC_TAX on it sets the tax behavior of the credit pack's inline price and what the pricing pages say about VAT. A Stripe Price (STRIPE_PRICE_PRO, STRIPE_PRICE_PRO_ANNUAL, STRIPE_PRICE_CREDIT_PACK) must come out the same: its own tax behavior, or, when it has none, the default tax behavior of the Stripe Tax settings (inferred_by_currency counts as unknown). A Price that differs, or whose behavior cannot be told, is not sold, and this is reported once (lib/plan-pricing.ts)." },
+  { name: "STRIPE_PACK_INVOICES", required: false, feature: "billing", secret: false, description: "1 = an invoice (a PDF showing the tax) for every credit pack bought, through invoice_creation on its checkout (Stripe may charge an invoicing fee for these). With STRIPE_TERMS_CONSENT on, packs get an invoice whatever this says (it carries the consent confirmation). Subscriptions produce invoices anyway. The pack is still granted from the checkout; its invoice's invoice.paid event changes nothing." },
+  { name: "STRIPE_TERMS_CONSENT", required: false, feature: "billing", secret: false, description: "1 = buyers must tick a Terms checkbox on both checkouts. Its text, in the student's language (dictionaries, checkout.termsPack / termsPro), links /terms, asks StudyOS to start at once and acknowledges the EU/UK right of withdrawal: for a credit pack it ends once the credits are added to the balance; for Pro, withdrawing within 14 days means paying for the share already provided, and the right ends once the service is fully provided. For a credit pack the confirmation goes out on a durable medium: every pack then gets an invoice whose footer repeats the consent (even without STRIPE_PACK_INVOICES), and the payment's description, printed on Stripe's receipt, says it in short. The buyer receives them only while Stripe's customer emails for successful payments (and paid invoices) are on (Dashboard, Settings, Customer emails). Stripe requires the Terms of service URL in the Dashboard (Settings, Public details) or checkout creation fails; /terms must state the same withdrawal rules." },
   // Assets + sandbox
   { name: "DEPLOYMENT_VERSION", required: false, feature: "core", secret: false, description: "Build-time only (a Docker build arg; Cloud Build passes its build id): the id of this build, so a browser tab still running the previous one is recognised during a rolling deploy (next.config.ts deploymentId)." },
   { name: "ASSETS_BUCKET", required: false, feature: "assets", secret: false, description: "GCS bucket for rendered images; required by the sandbox feature and account deletion of asset bytes." },
@@ -89,7 +114,15 @@ export const ENV_VARS: readonly EnvVarSpec[] = [
   { name: "VAPID_PUBLIC_KEY", required: false, feature: "notifications", secret: false, description: "Web Push VAPID public key (base64url, 65 bytes). With the private key and subject it switches notifications on; generate the pair once (see .env.example)." },
   { name: "VAPID_PRIVATE_KEY", required: false, feature: "notifications", secret: true, description: "Web Push VAPID private key (base64url, 32 bytes). Changing the pair makes every device re-subscribe the next time the student opens StudyOS." },
   { name: "VAPID_SUBJECT", required: false, feature: "notifications", secret: false, description: "Contact for push services: mailto:address or an https URL (Apple rejects pushes without one)." },
+  // Email reminders (lib/email): plain SMTP, so any provider works. Both set = on.
+  { name: "SMTP_URL", required: false, feature: "email", secret: true, description: "SMTP server for email reminders, with its login: smtps://user:password@smtp.example.com:465 (TLS from the start) or smtp://user:password@smtp.example.com:587 (STARTTLS, required except on localhost). Any provider with SMTP works (Postmark, Brevo, Amazon SES, Resend, Mailgun, ...). Percent-encode special characters in the user and password (@ is %40, : is %3A, / is %2F); a password with an unencoded /, +, % or @ is still read as written. With MAIL_FROM it switches email reminders on; students opt in in Settings." },
+  { name: "MAIL_FROM", required: false, feature: "email", secret: false, description: "Sender of email reminders, e.g. StudyOS <hello@example.com>. Set up SPF, DKIM and DMARC for its domain with your provider, or the emails land in spam." },
+  { name: "MAIL_REPLY_TO", required: false, feature: "email", secret: false, description: "Optional Reply-To of email reminders. Defaults to the MAIL_FROM address. (Unsubscribing is by the one-click HTTPS link only, never by mail to this address.)" },
+  { name: "UNSUBSCRIBE_SECRET", required: false, feature: "email", secret: true, description: "Optional secret (any long random string, 32+ characters) that signs the one-click unsubscribe links of reminder emails (lib/email/unsubscribe.ts). Without it they are signed with a key derived from CLERK_SECRET_KEY, so rotating the Clerk key would break the links in emails already sent; with it, the Clerk key can rotate freely. Links signed with the Clerk-derived key keep working after it is set (as long as the Clerk key is unchanged). To rotate it, move the old value to UNSUBSCRIBE_SECRET_PREVIOUS and set a new one: links signed with either keep working." },
+  { name: "UNSUBSCRIBE_SECRET_PREVIOUS", required: false, feature: "email", secret: true, description: "The previous UNSUBSCRIBE_SECRET after a rotation: unsubscribe links signed with it keep working (new ones use UNSUBSCRIBE_SECRET). Keep it for as long as old reminder emails matter." },
   { name: "FEED_URL_KEY", required: false, feature: "feedLinks", secret: true, description: "Secret that encrypts students' connected calendar feed links at rest (lib/feeds/secret.ts). Optional: in production without it, connecting a calendar link is switched off (students are told why; .ics file upload and one-time imports from a link still work) and no link is ever stored unencrypted; in development links are stored encoded without it. Changing it means students reconnect their feeds." },
+  { name: "STUDYOS_REFERRALS", required: false, feature: "core", secret: false, description: "Set to off to pause the invite program (lib/referral): invite links then lead to the landing page without remembering anything, no new friend is attributed and nothing is rewarded (pending referrals stay pending and are rewarded once it is back on), and the invite cards say invites are paused. On by default." },
+  { name: "STUDYOS_ERROR_EVENTS", required: false, feature: "core", secret: false, description: "Set to off to stop counting server errors in the database for the operator console's Errors section (lib/ops/error-events.ts). On by default; the stderr log line is written either way." },
   { name: "STUDYOS_TRUSTED_PROXY_HOPS", required: false, feature: "core", secret: false, description: "X-Forwarded-For entries appended by our own proxies (default 1 = Cloud Run alone; 2 = a Google external Application Load Balancer in front). Picks the client address for per-client rate limits." },
   { name: "STUDYOS_ALLOW_INCOMPLETE_ENV", required: false, feature: "core", secret: false, description: "1 = start in production even when required variables are missing (local next start only)." },
   // Dev-only
@@ -167,7 +200,12 @@ export function checkEnvironment(env: Env = process.env, build: BuildInfo = BUIL
   const aiKeys = requiredAiKeys(env);
   const always = ENV_VARS.filter((v) => v.required === "always").map((v) => v.name);
   // Only what the app cannot run without at all: database, auth, the AI key.
-  const missingRequired = [...always, ...aiKeys].filter((n) => !isSet(env, n));
+  // The website deployment (STUDYOS_APP_ORIGIN set) serves the public pages
+  // only and redirects everything that reads the database or calls a model to
+  // the app's own host (lib/ops/site-split.ts), so it needs neither.
+  const websiteOnly = isSet(env, "STUDYOS_APP_ORIGIN");
+  const needed = websiteOnly ? always.filter((n) => n !== "DATABASE_URL") : [...always, ...aiKeys];
+  const missingRequired = needed.filter((n) => !isSet(env, n));
   const billing = status(env, ["STRIPE_SECRET_KEY", "STRIPE_PRICE_PRO", "STRIPE_WEBHOOK_SECRET"]);
 
   const sandboxOn = isOn(env, "AGENT_SANDBOX");
@@ -176,6 +214,9 @@ export function checkEnvironment(env: Env = process.env, build: BuildInfo = BUIL
   // running, with remote asset images switched off.
   const assetsMismatch = assetsBuildMismatch(env, build);
   const feedLinks = status(env, ["FEED_URL_KEY"]);
+  // Both set AND readable: a malformed URL or sender keeps email off (warned below).
+  const email = status(env, ["SMTP_URL", "MAIL_FROM"]);
+  const emailValid = emailConfig(env) !== null;
   const features: EnvReport["features"] = {
     ai: status(env, aiKeys),
     billing,
@@ -189,6 +230,7 @@ export function checkEnvironment(env: Env = process.env, build: BuildInfo = BUIL
     maintenance: status(env, ["MAINTENANCE_SECRET"]),
     webFetch: status(env, ["AGENT_FETCH_ALLOWLIST"]),
     notifications: status(env, ["VAPID_PUBLIC_KEY", "VAPID_PRIVATE_KEY", "VAPID_SUBJECT"]),
+    email: { enabled: email.enabled && emailValid, missing: email.missing },
   };
 
   const warnings: string[] = [];
@@ -215,6 +257,17 @@ export function checkEnvironment(env: Env = process.env, build: BuildInfo = BUIL
       `Billing is partly configured (missing ${billing.missing.join(", ")}): payments could succeed without the subscription being recorded.`,
     );
   }
+  if (!isValidTaxBehavior(env.STRIPE_TAX_BEHAVIOR)) {
+    warnings.push('STRIPE_TAX_BEHAVIOR is neither "inclusive" nor "exclusive": inclusive is used (prices include VAT).');
+  }
+  for (const name of unreadableSwitches(env)) {
+    warnings.push(`${name} is set to something that is neither on (1, true, yes, on) nor off (0, false, no, off), so it is OFF.`);
+  }
+  if (checkoutConfig(env).termsConsent) {
+    warnings.push(
+      "STRIPE_TERMS_CONSENT is on: make sure Stripe's customer emails for successful payments and paid invoices are switched on (Dashboard, Settings, Customer emails). Without them buyers of a credit pack never receive the invoice and receipt that confirm their consent and the end of their right of withdrawal.",
+    );
+  }
   if (sandboxOn && !assetsMismatch && !features.sandbox.enabled) {
     warnings.push(`AGENT_SANDBOX is on but ${features.sandbox.missing.join(", ")} is missing.`);
   }
@@ -229,8 +282,44 @@ export function checkEnvironment(env: Env = process.env, build: BuildInfo = BUIL
   if (features.notifications.enabled && !features.maintenance.enabled) {
     warnings.push("VAPID keys are set but MAINTENANCE_SECRET is not: the notifications dispatch cannot run, so nothing is sent.");
   }
+  if (email.missing.length === 1) {
+    warnings.push(`Email reminders are partly configured (missing ${email.missing[0]}): they stay off.`);
+  }
+  const smtpProblem = email.enabled ? smtpUrlProblem(env.SMTP_URL) : null;
+  if (smtpProblem) {
+    warnings.push(
+      `SMTP_URL cannot be read (${smtpProblem}; expected e.g. smtps://user:password@smtp.example.com:465), so email reminders are OFF.`,
+    );
+  }
+  const unsubscribeSecret = env.UNSUBSCRIBE_SECRET?.trim();
+  if (unsubscribeSecret && unsubscribeSecret.length < 32) {
+    warnings.push("UNSUBSCRIBE_SECRET is shorter than 32 characters: use a long random string, as it signs the unsubscribe links of every reminder email.");
+  }
+  if (email.enabled && !parseMailbox(env.MAIL_FROM)) {
+    warnings.push("MAIL_FROM is not an email address (expected e.g. StudyOS <hello@example.com>), so email reminders are OFF.");
+  }
+  if (isSet(env, "MAIL_REPLY_TO") && !isPlausibleEmail(env.MAIL_REPLY_TO?.trim())) {
+    warnings.push("MAIL_REPLY_TO is not a single email address: it is ignored (replies go to the MAIL_FROM address).");
+  }
+  // Payments mean consumer contracts, and the withdrawal function and the
+  // cancellation button (lib/contract-notices) must acknowledge receipt by email.
+  if (!websiteOnly && isSet(env, "STRIPE_SECRET_KEY") && isSet(env, "STRIPE_PRICE_PRO") && !features.email.enabled) {
+    warnings.push(
+      "Billing is on but email is not (SMTP_URL, MAIL_FROM): withdrawals and cancellations sent with /withdraw and /cancel are stored and shown on screen, but their acknowledgement of receipt cannot be emailed, which the law requires, and you get no email about them (check /app/admin).",
+    );
+  }
+  if (features.email.enabled && !features.maintenance.enabled) {
+    warnings.push(
+      "SMTP_URL and MAIL_FROM are set but MAINTENANCE_SECRET is not: the notifications dispatch cannot run, so no reminder emails are sent (test emails still are).",
+    );
+  }
   if (production && !isSet(env, "STUDYOS_SUPPORT_EMAIL")) {
     warnings.push("STUDYOS_SUPPORT_EMAIL is not set: public pages show the fallback support address.");
+  }
+  if (production && !legalNoticeConfigured(env)) {
+    warnings.push(
+      "STUDYOS_OPERATOR_NAME and STUDYOS_OPERATOR_ADDRESS are not both set, so there is no legal notice (/legal-notice is off). A legal notice naming the operator with a postal address is required in Germany (Impressum, § 5 DDG) and, under the EU e-commerce rules, across the EU: set both before selling there.",
+    );
   }
   if (production && !isSet(env, "APP_URL") && !isSet(env, "NEXT_PUBLIC_APP_URL")) {
     warnings.push("APP_URL is not set: absolute links use the fallback Cloud Run URL.");

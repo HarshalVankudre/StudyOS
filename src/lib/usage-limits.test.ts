@@ -20,6 +20,7 @@ vi.mock("@/lib/db", () => {
 
 import {
   checkUsageLimit,
+  claimOutcomeSlot,
   isUsageLimitReached,
   recordUsageEvent,
   USAGE_LIMITS,
@@ -82,6 +83,34 @@ describe("checkUsageLimit", () => {
     mocks.usageCreate.mockRejectedValue(new Error("db down"));
     const res = await checkUsageLimit("user_1", "generate");
     expect(res.allowed).toBe(true);
+  });
+
+  it("still allows the action when the plan lookup fails (fail-open)", async () => {
+    mocks.subFindUnique.mockRejectedValue(new Error("db down"));
+    await expect(checkUsageLimit("user_1", "generate")).resolves.toEqual({ allowed: true, remaining: 0 });
+  });
+
+  it("gives a subscriber whose payment is disputed the free limit", async () => {
+    mocks.subFindUnique.mockResolvedValue({ status: "active", currentPeriodEnd: null, disputeId: "dp_1" });
+    mocks.usageCount.mockResolvedValue(USAGE_LIMITS.generate.free);
+    expect((await checkUsageLimit("user_1", "generate")).allowed).toBe(false);
+  });
+
+  it("gives an 'active' row long past its paid period the free limit", async () => {
+    mocks.subFindUnique.mockResolvedValue({
+      status: "active",
+      currentPeriodEnd: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+      disputeId: null,
+    });
+    mocks.usageCount.mockResolvedValue(USAGE_LIMITS.generate.free);
+    expect((await checkUsageLimit("user_1", "generate")).allowed).toBe(false);
+  });
+});
+
+describe("claimOutcomeSlot", () => {
+  it("fails open (no slot) when the plan lookup fails", async () => {
+    mocks.subFindUnique.mockRejectedValue(new Error("db down"));
+    await expect(claimOutcomeSlot("user_1", "generate_failed")).resolves.toEqual({ allowed: true, slot: null });
   });
 });
 

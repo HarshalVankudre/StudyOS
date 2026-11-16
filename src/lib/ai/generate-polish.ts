@@ -25,6 +25,7 @@
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import type { Locale } from "@/lib/i18n/config";
 import { gradeDatabaseScore, detectGradeColumns } from "@/lib/grades/workspace";
+import { isGradeEntry } from "@/lib/grades/modules";
 import { assessmentKey, nameStems } from "@/lib/import/assessment-match";
 import { statesCount } from "@/lib/import/syllabus-facts";
 import { titleProperty } from "@/lib/workspace/helpers";
@@ -552,9 +553,16 @@ const GRADE_TABLE =
 function dropCompetingGradeTables(workspace: Workspace, gradesTitle: string) {
   const work = findDeadlineDatabase(workspace);
   if (!work) return;
+  // A list of module grades read by a grades block is the tracker's own list, not a rival.
+  const moduleLists = new Set(
+    workspace.pages.flatMap((p) =>
+      p.blocks.flatMap((b) => (b.type === "grades" && isGradeEntry(b) && b.databaseId ? [b.databaseId] : [])),
+    ),
+  );
   const competing = workspace.databases.filter(
     (db) =>
       db.id !== work.id &&
+      !moduleLists.has(db.id) &&
       GRADE_TABLE.test(db.name) &&
       db.properties.some((p) => p.type === "number") &&
       datedRows(db) === 0 &&

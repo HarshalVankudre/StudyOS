@@ -2,9 +2,15 @@ import { z } from "zod";
 
 export const DAILY_STUDY_AGENT_KEY = "daily-study";
 export const DEFAULT_DAILY_MINUTES = 60;
-export const DAILY_MINUTES_OPTIONS = [30, 45, 60, 90, 120] as const;
+/**
+ * Standing daily time choices. The long days (3, 4, 6 hours) are for exam
+ * season: in a German Klausurenphase students study several hours a day.
+ */
+export const DAILY_MINUTES_OPTIONS = [30, 45, 60, 90, 120, 180, 240, 360] as const;
+/** Longest standing daily time (the planner clamps to it). */
+export const MAX_DAILY_MINUTES = 360;
 /** "How much time do you have today?" choices offered when rebuilding. */
-export const TODAY_MINUTES_OPTIONS = [15, 30, 60, 90] as const;
+export const TODAY_MINUTES_OPTIONS = [15, 30, 60, 90, 180, 240, 360] as const;
 
 /**
  * Plan storage versions. Version 1 stored English sentences (`summary`,
@@ -48,8 +54,20 @@ export const REASON_CODES = [
   "cards_due",
   "new_cards",
   "open_task",
+  // Administrative deadlines (registration, re-registration, fees): a few
+  // minutes to finish before the window closes. Appended, so stored plans
+  // with the codes above still parse.
+  "formality_overdue",
+  "formality_today",
+  "formality_tomorrow",
+  "formality_soon",
 ] as const;
 export type ReasonCode = (typeof REASON_CODES)[number];
+
+/** True for the reason codes of an administrative deadline. */
+export function isFormalityReason(code: ReasonCode): boolean {
+  return code.startsWith("formality_");
+}
 
 export const planReasonSchema = z.object({
   code: z.enum(REASON_CODES),
@@ -135,7 +153,9 @@ export const planItemSchema = z.object({
 });
 export type DailyStudyPlanItem = z.infer<typeof planItemSchema>;
 
-export const dailyStudyPlanItemsSchema = z.array(planItemSchema).max(12);
+/** Most items a stored plan holds (the planner never builds more). */
+export const MAX_STORED_PLAN_ITEMS = 12;
+export const dailyStudyPlanItemsSchema = z.array(planItemSchema).max(MAX_STORED_PLAN_ITEMS);
 
 export const examCountdownSchema = z.object({
   id: z.string().min(1).max(400),

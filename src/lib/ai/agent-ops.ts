@@ -265,6 +265,10 @@ export function applyAgentOps(workspace: Workspace, ops: AgentOp[]): Workspace {
       }
       case "set_grades_block": {
         const page = findPage(op.pageId);
+        // Module grades are German grades: elsewhere the block would quietly read percentages.
+        if (op.block.entry === "grade" && op.block.scale !== "de_grade") {
+          throw new Error('set_grades_block: entry "grade" (module grades) needs scale "de_grade"');
+        }
         if (op.block.databaseId) findDb(op.block.databaseId);
         const at = page.blocks.findIndex((b) => b.id === op.block.id);
         if (at >= 0) {

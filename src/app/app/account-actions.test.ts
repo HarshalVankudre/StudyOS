@@ -7,6 +7,9 @@ const m = vi.hoisted(() => ({
   tombstone: vi.fn(),
   untombstone: vi.fn(),
   deleteUser: vi.fn(),
+  record: vi.fn(),
+  isPro: vi.fn(),
+  findAccount: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -22,9 +25,15 @@ vi.mock("@/lib/billing", () => ({
   markAccountDeleted: m.tombstone,
   stopBillingForDeletedAccount: m.stopBilling,
   unmarkAccountDeleted: m.untombstone,
-  isPro: vi.fn(),
+  isPro: m.isPro,
 }));
 vi.mock("@/lib/credits", () => ({ getCreditBalance: vi.fn() }));
+vi.mock("@/lib/db", () => ({ prisma: { creditAccount: { findUnique: m.findAccount } } }));
+vi.mock("@/lib/ops/report-error", () => ({ reportError: vi.fn() }));
+vi.mock("@/lib/account/deletion-reason", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/account/deletion-reason")>()),
+  recordDeletionReason: m.record,
+}));
 vi.mock("@/lib/account/erase-user-data", () => ({ eraseUserData: m.erase }));
 
 import { deleteAccountAction } from "./account-actions";
@@ -43,6 +52,8 @@ beforeEach(() => {
     m.calls.push("stopBilling");
     return true;
   });
+  m.isPro.mockImplementation(async () => true);
+  m.findAccount.mockImplementation(async () => ({ createdAt: new Date("2026-11-01T00:00:00Z") }));
 });
 
 describe("deleteAccountAction billing", () => {
@@ -63,5 +74,33 @@ describe("deleteAccountAction billing", () => {
     expect(m.erase).not.toHaveBeenCalled();
     expect(m.deleteUser).not.toHaveBeenCalled();
     expect(m.calls).toEqual(["tombstone", "stopBilling", "untombstone"]);
+  });
+});
+
+describe("deleteAccountAction: why the student is leaving", () => {
+  it("stores the answer only after the account is erased, with the plan and account age", async () => {
+    await expect(deleteAccountAction({ reason: "tooExpensive", note: "Exams are over" })).rejects.toMatchObject({ url: "/" });
+    expect(m.calls).toEqual(["tombstone", "stopBilling", "erase", "record", "deleteUser"]);
+    expect(m.record).toHaveBeenCalledWith(
+      { reason: "tooExpensive", note: "Exams are over" },
+      { pro: true, createdAt: new Date("2026-11-01T00:00:00Z") },
+    );
+  });
+
+  it("stores nothing without an answer, or when nothing was deleted", async () => {
+    await expect(deleteAccountAction()).rejects.toMatchObject({ url: "/" });
+    expect(m.record).not.toHaveBeenCalled();
+
+    m.stopBilling.mockImplementation(async () => false);
+    expect(await deleteAccountAction({ reason: "other" })).toEqual({ error: "billing_cancel_failed" });
+    expect(m.record).not.toHaveBeenCalled();
+  });
+
+  it("deletes the account even when the answer cannot be stored", async () => {
+    m.record.mockImplementation(async () => {
+      throw new Error("db down");
+    });
+    await expect(deleteAccountAction({ reason: "other" })).rejects.toMatchObject({ url: "/" });
+    expect(m.deleteUser).toHaveBeenCalledWith("user_1");
   });
 });

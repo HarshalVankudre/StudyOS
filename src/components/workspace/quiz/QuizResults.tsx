@@ -86,7 +86,7 @@ export function QuizResults({
           {redrillCount > 0 && (
             <button
               onClick={onRedrill}
-              className="flex min-h-12 items-center justify-center gap-2 rounded-lg bg-lime px-5 text-sm font-semibold text-lime-on transition hover:bg-lime-deep"
+              className="flex min-h-12 items-center justify-center gap-2 rounded-lg bg-lime px-5 text-sm font-semibold text-lime-on transition hover:bg-lime-hover"
             >
               <Target className="size-4" aria-hidden />
               {t(Q.redrill, { count: redrillCount })}

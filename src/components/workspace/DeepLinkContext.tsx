@@ -28,7 +28,7 @@ export function useDeepLink(): DeepLinkApi {
   return useContext(DeepLinkContext);
 }
 
-const FLASH_CLASSES = ["rounded-md", "bg-lime-faint", "ring-2", "ring-lime/60", "transition-colors"];
+const FLASH_CLASSES = ["rounded-md", "bg-lime-faint", "ring-2", "ring-lime-deep/60", "transition-colors"];
 const FLASH_MS = 2200;
 
 function prefersReducedMotion(): boolean {

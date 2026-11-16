@@ -335,4 +335,54 @@ describe("loop tool gating + ownerId", () => {
       ),
     ).toBe(true);
   });
+
+  it("a slow tool is cut off at the turn's deadline, not at its own timeout", async () => {
+    // A tool allowed a minute (like a sandbox render) must not outlive the
+    // model deadline: the turn's tail and the route's maxDuration come after it.
+    let sawAbort = false;
+    toolRegistry.register({
+      id: "test_slow_tool",
+      description: "slow: waits until its signal aborts",
+      input: z.object({}),
+      output: z.object({ ok: z.boolean() }),
+      limits: { timeoutMs: 60_000 },
+      networkPermission: "none",
+      enabled: true,
+      handler: (_input, ctx) =>
+        new Promise<{ ok: boolean }>((resolve) => {
+          ctx.signal?.addEventListener("abort", () => {
+            sawAbort = true;
+            resolve({ ok: true });
+          });
+        }),
+    });
+    skillRegistry.register({
+      id: "test-slow-skill",
+      version: "1.0.0",
+      instructions: "slow skill",
+      toolIds: ["test_slow_tool"],
+    });
+
+    mocks.chat.mockReset();
+    mocks.chat.mockResolvedValueOnce(
+      '{"action":"execute","skillId":"test-slow-skill","summary":"slow","affectedAreaIds":["p1"]}',
+    );
+    mocks.chat.mockResolvedValueOnce('{"action":"tool","tool":"test_slow_tool","input":{}}');
+    mocks.chat.mockResolvedValueOnce('{"action":"final","reply":"never reached"}');
+
+    const started = Date.now();
+    const res = await runAgentLoop({
+      workspace: WS, history: [], message: "run slow",
+      model: "m",
+      // 10 s of the wall budget is the reserved tail: the model deadline is 200 ms out.
+      budget: { ...budget, wallTimeMs: 10_200 },
+      locale: "en", taskId: "task_slow", ownerId: "user_slow",
+      emit: vi.fn(),
+    });
+
+    expect(Date.now() - started).toBeLessThan(3_000);
+    expect(sawAbort).toBe(true);
+    expect(res.stopReason).toBe("time");
+    expect(mocks.chat).toHaveBeenCalledTimes(2);
+  });
 });

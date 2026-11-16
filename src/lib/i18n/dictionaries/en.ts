@@ -217,6 +217,7 @@ export const en = {
     skipToContent: "Skip to main content",
     openMenu: "Open menu",
     closeMenu: "Close menu",
+    appNav: "Sections",
   },
 
   // ---- Document <title> / <meta> ----------------------------------------
@@ -265,10 +266,10 @@ export const en = {
     },
     hero: {
       badge: "The study planner that keeps itself up to date",
-      titleLine1: "Your semester, set up in about a minute.",
-      titleLine2: "Then it keeps itself current.",
+      titleLine1: "A study workspace made to measure.",
+      titleLine2: "Built around your semester in about a minute.",
       subtitle:
-        "Describe your courses or upload a syllabus. StudyOS sets up your deadlines, a plan for today and a place to study. Connect your school calendar and new deadlines come in on their own. Miss a day and the plan rebuilds around what’s left.",
+        "Most study tools hand everyone the same templates. Describe your courses or upload a syllabus, and StudyOS builds the pages, tables, trackers and study tools that fit them. Connect your school calendar and your deadlines stay current on their own. Miss a day and the plan rebuilds around what’s left.",
       promptTitle: "Start with one sentence",
       build: "Build",
       finePrint: "Free trial credits · No card needed · Ready in about a minute",
@@ -283,6 +284,27 @@ export const en = {
         "Export or delete your data any time",
         "Works on your phone, in 10 languages",
       ],
+    },
+    tailored: {
+      title: "Off the rack, or made to measure.",
+      subtitle:
+        "Templates come in a few fixed sizes, and you bend your semester to fit them. StudyOS is cut to your courses, and re-cut whenever you ask.",
+      offTheRack: {
+        name: "Templates",
+        points: [
+          "The same pages and trackers for every student",
+          "You fill them in and rearrange them by hand",
+          "When your semester changes, you rebuild it yourself",
+        ],
+      },
+      fitted: {
+        name: "StudyOS",
+        points: [
+          "Pages, tables and trackers built from your own courses and syllabus",
+          "Deadlines and grade weights filled in from your syllabus and school calendar",
+          "Ask for a change in plain words and it rebuilds that part, with Undo",
+        ],
+      },
     },
     how: {
       eyebrow: "How it works",
@@ -369,10 +391,14 @@ export const en = {
     also: {
       title: "Also in StudyOS",
       items: [
+        { title: "A focus timer", body: "Start 25 focused minutes from any item on Today. The minutes count toward that course and your week." },
+        { title: "See your progress", body: "Focus time, streaks, recall rate and quiz scores for the last week, month or three months, per course." },
+        { title: "Share a page", body: "Send classmates a link to your notes or flashcards. They can practise without an account; the rest stays private." },
+        { title: "Gentle reminders", body: "If you want them: a nudge on your phone or computer for today’s plan, close deadlines and your streak." },
         { title: "A real editor", body: "Pages made of blocks: headings, lists, to-dos, callouts, math and code. Type / to insert one." },
         { title: "Tables, boards and calendars", body: "Any list can be a table, a board or a calendar, with filters and sorts saved on each view." },
         { title: "Undo and trash", body: "Undo and redo across the whole workspace. Deleted workspaces wait in the trash for 30 days." },
-        { title: "Search", body: "Find any workspace, page, row, flashcard or question from one search box." },
+        { title: "Coming from Notion?", body: "Upload Notion’s Markdown & CSV export and your pages and tables arrive as a StudyOS workspace." },
         { title: "Export and print", body: "Pages as Markdown, tables as CSV, a whole workspace as a .zip, or print to PDF." },
         { title: "On your phone", body: "Add StudyOS to your home screen and open it like an app." },
         { title: "Ten languages", body: "English, Spanish, German, French, Italian, Portuguese, Dutch, Chinese, Japanese and Arabic, right to left included." },
@@ -381,6 +407,8 @@ export const en = {
     },
     trust: {
       title: "Honest about what it does, and what it costs.",
+      // Replaces the item that names Pro's {price} while Pro cannot be bought.
+      billingUnpriced: "Free needs no card: it’s {trial} trial credits, once. Pro adds credits every month, and you can cancel in the billing portal at any time. Credits don’t expire.",
       items: [
         {
           title: "Studying is never paywalled",
@@ -406,6 +434,8 @@ export const en = {
     },
     plans: {
       title: "Try it free. {price} a month for more AI.",
+      // While Pro cannot be bought (billing on, its Stripe price not sellable): no price.
+      titleUnpriced: "Try it free. Go Pro when you want more AI.",
       free: "Free",
       pro: "Pro",
       freeBullets: [
@@ -449,6 +479,9 @@ export const en = {
         statsExam: "Statistics exam",
         deck: "Metabolism",
         reading: "Read chapter 8",
+        // A registration deadline in the sample plan. Empty = not shown: only the
+        // German page shows it (exam registration is a German university matter).
+        registration: "",
       },
       card: {
         front: "What is the net ATP yield of glycolysis for one glucose molecule?",
@@ -515,6 +548,8 @@ export const en = {
       manageBilling: "Manage billing",
       upgrade: "Upgrade to Pro",
       ctaSignedOut: "Sign up, then upgrade",
+      // With billing on, while Stripe's Pro price cannot be sold (lib/plan-pricing.ts).
+      unavailableNote: "Pro can’t be bought at the moment. Please check back later.",
     },
     sameModel: "Both plans use the same AI model.",
     costs: {
@@ -661,6 +696,91 @@ export const en = {
     fallbackIcon: "📄",
   },
 
+  // ---- Study insights (/app/insights) ------------------------------------
+  insights: {
+    metaTitle: "Insights · StudyOS",
+    label: "Insights",
+    paletteAction: "Open insights",
+    back: "← Today",
+    title: "How your studying is going",
+    subtitle: "From your focus sessions, flashcards and quizzes.",
+    periodLabel: "Time period",
+    periods: { d7: "7 days", d30: "30 days", d90: "90 days" },
+    periodAria: { d7: "Show the last 7 days", d30: "Show the last 30 days", d90: "Show the last 90 days" },
+    previous: { d7: "the 7 days before", d30: "the 30 days before", d90: "the 90 days before" },
+    download: "Download CSV",
+    downloadAria: "Download these days as a CSV file",
+    focusTime: "Focus time",
+    activeDays: "Active days",
+    activeOf: "{active} of {total}",
+    activeHint: "Days with focus, flashcards or quizzes",
+    cardsReviewed: "Cards reviewed",
+    newCards: { one: "{count} new card", other: "{count} new cards" } as PluralForms,
+    recallRate: "Recall rate",
+    recallHint: "Learned cards you remembered",
+    recallNone: "Shows up once cards come back for review",
+    quizAccuracy: "Quiz accuracy",
+    quizFrom: { one: "From {count} answer", other: "From {count} answers" } as PluralForms,
+    quizNone: "Answer a quiz to see this",
+    noValue: "–",
+    up: "Up {value} from {previous}",
+    down: "Down {value} from {previous}",
+    same: "Same as {previous}",
+    noPrevious: "Nothing to compare with yet",
+    chartDaily: "Day by day",
+    chartWeekly: "Week by week",
+    legendFocus: "Focus minutes",
+    legendCards: "Cards reviewed",
+    tableDay: "Day",
+    tableWeek: "Week",
+    tableFocus: "Focus time",
+    tableCards: "Cards reviewed",
+    weekRange: "{from} – {to}",
+    barLabel: "{day}: {focus} of focus, {cards}",
+    today: "Today",
+    streakTitle: "Your streak",
+    streakNone: "No streak right now",
+    streakStart: "Review a few cards or answer a quiz question to start one.",
+    streakToday: "Today already counts. Nice work.",
+    streakKeep: "A few cards today keep it going.",
+    streakHint: "Counts days with flashcards or quizzes. A streak freeze covers a missed day.",
+    rhythmTitle: "When you focus",
+    bestTime: {
+      morning: "You focus best in the morning.",
+      afternoon: "You focus best in the afternoon.",
+      evening: "You focus best in the evening.",
+      night: "You focus best at night.",
+    },
+    bestTimeNotYet: "A few more focus sessions and you’ll see when you focus best.",
+    bestTimeEven: "Your focus is spread across the day.",
+    parts: { morning: "Morning", afternoon: "Afternoon", evening: "Evening", night: "Night" },
+    sessions: { one: "Based on {count} focus session", other: "Based on {count} focus sessions" } as PluralForms,
+    coursesTitle: "By course",
+    other: "Other",
+    otherHint: "Focus without a course, and courses in the trash",
+    quizShare: "{value} right on quizzes",
+    openCourse: "Open {name}",
+    emptyTitle: "Your insights start here",
+    emptyBody: "Run a focus session or review some flashcards, and this page fills in by itself.",
+    quietTitle: "A quiet stretch",
+    quietBody: "Every bit counts. One short session is a great restart.",
+    startFocus: "Start a focus session",
+    reviewCards: "Review flashcards",
+    loadFailed: "Your insights couldn’t load right now. Try again in a moment.",
+    zoneNote: "Days follow your time zone, {zone}.",
+    weekLink: "Last 7 days: {time} of focus. Open your insights",
+    csv: {
+      date: "Date",
+      focusMinutes: "Focus minutes",
+      focusSessions: "Focus sessions",
+      cards: "Cards reviewed",
+      newCards: "New cards",
+      recallRate: "Recall rate (%)",
+      quizAnswers: "Quiz answers",
+      quizCorrect: "Quiz answers right",
+    },
+  },
+
   // ---- Agent Center & Daily Study Agent --------------------------------
   agentCenter: {
     metaTitle: "Agent Center · StudyOS",
@@ -718,6 +838,43 @@ export const en = {
     scanned: "Scanned {sources} workspaces · found {candidates} candidates",
   },
 
+  // ---- Agenda (/app/agenda): the next two weeks across every workspace ----
+  agenda: {
+    metaTitle: "Agenda · StudyOS",
+    label: "Agenda",
+    paletteAction: "Open agenda",
+    back: "← Today",
+    title: "Your next two weeks",
+    subtitle: "Deadlines and exams from all your courses, day by day.",
+    summary: { one: "{count} thing on your agenda", other: "{count} things on your agenda" } as PluralForms,
+    weekLabel: "The next 14 days",
+    dayCell: "{day}: {items}",
+    nothingDue: "nothing due",
+    filterLabel: "Filter by course",
+    allCourses: "All courses",
+    showDone: "Show done",
+    hideDone: "Hide done",
+    overdue: "Overdue",
+    today: "Today",
+    tomorrow: "Tomorrow",
+    todayEmpty: "Nothing due today.",
+    kindDeadline: "Deadline",
+    kindExam: "Exam",
+    kindFormality: "Admin deadline",
+    done: "Done",
+    wasDue: "Was due {date}",
+    emptyTitle: "Nothing in the next two weeks",
+    emptyBody: "No deadlines or exams are dated in the next 14 days. Enjoy the breathing room.",
+    emptyCourse: "Nothing for {course} in the next two weeks.",
+    showAll: "Show all courses",
+    noWorkspacesTitle: "Your agenda fills in from your workspaces",
+    noWorkspacesBody: "Generate a workspace for your courses, and every deadline and exam shows up here, day by day.",
+    calendarLink: "Add these to your calendar app",
+    partial: "Showing your most recently updated workspaces.",
+    loadFailed: "Your agenda couldn’t load right now. Try again in a moment.",
+    seeNext: "See the next two weeks",
+  },
+
   // ---- Today (daily plan on /app and the Agent Center) -------------------
   today: {
     title: "Today",
@@ -750,6 +907,12 @@ export const en = {
     reasonCardsDue: { one: "{count} card is ready for review.", other: "{count} cards are ready for review." } as PluralForms,
     reasonNewCards: { one: "{count} new card to start learning.", other: "{count} new cards to start learning." } as PluralForms,
     reasonOpenTask: "Still open on {page}.",
+    // Administrative deadlines: exam registration, re-registration, fees.
+    kindFormality: "Admin deadline",
+    reasonFormalityOverdue: "The deadline was {date}. Check now whether it can still be done.",
+    reasonFormalityToday: "Closes today. A few minutes now; it can’t be made up later.",
+    reasonFormalityTomorrow: "Closes tomorrow. A few minutes now; it can’t be made up later.",
+    reasonFormalitySoon: { one: "Closes in {count} day. A few minutes now; it can’t be made up later.", other: "Closes in {count} days. A few minutes now; it can’t be made up later." } as PluralForms,
     weight: "Worth {weight}% of the grade.",
     minutes: "{count} min",
     hours: "{count} h",
@@ -1092,6 +1255,71 @@ export const en = {
       statusDone: "Done",
       viewTable: "Table",
     },
+  },
+
+  // ---- Focus timer (turns Today into study time; free, no AI) -------------
+  focus: {
+    timerLabel: "Focus timer",
+    start: "Start a focus session",
+    itemButton: "Focus",
+    itemActive: "Focusing",
+    itemAria: "Start a focus session on “{title}”, {course}",
+    itemAriaNoCourse: "Start a focus session on “{title}”",
+    paletteAction: "Start focus timer",
+    todayTime: "Focused today: {time}",
+    todayNone: "No focus time yet today",
+    streak: { one: "{count} day of focus in a row", other: "{count} days of focus in a row" } as PluralForms,
+    weekLabel: "Focus time, last 7 days",
+    dayBar: "{day}: {time}",
+    setupTitle: "Ready to focus?",
+    labelField: "What are you working on?",
+    labelPlaceholder: "Optional, e.g. chapter 4 reading",
+    presetsLabel: "Choose a length",
+    presetClassic: "Classic",
+    presetDeep: "Deep work",
+    presetQuick: "Quick start",
+    presetDetail: "{focus} focus · {rest} break",
+    presetQuickDetail: "{focus}, just to get going",
+    phaseFocus: "Focus",
+    phaseBreak: "Break",
+    paused: "Paused",
+    timerFocusAria: "Focus time left",
+    timerBreakAria: "Break time left",
+    pause: "Pause",
+    resume: "Resume",
+    stopEarly: "Stop early",
+    skipBreak: "Skip break",
+    focusDoneTitle: "Nice work",
+    focusDoneBody: "{time} of focus saved.",
+    takeBreak: "Take a {time} break",
+    anotherBlock: "Another focus block",
+    finish: "Done for now",
+    breakDoneTitle: "Break’s over",
+    breakDoneBody: "Ready for the next block?",
+    nextBlock: "Start the next block",
+    tooShort: "Stopped. Sessions under a minute aren’t saved.",
+    saveFailed: "Your focus time didn’t save yet. It will try again.",
+    minimize: "Minimize the focus timer",
+    expand: "Show the focus timer",
+    close: "Close the focus timer",
+    mute: "Mute the chime",
+    unmute: "Turn the chime on",
+    notifyOffer: "Notify me when time’s up",
+    notifyFocusTitle: "Focus block done",
+    notifyFocusBody: "{time} of focus. Time for a break.",
+    notifyBreakTitle: "Break’s over",
+    notifyBreakBody: "Ready for the next block when you are.",
+    titleFocus: "{time} focus",
+    titleBreak: "{time} break",
+    titlePaused: "Paused",
+    announceStart: "Focus block started: {time}.",
+    announceBreak: "Break started: {time}.",
+    announcePaused: "Timer paused.",
+    announceResumed: "Timer resumed.",
+    announceFocusDone: "Focus block done. {time} saved.",
+    announceBreakDone: "Break’s over.",
+    announceStopped: "Timer stopped.",
+    free: "Free, no AI credits.",
   },
 
   // ---- Flashcards & spaced-repetition study -----------------------------
@@ -1597,6 +1825,58 @@ export const en = {
   },
 
   // ---- Grade tracker block ----------------------------------------------
+  // Grades overview (app/app/grades): every course's tracker on one page.
+  // Calm on purpose: what is needed, never "at risk". {target}, {final} and
+  // {best} come written in the tracker's scale ("B+ (87%)", "1,7 (85 %)").
+  gradesOverview: {
+    metaTitle: "Grades · StudyOS",
+    label: "Grades",
+    paletteAction: "Open grades overview",
+    back: "← Today",
+    title: "Where you stand",
+    subtitle: "Every course with a grade tracker, in one place.",
+    loadFailed: "Your grades couldn’t load right now. Try again in a moment.",
+    coursesTitle: "Your courses",
+    decidedRing: "Grade decided in {course}",
+    soFar: "So far",
+    target: "Target",
+    noTarget: "Not set yet",
+    outlook: {
+      needed: "You need {average} on the rest to reach {target}.",
+      neededNoScores: "An average of {average} across the work reaches {target}.",
+      secured: "{target} is already secured. Nice work.",
+      unreachable: "{target} would take more than {max} on the rest. You can still reach {best}.",
+      met: "Finished with {final}. Target reached.",
+      missed: "Finished with {final}.",
+      allGraded: "Everything is graded.",
+      pick: "Set a target in the tracker to see what you need on the rest.",
+      empty: "No graded work listed yet.",
+    },
+    next: "Next: {title}",
+    nextMeta: "{date} · {weight} of the grade",
+    nothingNext: "Nothing dated coming up",
+    open: "Open",
+    openAria: "Open the grade tracker for {name}",
+    overallTitle: "Overall",
+    overallGpa: "GPA",
+    overallGerman: "Average grade",
+    overallAverage: "Average",
+    overallUk: "Average mark",
+    mixedScales: "Your courses use different grading scales, so each scale gets its own average.",
+    germanNeedsCredits: "Add the ECTS of each course to see your weighted average grade.",
+    unsetTitle: "Trackers still to set up",
+    unsetDetail: "The grade tracker here isn’t set up yet.",
+    unsetOpen: "Finish setting up",
+    emptyTitle: "Add a grade tracker to a course",
+    emptyBody: "Then this page shows where you stand in every course and what you need on the rest.",
+    howToTitle: "How to add one",
+    howTo1: "Open one of your courses.",
+    howTo2: "On any page, type {command} and pick “{label}”.",
+    howTo3: "Choose your list of graded work and set a target.",
+    openCourses: "Go to your courses",
+    free: "Worked out from your grade trackers. Free, and no AI involved.",
+  },
+
   grades: {
     insertLabel: "Grade tracker",
     defaultTitle: "Grades",
@@ -1741,6 +2021,33 @@ export const en = {
     bandMinAria: "Minimum percentage for {label}",
     bandPointsAria: "Grade points for {label}",
     resetBands: "Reset to default",
+    // Module-grade entry with German grades (lib/grades/modules.ts): one
+    // module per row, its grade typed as 1.0 to 5.0, averaged by ECTS. The
+    // result is worded with tools.gradeCalculator.ects.
+    modules: {
+      entryLegend: "How do you enter grades?",
+      entryGrade: "Module grades directly (1.0 to 5.0), one module per row",
+      entryPercent: "Percentages or points per piece of work, turned into grades",
+      setupIntro: "Pick your list of modules: one row per module, with its grade and its ECTS.",
+      creditsColumn: "Credits (ECTS)",
+      gradeHint: "The module’s grade, 1.0 to 5.0. Empty means still open.",
+      creditsHint: "Optional. Without it, the ECTS come from your course list.",
+      missingGrade: "This list has no column for the module grade yet.",
+      addGradeColumn: "Add a Grade column",
+      missingCredits: "This list has no column for the ECTS yet.",
+      addCreditsColumn: "Add an ECTS column",
+      counts: "{passed} passed · {failed} not passed · {open} open",
+      gradeAria: "Grade for {module}",
+      whatIfAria: "What-if grade for {module}",
+      whatIfOn: "What-if mode: type grades for open modules to see your average. Nothing is saved.",
+      noCredits: "No ECTS",
+      noModules: "This list has no modules yet. Add one row per module and it appears here.",
+      passed: "Passed",
+      open: "Open",
+      notAGrade: "Not a grade",
+      looksLikeGrades: "These look like grades, not percentages. Read them as module grades?",
+      readAsGrades: "Read as module grades",
+    },
     uk: {
       first: "First",
       upperSecond: "2:1",
@@ -1748,6 +2055,46 @@ export const en = {
       third: "Third",
       fail: "Fail",
     },
+  },
+
+  // ---- Invite friends (lib/referral) ---------------------------------------
+  // {credits} is a whole count from counts.credits ("100 credits").
+  // shareText is the student's own message to a friend (the share sheet).
+  referral: {
+    title: "Invite friends",
+    howItWorks: "You both get {credits} when your friend builds their first workspace.",
+    linkLabel: "Your invite link",
+    copy: "Copy link",
+    copied: "Copied",
+    share: "Share",
+    shareText: "I organize my studies with StudyOS. Sign up with my link and we both get {credits} when you build your first workspace.",
+    joined: "Friends joined",
+    rewarded: "Rewarded",
+    earned: "Credits earned",
+    capReached: "You’ve reached the invite limit, so invites won’t earn you more credits. Friends who join still get their {credits}.",
+    dailyCapReached: "You’ve reached today’s invite limit: friends who build their first workspace today still get their {credits}, but you won’t.",
+    invited: "You were invited: you’ll get {credits} as a bonus after your first workspace.",
+    paused: "Invites are paused for now.",
+  },
+
+  // ---- Stripe Checkout (lib/checkout-options.ts) ---------------------------
+  // termsPack / termsPro: the text beside the Terms checkbox (with
+  // STRIPE_TERMS_CONSENT), first person, Markdown; {terms} is the Terms page
+  // URL. Stripe allows 1,200 characters. vatIncluded / vatExcluded: the note
+  // beside prices while Stripe Tax is on (STRIPE_AUTOMATIC_TAX).
+  checkout: {
+    termsPack:
+      "I agree to the [Terms of Service]({terms}). I ask StudyOS to add the credits to my balance immediately, before the withdrawal period ends, and I acknowledge that, if I am a consumer in the EU, the EEA or the UK, I lose my right of withdrawal once the credits have been added to my balance.",
+    invoiceConsentPack:
+      "At checkout you agreed to the Terms of Service ({terms}), asked StudyOS to add these credits to your balance immediately, and acknowledged that, as a consumer in the EU, the EEA or the UK, you lose your right of withdrawal once they have been added.",
+    termsPro:
+      "I agree to the [Terms of Service]({terms}). I ask StudyOS to start my Pro subscription immediately, before the withdrawal period ends. I understand that, if I am a consumer in the EU, the EEA or the UK and withdraw within 14 days, I pay for the share of the service already provided, and that my right of withdrawal ends once the service has been fully provided.",
+    vatIncluded: "Prices include VAT where applicable.",
+    vatExcluded: "Prices exclude VAT, which is added at checkout where applicable.",
+    // The credit pack payment's description (with STRIPE_TERMS_CONSENT), shown
+    // on Stripe's receipt: a short plain-text copy of invoiceConsentPack.
+    receiptConsentPack:
+      "StudyOS credit pack. At checkout you accepted the Terms of Service ({terms}) and asked for the credits to be added immediately; as a consumer in the EU, the EEA or the UK, you lose your right of withdrawal once they are added.",
   },
 
   // ---- Credits ----------------------------------------------------------
@@ -1771,9 +2118,20 @@ export const en = {
     // Transparency: always-visible meter, per-action cost, low-balance nudge.
     low: "Low",
     runningLow: "You’re running low on credits.",
+    // Today's note when the balance is low (components/account/LowCreditsNotice).
+    lowNotice: {
+      title: "Running low on credits",
+      body: "You have {balance} left. Studying never uses credits; they pay only for AI work, like building a workspace or asking the assistant.",
+      seePro: "See Pro",
+      more: "Get more credits",
+      snooze: "Hide for a week",
+    },
     turnCostTitle: "Credits this turn",
     buysApprox: "Enough for {gens} workspace builds or {edits} assistant messages",
     buyMore: "Buy more",
+    // With billing on, where a price would be while it cannot be sold (lib/plan-pricing.ts).
+    unavailable: "Not available right now",
+    packUnavailableNote: "Credit packs can’t be bought at the moment. Please check back later.",
   },
 
   // ---- Before credits are spent: the expected cost and the balance; and
@@ -1796,6 +2154,39 @@ export const en = {
     unavailable: "Payments aren’t available right now, so nothing was charged. Please try again later.",
     alreadySubscribed: "You already have an active Pro subscription, so we didn’t start a second one. Manage it from your billing settings.",
     error: "We couldn’t open checkout, and nothing was charged. Please try again in a moment.",
+  },
+
+  // ---- Send feedback (account menu, command palette) ---------------------
+  feedback: {
+    open: "Send feedback",
+    title: "Send feedback",
+    intro: "Something broken, an idea or a question? Tell us here.",
+    kindLabel: "What is it about?",
+    kinds: {
+      bug: "Bug",
+      idea: "Idea",
+      question: "Question",
+      other: "Other",
+    },
+    messageLabel: "Your message",
+    placeholder: "What happened, or what would help you?",
+    counter: "{count} / {max}",
+    contactOk: "You may email me about this",
+    pageNote: "We’ll include the address of the page you’re on.",
+    send: "Send",
+    sending: "Sending…",
+    cancel: "Cancel",
+    thanksTitle: "Thanks — we read every message",
+    thanksBody: "It helps us make StudyOS better.",
+    thanksContact: "If we have questions, we’ll write to the email address on your account.",
+    close: "Close",
+    errors: {
+      tooShort: "Please write at least {min} characters.",
+      invalid: "Please write between {min} and {max} characters.",
+      rateLimited: "You’ve sent several messages in a short time. Please try again later.",
+      failed: "Your message couldn’t be sent. Please try again.",
+      signedOut: "Please sign in again to send feedback.",
+    },
   },
 
   // ---- Account menu -----------------------------------------------------
@@ -1840,12 +2231,27 @@ export const en = {
     deleteAccount: "Delete account",
     deleteAccountDesc:
       "Permanently delete your account, workspaces, credits, and subscription. This can’t be undone.",
-    deleteAccountConfirm:
-      "Delete your account permanently?\n\nAll workspaces, credits, and your subscription will be removed. This can’t be undone.",
     deleteAccountButton: "Delete my account",
     deleting: "Deleting…",
     deleteAccountError:
       "We couldn’t cancel your subscription just now, so nothing was deleted. Please try again in a moment.",
+    // The in-page confirmation, with the optional reason (components/account/DeleteAccountButton).
+    deleteConfirmTitle: "Delete your account for good?",
+    deleteConfirmBody: "All workspaces, credits and your subscription will be removed. This can’t be undone.",
+    deleteReasonLegend: "Mind telling us why you’re leaving? (optional)",
+    deleteReasons: {
+      tooExpensive: "It costs too much",
+      missingFeature: "It’s missing something I need",
+      hardToUse: "It’s hard to use",
+      aiQuality: "The AI results weren’t good enough",
+      finished: "I finished my course or exams",
+      otherTool: "I’m using something else",
+      other: "Something else",
+    },
+    deleteNoteLabel: "Anything you’d like to add? (optional)",
+    deleteReasonPrivacy: "Your answer is kept without your name or account, to help us improve StudyOS.",
+    deleteConfirmButton: "Delete permanently",
+    deleteCancel: "Keep my account",
     yourData:
       "Your data",
     yourDataDesc:
@@ -1968,6 +2374,375 @@ export const en = {
     backHome: "Back to home",
   },
 
+  // ---- Help centre (/help, /help/<slug>) ------------------------------------
+  // Articles are keyed by the slugs in lib/help/catalog.ts. Their numbers are
+  // {placeholders} filled from the product's own constants (lib/help/content.ts):
+  // {build}, {message}, {kitPart} and {referral} include the unit ("30
+  // credits"); every other placeholder is a bare number. Never write a number in.
+  help: {
+    metaTitle: "Help centre · StudyOS",
+    metaDescription:
+      "Short answers on how StudyOS works: building a workspace, importing deadlines, flashcards, quizzes, grades, credits and your data.",
+    articleTitle: "{title} · StudyOS help",
+    title: "How can we help?",
+    subtitle: "Short answers about how StudyOS works today. Search, or pick a topic below.",
+    searchLabel: "Search the help centre",
+    searchPlaceholder: "Try “streak freeze” or “Canvas”",
+    clearSearch: "Clear search",
+    resultCount: "Articles matching “{query}”: {count}",
+    noResultsTitle: "Nothing matches “{query}”",
+    noResultsBody: "Try a shorter word or another spelling, or browse every article.",
+    showAll: "Show all articles",
+    topics: {
+      start: "Getting started",
+      deadlines: "Deadlines and planning",
+      study: "Studying",
+      account: "Sharing and your account",
+    },
+    home: "Help centre",
+    stepsTitle: "Step by step",
+    relatedTitle: "Related articles",
+    stuckTitle: "Still stuck?",
+    stuckBody: "Email {email} with what you were trying to do and what happened, and we’ll help you sort it out.",
+    stuckButton: "Email us",
+    footerLink: "Help",
+    paletteAction: "Open the help centre",
+    costRange: "about {price} credits, at most {max}",
+    articles: {
+      "getting-started": {
+        title: "Build your first workspace",
+        summary: "Describe your courses or add your syllabus, answer a couple of questions, and StudyOS builds your workspace in about a minute.",
+        intro: "A workspace is your semester in one place: pages, tables, trackers and study tools made for your courses. There’s no template to fill in. You describe what you study, and StudyOS builds it.",
+        steps: [
+          "Choose Generate on Your workspaces, or New workspace in search, and describe your courses in a sentence or two.",
+          "Optional: choose Add your syllabus and paste it, or upload a PDF, Word, .txt or .md file up to {uploadMb} MB. StudyOS then builds from your real courses, deadlines, grading weights and topics.",
+          "Answer a couple of short questions, or skip them, and choose Build my workspace.",
+          "Wait about a minute. Your workspace opens when it’s ready.",
+        ],
+        sections: [
+          {
+            heading: "What it costs",
+            text: "A build costs {build}, setup questions included. You see the price and your balance before you start, and a build that fails costs nothing. New accounts get {trial} trial credits once.",
+          },
+          {
+            heading: "After the build",
+            text: "Everything stays editable. Use Ask AI to change things in plain words; each change comes with Undo. Inside a workspace, Getting started shows five small steps to find your way around, and you can bring it back from search anytime.",
+          },
+        ],
+      },
+      "notion-anki-quizlet": {
+        title: "Import from Notion, Anki or Quizlet",
+        summary: "Bring Notion pages and tables into a new workspace, and move flashcards in and out of Anki and Quizlet as text.",
+        intro: "You don’t have to start from zero. Notion pages and tables can become a StudyOS workspace, and flashcard decks move in and out as plain text. None of it uses credits.",
+        steps: [
+          "In Notion, open the page to bring over and choose ••• → Export (or Settings → Export all workspace content).",
+          "Pick Markdown & CSV and turn on Include subpages.",
+          "In StudyOS, choose Import from Notion on Your workspaces, or in search, and upload the .zip, up to {notionMb} MB.",
+        ],
+        sections: [
+          {
+            heading: "What comes over from Notion",
+            text: "Pages and subpages come in as pages, and databases as tables: up to {notionPages} pages, {notionTables} tables and {notionRows} rows per table. Images come too when they can be stored; attachments such as PDFs stay in your export. When the import finishes, you see a list of anything left out.",
+          },
+          {
+            heading: "Cards from Anki or Quizlet",
+            text: "Open a flashcard deck, choose Import / export, then Import cards. Paste or upload one card per line, with front and back separated by a tab, comma or semicolon. From Anki, export with File → Export → Notes in Plain Text (.txt); .apkg files can’t be read. Cards already in the deck are skipped, and a deck holds up to {deckMax} cards.",
+          },
+          {
+            heading: "Cards to Anki or Quizlet",
+            text: "In the same menu, Download for Anki gives you a text file to open in Anki with File → Import. Download for Quizlet, or Copy for Quizlet, gives you text to paste into Quizlet’s import box.",
+          },
+        ],
+      },
+      "plans-and-credits": {
+        title: "Plans and credits",
+        summary: "What costs credits and what never does, the free trial, Pro and credit packs, and why your balance never resets.",
+        intro: "Credits pay for AI work only. Studying never costs credits, and every feature is on both plans: Pro gives you more credits, not more features.",
+        steps: [] as string[],
+        sections: [
+          {
+            heading: "What costs credits",
+            text: "Building a workspace costs {build}, setup questions included. An assistant message costs {message}; a long request can cost more, but never more than {capFree} credits on Free or {capPro} on Pro. A study kit costs {kitPart} for each part of your material it reads. You always see the cost before you start.",
+          },
+          {
+            heading: "What never costs credits",
+            text: "Reviewing flashcards, quizzes and exam mode, Today, the agenda, the grade tracker, the focus timer and insights, editing, importing and syncing deadlines, the calendar subscription, Notion and flashcard imports, search, export, undo and the trash.",
+          },
+          {
+            heading: "Failures and stopped work",
+            text: "A build or study kit that fails costs nothing, and so does an assistant message that fails, up to {failures} a day. If you stop something part-way, you pay only for the share that ran, never more than its price.",
+          },
+          {
+            heading: "Trial, Pro and credit packs",
+            text: "New accounts get {trial} credits once, and Free has no monthly top-up. Pro adds {monthly} credits for every paid month, plus higher hourly limits and a higher ceiling per message. A credit pack adds {pack} credits once, on either plan. Credits never expire and carry over: nothing resets your balance. If you run out, everything you made stays and studying keeps working.",
+          },
+          {
+            heading: "Cancelling Pro",
+            text: "In Settings, open the billing portal and cancel. Pro stays on until the end of the period you paid for, and you keep the credits you have.",
+          },
+        ],
+      },
+      "import-deadlines": {
+        title: "Import deadlines from your school calendar",
+        summary: "Connect the calendar link from Canvas, Moodle, Blackboard, Brightspace or Google Calendar, or upload an .ics file, and your deadlines land in a table.",
+        intro: "Your course platform already knows your deadlines. Connect its calendar link once and StudyOS keeps them up to date, or upload an .ics file for a one-time import.",
+        steps: [
+          "Open the table that holds your deadlines, such as Assignments, and choose Import deadlines in its toolbar.",
+          "Paste your calendar link (https:// or webcal://) and choose Preview, or upload an .ics file up to {icsMb} MB.",
+          "Check the list and which column each part goes into. Entries that don’t look like coursework, such as holidays and classes, start unticked.",
+          "Leave Keep in sync on, and import.",
+        ],
+        sections: [
+          {
+            heading: "Finding your link",
+            text: "The import dialog has a “Where do I find my calendar link?” section with the steps for Canvas, Moodle, Blackboard, Brightspace and Google Calendar.",
+          },
+          {
+            heading: "How syncing works",
+            text: "When you open the workspace, StudyOS checks the calendar for new and changed deadlines, at most every {syncHours} hours, or right away when you choose Sync now. A cell you edited yourself is never overwritten, and a deadline removed from the calendar is flagged for you to keep or delete. An uploaded file is a one-time copy and doesn’t sync.",
+          },
+          {
+            heading: "Your link stays private",
+            text: "StudyOS stores the link encrypted and never shows it to the AI. You can disconnect it anytime; deadlines already imported stay. A workspace can connect up to {feedsMax} calendars, and importing never costs credits.",
+          },
+        ],
+      },
+      "subscribe-to-your-calendar": {
+        title: "See your deadlines in Google, Apple or Outlook Calendar",
+        summary: "Subscribe to your private StudyOS calendar link, and your assignments, exams and other dated items show up in your calendar app.",
+        intro: "StudyOS gives you a private calendar link. Subscribe to it once, and your calendar app shows the assignments, exams and other dated items from all your workspaces.",
+        steps: [
+          "Open Settings and find Calendar sync.",
+          "Choose Add to calendar to open your calendar app, or copy the link and paste it into your app’s option to subscribe from a URL.",
+          "Want finished work in there too? Turn on Include completed items before you copy or add the link.",
+        ],
+        sections: [
+          {
+            heading: "Staying up to date",
+            text: "Your calendar app picks up changes the next time it refreshes, on its own schedule. Workspaces in the trash are left out.",
+          },
+          {
+            heading: "Keep the link private",
+            text: "Anyone with the link can see your deadlines. Reset link makes a new one and the old link stops working, so add the new one to your calendar app again.",
+          },
+        ],
+      },
+      agenda: {
+        title: "Your agenda for the next two weeks",
+        summary: "Every deadline and exam from all your courses, day by day, for the next {agendaDays} days.",
+        intro: "The agenda gathers the deadlines and exams from all your workspaces into one view of the days ahead, with anything overdue at the top.",
+        steps: [
+          "Choose Agenda in the row of sections at the top of Today, or Open agenda in search.",
+          "Filter by course, or choose Show done to see work you’ve finished.",
+          "Choose Focus on an item to start a focus session on it.",
+        ],
+        sections: [
+          {
+            heading: "What’s on it",
+            text: "Dated rows from your workspaces, such as assignments and exams, including deadlines imported from your school calendar. Open work that’s past its date shows as overdue. Undated to-dos, flashcards and quizzes aren’t on it.",
+          },
+          {
+            heading: "In your calendar app too",
+            text: "Choose Add these to your calendar app to subscribe to the same deadlines in Google, Apple or Outlook Calendar. The agenda is worked out from your own workspaces and never uses credits.",
+          },
+        ],
+      },
+      reminders: {
+        title: "Reminders by notification and email",
+        summary: "Get today’s plan, a heads-up before deadlines and exams, and a streak reminder on your devices or by email. Change or stop them anytime.",
+        intro: "StudyOS can remind you while the app is closed. Nothing is sent until you turn it on, and you choose what you get.",
+        steps: [
+          "Open Settings, go to Notifications and choose Turn on notifications. When your browser asks, allow them.",
+          "On iPhone or iPad, add StudyOS to your home screen first (Share, then Add to Home Screen) and open it from there. Apple only lets home-screen apps send notifications.",
+          "Choose what you get, and save.",
+          "To get reminders by email as well, turn on Send reminders by email. Your account’s email address needs to be verified.",
+        ],
+        sections: [
+          {
+            heading: "What you can get",
+            text: "Your plan for the day, at a time you pick (this needs your Daily Study Agent switched on). Deadline reminders a few days before assignments and exams, never for work you’ve marked done. One evening note, only on a day your streak would otherwise end. A weekly recap, if you turn it on.",
+          },
+          {
+            heading: "Quiet hours and limits",
+            text: "Nothing is sent during your quiet hours; a reminder that falls inside them waits until they end. You get at most {dailyCap} notifications a day.",
+          },
+          {
+            heading: "Turning them off",
+            text: "In Settings, turn notifications off on this device or on all your devices. Every reminder email has an Unsubscribe link: it stops the emails and leaves notifications on your devices as they are.",
+          },
+        ],
+      },
+      flashcards: {
+        title: "Flashcards and spaced repetition",
+        summary: "Review a few minutes a day. StudyOS schedules each card with FSRS, spreads out a backlog and protects your streak with freezes.",
+        intro: "Each card comes back around the time you’d otherwise start to forget it. StudyOS schedules cards with FSRS, so a few minutes a day is enough, even on your phone.",
+        steps: [
+          "Add a deck: on any page, type / and pick Flashcards. You can also ask the assistant for a deck, or make a study kit from your notes.",
+          "Choose Study to review the cards that are due. Show the answer with Space, then grade yourself Again, Hard, Good or Easy (keys 1 to 4).",
+          "Want more? Practice gives you extra rounds and never changes your schedule.",
+        ],
+        sections: [
+          {
+            heading: "Back after a break",
+            text: "If reviews piled up, StudyOS offers to keep today short, with the cards you’re most likely to forget, and spread the rest over the next days. Nothing you’ve learned is reset; only due dates move.",
+          },
+          {
+            heading: "Streak freezes",
+            text: "Every {freezeEvery} days of study earns a streak freeze, and you can bank {freezeMax}. A freeze covers a missed day automatically. Reviewing a few cards or answering a quiz question counts as a study day.",
+          },
+          {
+            heading: "What it costs",
+            text: "Reviewing and practising never cost credits, and neither do cards you write yourself. Cards made by the assistant or a study kit use credits, and you see the cost first.",
+          },
+        ],
+      },
+      quizzes: {
+        title: "Quizzes and mock exams",
+        summary: "Practise with instant feedback, or sit a mock exam with an optional timer and no feedback until you submit.",
+        intro: "A quiz holds multiple-choice, true/false and short-answer questions. Practise one question at a time, or take it like an exam.",
+        steps: [
+          "Add a quiz: on any page, type / and pick Quiz. You can also ask the assistant to write one from your notes, or make a study kit.",
+          "Choose Practice to see right away whether you got each question.",
+          "Choose Exam for a mock exam: every question at once, an optional timer, and no feedback until you submit.",
+        ],
+        sections: [
+          {
+            heading: "After you submit",
+            text: "You get your score and a review of every answer. You mark short answers yourself against the model answer. Then re-drill the questions you missed, or take the quiz again.",
+          },
+          {
+            heading: "Weak questions",
+            text: "In a workspace’s study hub, Practice weak questions builds a round from all your quizzes, weighted toward the questions you keep missing.",
+          },
+          {
+            heading: "Good to know",
+            text: "Taking quizzes never costs credits. A quiz holds up to {quizMax} questions. If an exam is interrupted, you can pick up where you left off on the same device.",
+          },
+        ],
+      },
+      grades: {
+        title: "The grade tracker and grades overview",
+        summary: "Enter your scores and syllabus weights to see where you stand in each course and what you need on the rest.",
+        intro: "The grade tracker shows your grade so far and the average you need on the remaining work to reach your target.",
+        steps: [
+          "On a course page, type / and pick Grade tracker.",
+          "Pick your list of graded work. The columns are filled in for you; correct anything that’s wrong and choose Start tracking.",
+          "Set a target, then type each score as you get it back, for example 87, 87.5 or 42/50.",
+        ],
+        sections: [
+          {
+            heading: "Scales and what-if",
+            text: "Show grades as percentages, US letter grades or GPA, UK degree classes or German grades, and edit the thresholds to match your school. What if lets you try scores for unfinished work without saving them. With German grades you can instead enter each module’s grade and its ECTS directly, one module per row, and see your ECTS-weighted grade average (Notenschnitt).",
+          },
+          {
+            heading: "Numbers you can trust",
+            text: "When the weights don’t add up to 100%, the tracker says so instead of showing a confident wrong number. A category such as “Problem sets 20%” shares one weight between many items and can drop your lowest scores.",
+          },
+          {
+            heading: "Grades overview",
+            text: "Choose Grades at the top of Today to see every course with a tracker in one place: where you stand, your target and what’s next. It’s worked out from your trackers, with no AI and no credits.",
+          },
+        ],
+      },
+      "focus-and-insights": {
+        title: "The focus timer and insights",
+        summary: "Start focus blocks from Today or the agenda, then see your focus time, streak, recall rate and quiz scores over time.",
+        intro: "The focus timer turns an item on your plan into study time, and Insights shows how your studying is going.",
+        steps: [
+          "Choose Focus on an item in Today or the agenda, or Start focus timer in search.",
+          "Pick a length: Classic ({classic} minutes, then a {classicBreak}-minute break), Deep work ({deep} minutes, then a {deepBreak}-minute break) or Quick start ({quick} minutes, just to get going).",
+          "Pause, stop early or skip the break whenever you like. The timer keeps running while you move around the app.",
+        ],
+        sections: [
+          {
+            heading: "What gets saved",
+            text: "Each focus block counts toward its course and your week. Sessions under a minute aren’t saved.",
+          },
+          {
+            heading: "Insights",
+            text: "Choose Insights at the top of Today to see focus time, active days, cards reviewed, recall rate and quiz accuracy for the last 7, 30 or 90 days, plus your streak, when you focus best and how each course is going. Download CSV saves the numbers.",
+          },
+          {
+            heading: "What it costs",
+            text: "Nothing. The focus timer and insights never use credits.",
+          },
+        ],
+      },
+      "share-a-page": {
+        title: "Share a page with a link",
+        summary: "Send classmates a read-only link to your notes, flashcards or quizzes. They see that one page; the rest of your workspace stays private.",
+        intro: "Share one page, such as your notes or a deck, with anyone who has the link. They can read it and practise without an account. Only you can edit it.",
+        steps: [
+          "Open the page and choose Share.",
+          "Turn on Share with a link, then copy the link and send it.",
+          "To stop sharing, turn it off. The link stops working, and turning it on again makes a new one.",
+        ],
+        sections: [
+          {
+            heading: "What visitors see",
+            text: "The current version of that one page. Flashcards show their front and back, quizzes their questions and answers, and tables the columns of the page’s views, up to {shareRows} rows each. Practising there saves nothing.",
+          },
+          {
+            heading: "What stays private",
+            text: "Your other pages, grade trackers, calendar, review history, scores and the sources your cards cite. Interactive parts of the page aren’t shown either.",
+          },
+          {
+            heading: "Copies, reports and limits",
+            text: "Visitors with a StudyOS account can save their own copy to edit. Anyone can report a page, and a page may be turned off after a report. Moving a workspace to the trash turns its links off. You can share up to {shareMax} pages at a time.",
+          },
+        ],
+      },
+      "invite-friends": {
+        title: "Invite friends and earn credits",
+        summary: "Share your invite link. When a friend joins and builds their first workspace, you both get {referral}.",
+        intro: "Every account has a personal invite link. A friend who joins through it gets bonus credits, and so do you.",
+        steps: [
+          "Open Settings and find Invite friends. Copy your link, or choose Share.",
+          "Your friend opens the link and creates a new StudyOS account in the same browser within {inviteDays} days.",
+          "Once their email address is verified and they build their first workspace, you each get {referral}.",
+        ],
+        sections: [
+          {
+            heading: "The limits",
+            text: "You can earn invite credits for up to {referralMax} friends, and for {referralPerDay} in any 24 hours. Friends past either limit still get theirs. Only new accounts count, and inviting yourself or your own other accounts earns nothing.",
+          },
+          {
+            heading: "What you see",
+            text: "Your invite card shows how many friends joined, how many were rewarded and the credits you earned. It never shows who they are.",
+          },
+          {
+            heading: "Good to know",
+            text: "Invite credits work like any other credits and never expire. They have no cash value and can’t be exchanged, transferred or refunded.",
+          },
+        ],
+      },
+      "your-data": {
+        title: "Export your data or delete your account",
+        summary: "Download everything StudyOS stores for you, export a page or a whole workspace, or delete your account for good.",
+        intro: "Your data is yours. You can take a copy or delete it yourself, anytime, without emailing anyone.",
+        steps: [
+          "To download everything: open Settings, go to Your data and choose Download my data. You get one JSON file.",
+          "To export from a workspace: use Export and print inside it for a page as Markdown, a table as CSV, the whole workspace as a .zip, or a printout or PDF.",
+          "To delete your account: open Settings, go to Danger zone, choose Delete my account and confirm.",
+        ],
+        sections: [
+          {
+            heading: "What the download includes",
+            text: "Your workspaces, study material, assistant conversations, study history, focus sessions, plans, connected calendars, notification settings, the feedback you sent, and your credits and subscription status.",
+          },
+          {
+            heading: "Deleting your account",
+            text: "It permanently removes your workspaces, study material, history, credits and shared links, and cancels any subscription straight away. It can’t be undone.",
+          },
+          {
+            heading: "The trash",
+            text: "A workspace you move to the trash waits there for {trashDays} days, so you can restore it. After that, it’s gone for good.",
+          },
+        ],
+      },
+    },
+  },
+
   // ---- Legal & footer -----------------------------------------------------
   legal: {
     terms: "Terms of Service",
@@ -1976,6 +2751,357 @@ export const en = {
     home: "Home",
     effective: "Effective {date}",
     englishOnly: "This document is published in English only.",
+    /** Footer link and page title of the legal notice (German: Impressum). */
+    notice: "Legal notice",
+    noticeDescription: "Who operates StudyOS and how to reach us.",
+  },
+
+  // ---- Withdrawal and cancellation: the statutory online functions (/withdraw, /cancel) ----
+  contractNotices: {
+    /** Link to /withdraw (statutory wording of Art. 11a CRD; German exactly „Vertrag widerrufen“). */
+    withdrawLink: "Withdraw from contract here",
+    /** Link to /cancel (§ 312k BGB; German exactly „Verträge hier kündigen“). */
+    cancelLink: "Cancel contracts here",
+    linksNote: "Withdraw from a purchase within 14 days, or cancel Pro. No sign-in needed.",
+    termsLink: "Read the Terms",
+    formTitle: "Your details",
+    withdraw: {
+      title: "Withdraw from contract",
+      metaDescription: "Withdraw from a StudyOS purchase online: fill in the form, check it and confirm.",
+      intro:
+        "You can withdraw from a purchase (Pro or a credit pack) within 14 days without giving a reason. Fill in the form, check what you’ll send, then confirm.",
+      alsoEmail: "You can also withdraw by email to {email}.",
+      /** The statutory confirm button (German exactly „Widerruf bestätigen“). */
+      confirm: "Confirm withdrawal",
+      statement: "I hereby withdraw from my contract for the following.",
+      reviewTitle: "Check your withdrawal",
+      reviewIntro: "This is exactly what we’ll receive. Nothing is sent until you select “Confirm withdrawal”.",
+      receiptTitle: "Withdrawal received",
+      received: "We received your withdrawal declaration on {date}.",
+      next: "We’ll process it as described in section 4 of the Terms and write to you by email.",
+      emailSubject: "We received your withdrawal",
+    },
+    cancel: {
+      title: "Cancel contracts",
+      metaDescription: "Cancel your StudyOS subscription online: fill in the form, check it and confirm.",
+      intro:
+        "Cancel your Pro subscription here, without signing in. Fill in the form, check what you’ll send, then confirm.",
+      alsoEmail: "You can also cancel by email to {email}.",
+      /** The statutory confirm button (German exactly „Jetzt kündigen“). */
+      confirm: "Cancel now",
+      statementOrdinary: "I hereby cancel the following contract.",
+      statementExtraordinary: "I hereby cancel the following contract for good cause, without notice.",
+      reviewTitle: "Check your cancellation",
+      reviewIntro: "This is exactly what we’ll receive. Nothing is sent until you select “Cancel now”.",
+      receiptTitle: "Cancellation received",
+      received: "We received your cancellation on {date}.",
+      scheduled: "Your Pro subscription ends on {date} and won’t renew. You keep Pro until then.",
+      next: "We’ll process it and confirm by email when your contract ends.",
+      emailSubject: "We received your cancellation",
+      typeLabel: "Kind of cancellation",
+      ordinary: "Ordinary cancellation",
+      extraordinary: "Extraordinary cancellation for good cause",
+      reasonLabel: "Reason",
+      reasonHint: "Only needed for an extraordinary cancellation.",
+      endLabel: "When should the contract end?",
+      endEarliest: "At the earliest possible date",
+      endDate: "On a date I choose",
+      endDateLabel: "End date",
+      endOn: "On {date}",
+    },
+    step: "Step {n} of 2",
+    continue: "Continue",
+    edit: "Change details",
+    sending: "Sending…",
+    signedIn: "You’re signed in, so we filled in your details. You can change them.",
+    nameLabel: "Your name",
+    emailLabel: "Email for the acknowledgement",
+    emailHint: "We confirm that we received your notice at this address.",
+    contractLabel: "Which contract?",
+    chooseOne: "Choose…",
+    pro: "Pro subscription",
+    pack: "Credit pack",
+    other: "Something else",
+    proUntil: "Pro subscription, paid until {date}",
+    packOn: "Credit pack, bought on {date}",
+    detailsLabel: "Order date or other details (optional)",
+    detailsHint: "For example when you bought it, or the email address of your StudyOS account.",
+    lines: {
+      declaration: "Declaration",
+      to: "To",
+      name: "Name",
+      email: "Email for the acknowledgement",
+      contract: "Contract",
+      details: "Details",
+      type: "Kind of cancellation",
+      reason: "Reason",
+      end: "Contract end",
+      reference: "Reference",
+    },
+    errors: {
+      summary: "Please check the marked fields.",
+      required: "Please fill this in.",
+      invalidEmail: "Enter a valid email address, like name@example.com.",
+      invalidContract: "Choose one of the contracts.",
+      invalidDate: "Choose a date from today onwards.",
+      tooLong: "This is too long. Please shorten it.",
+      rateLimited: "Too many notices were sent from your network in a short time, so this one wasn’t sent.",
+      busy: "We can’t accept more notices online right now, so this one wasn’t sent.",
+      failed: "Something went wrong and your notice wasn’t sent.",
+      emailRoute: "You can always send it by email instead, to {email}. Sending it before the period ends is enough.",
+    },
+    receipt: {
+      emailSent: "We emailed an acknowledgement of receipt to {email}.",
+      emailFailed:
+        "We couldn’t email the acknowledgement. Please print or save this page as your proof of receipt. You can also write to us at {email}.",
+      emailOff:
+        "No acknowledgement email could be sent. Please print or save this page as your proof of receipt. You can also write to us at {email}.",
+      print: "Print or save this page",
+    },
+    email: {
+      receiptOnly: "This email confirms that we received your declaration. Here is what you sent:",
+      notYou: "This address was entered in the form on {site}. If that wasn’t you, please tell us at {email}.",
+    },
+  },
+
+  // ---- Share links: the page's "Share" dialog and the public page (/s/...) ----
+  share: {
+    button: "Share",
+    title: "Share this page",
+    intro: "Anyone with the link can see this page. Only you can edit it.",
+    toggle: "Share with a link",
+    offNote: "Off. Only you can see this page.",
+    visibleNote: "Visitors see the current version of this page. Your other pages, grades and calendar stay private.",
+    linkLabel: "Link to this page",
+    copy: "Copy link",
+    copied: "Copied",
+    open: "Open",
+    views: { one: "{count} view", other: "{count} views" } as PluralForms,
+    sharedSince: "Shared since {date}",
+    offHint: "Turning it off breaks the link. Turning it on again makes a new one.",
+    columnsNote: "Tables and calendars show the columns of this page’s views.",
+    trashNote: "Moving the workspace to the trash turns its links off. Restoring it doesn’t turn them back on.",
+    loading: "Loading…",
+    errors: {
+      failed: "That didn’t work. Try again.",
+      limit: "You’re sharing {max} pages already. Turn one off to share this one.",
+      notFound: "This page can’t be shared right now. Reload and try again.",
+      signedOut: "You’re signed out. Sign in again to share.",
+      pageDisabled: "This page was turned off after a report. Contact support if you think that’s a mistake.",
+      accountBlocked:
+        "Sharing is off for your account after several reports. Contact support if you think that’s a mistake.",
+      rateLimited: "You’ve turned sharing on many times in the last hour. Try again later.",
+    },
+    // The public page
+    madeWith: "Made with StudyOS",
+    sharedNote: "Shared from StudyOS. Read-only.",
+    hiddenComponent: "An interactive part of this page isn’t shown here.",
+    empty: "This page is empty.",
+    metaDescription: "A study page shared from StudyOS.",
+    tooMany: {
+      title: "Too many requests",
+      body: "Shared pages were opened many times from your network in a short while. Wait a few minutes, then reload this page.",
+    },
+    cta: {
+      title: "Make your own StudyOS",
+      body: "Notes, flashcards and quizzes made to measure by AI. Free to start.",
+      button: "Start free",
+    },
+    save: {
+      title: "Keep this page",
+      body: "Save a copy to your StudyOS. It’s yours to edit and study from.",
+      button: "Save a copy to my StudyOS",
+      saving: "Saving…",
+      signUp: "Sign up to save a copy",
+      signIn: "I have an account",
+      welcomeBack: "You’re signed in. Save your copy now.",
+      errors: {
+        limit: "You have too many workspaces. Delete one, then try again.",
+        rateLimited: "You’ve made a lot of copies. Try again in an hour.",
+        gone: "This page isn’t shared anymore.",
+        failed: "Couldn’t save the copy. Try again.",
+      },
+    },
+    // Practice on the public page: nothing is recorded
+    practiceNote: "Practice only. Nothing is saved.",
+    cardOf: "Card {n} of {total}",
+    showAnswer: "Show answer",
+    showQuestion: "Show question",
+    front: "Question",
+    back: "Answer",
+    previous: "Previous",
+    next: "Next",
+    shuffle: "Shuffle",
+    questionOf: "Question {n} of {total}",
+    startOver: "Start over",
+    score: "{score} of {total} right",
+    report: {
+      link: "Report this page",
+      title: "Report this page",
+      intro: "Tell us what’s wrong and we’ll take a look.",
+      reasonLabel: "What’s wrong?",
+      reasons: {
+        spam: "Spam",
+        copyright: "Copyright",
+        harmful: "Harmful or abusive",
+        personal: "Someone’s personal information",
+        other: "Something else",
+      },
+      messageLabel: "Details (optional)",
+      placeholder: "Anything that helps us understand",
+      send: "Send report",
+      sending: "Sending…",
+      cancel: "Cancel",
+      thanksTitle: "Thanks for telling us",
+      thanksBody: "We’ll review this page.",
+      close: "Close",
+      errors: {
+        invalid: "Pick a reason. Details can be up to {max} characters.",
+        rateLimited: "Too many reports from here. Try again later.",
+        gone: "This page isn’t shared anymore.",
+        failed: "Couldn’t send the report. Try again.",
+      },
+    },
+  },
+
+  // ---- Free tools (/tools/...): public pages, no account, nothing stored -----
+  // The grade calculator words its results with the grades namespace's own
+  // sentences (outlook, notes, decided); only what it adds lives here.
+  tools: {
+    gradeCalculator: {
+      footerLink: "Grade calculator",
+      metaTitle: "Grade calculator: what do I need on my final? · StudyOS",
+      metaDescription:
+        "Free weighted grade calculator. Enter your scores and weights to see your grade so far and what you need on the rest of the course to reach your target. No sign-up.",
+      title: "Final grade calculator",
+      subtitle:
+        "Enter your graded work and its weight. You’ll see your grade so far and the average you need on the rest to reach your target. Free, with no sign-up.",
+      workTitle: "Your graded work",
+      nameColumn: "Assignment or exam",
+      namePlaceholder: "e.g. Midterm",
+      // Names a row without a name in labels: "Weight item 2", "Remove item 2".
+      itemN: "item {n}",
+      scorePlaceholder: "e.g. 42/50",
+      scoreHint:
+        "Type a score as a percentage (84 or 84%) or as points (42/50). Leave it empty for work that isn’t graded yet.",
+      addRow: "Add a row",
+      maxRows: "That’s the most the calculator takes: {max} rows.",
+      invalidWeight: "Couldn’t read “{text}”. Type the weight in percent, like 25.",
+      invalidTarget: "Couldn’t read “{text}”. Type a percentage, like 85.",
+      targetPlaceholder: "e.g. 85",
+      resultTitle: "Your result",
+      current: "Grade so far",
+      needed: "Needed on the rest",
+      securedValue: "Secured",
+      unreachableValue: "Out of reach",
+      metValue: "Reached",
+      missedValue: "Missed",
+      range: "Depending on the rest, your final grade will be between {min} and {max}.",
+      empty: "Add your graded work with its weight, and your result appears here.",
+      loadExample: "Load an example",
+      copyFailed: "Couldn’t copy the link. Copy the address from your browser instead.",
+      privacyNote:
+        "Nothing is saved. Your numbers live only in this page’s address, so you can bookmark it or share the link.",
+      // The mode switch: one course with weights, or the German grade average
+      // (modules with credits and grades 1.0 to 5.0, lib/grades/german.ts),
+      // which German visitors get first.
+      modeLegend: "What do you want to work out?",
+      modes: {
+        course: "One course (weights)",
+        ects: "German grade average (ECTS)",
+      },
+      ects: {
+        workTitle: "Your modules",
+        moduleColumn: "Module",
+        ectsColumn: "ECTS",
+        gradeColumn: "Grade",
+        namePlaceholder: "e.g. Statistics",
+        gradePlaceholder: "e.g. 1.7",
+        hint: "Grades go from 1.0 (best) to 5.0, and 4.0 or better is a pass. Leave the grade empty for modules you haven’t finished yet.",
+        failedTag: "Not passed",
+        invalidEcts: "Couldn’t read “{text}”. Type the credits as a number above 0, like 6.",
+        invalidGrade: "“{text}” isn’t a German grade. Type a grade from 1.0 to 5.0, like 1.7.",
+        targetLabel: "Target average",
+        average: "Grade average",
+        unrounded: "Unrounded: {value}",
+        neededLabel: "Needed in open modules",
+        orBetter: "or better",
+        ectsDone: "{earned} ECTS earned · {open} ECTS open",
+        empty: "Add your modules with their ECTS and grade, and your average appears here.",
+        outlook: {
+          pick: "Pick a target average to see what you need in your open modules.",
+          needed: "To finish with {target} or better, you need an average of {grade} or better in your open modules ({open} ECTS).",
+          secured: "{target} is secured, even with 4.0 in every open module.",
+          unreachable: "{target} is out of reach, even with 1.0 in every open module. The best you can still finish with is {best}.",
+          met: "No open modules: your average is {average}, so you reached {target}.",
+          missed: "No open modules: your average is {average}, so you missed {target}.",
+          nonePassed: "No module is passed yet, so there’s no average.",
+          missingEcts: "Add the ECTS for every module to see what you need. Modules without ECTS: {count}.",
+        },
+        notes: {
+          failed: "Not passed (worse than 4.0): {count}. They don’t count toward your average, and their ECTS are still missing. Enter a retake as an open module.",
+          equal: "Not every graded module has ECTS, so each counts the same. Add the ECTS for a weighted average.",
+        },
+        rule: "How it’s worked out: weighted by ECTS, modules not passed don’t count, and everything after the first decimal is cut off, not rounded (1.89 becomes 1.8). Check your exam regulations: some programmes weight modules differently or drop the worst grades.",
+        example: {
+          math: "Mathematics I",
+          programming: "Programming",
+          theory: "Theoretical computer science",
+          databases: "Databases",
+          statistics: "Statistics",
+          softwareEngineering: "Software engineering",
+        },
+      },
+      ctaTitle: "StudyOS does this for every course, automatically",
+      ctaBody:
+        "Describe your courses and StudyOS builds you a workspace made to measure, with a grade tracker that recalculates as you enter your scores.",
+      ctaPoints: [
+        "Your grade and target in every course, always up to date",
+        "What-if mode to try out scores before you get them",
+        "Every deadline in one list",
+        "A daily plan of what to study next",
+      ],
+      ctaSignedOut: "Track every course for free",
+      ctaSignedIn: "Open my grades",
+      faqTitle: "How it works",
+      faq: [
+        {
+          question: "How is a weighted grade worked out?",
+          answer:
+            "Each piece of work counts in proportion to its weight. Multiply each score, as a percentage, by its weight, add the results up and divide by the total weight of the work graded so far. For example, 90% on a test worth 20% and 70% on a test worth 30% give (90 × 20 + 70 × 30) ÷ 50 = 78%.",
+        },
+        {
+          question: "What does “needed on the rest” mean?",
+          answer:
+            "It’s the average you need across all the work that isn’t graded yet, with each piece counted by its weight. If 60% of the grade is decided and you have 78% so far, reaching 80% takes an average of 83% on the remaining 40%.",
+        },
+        {
+          question: "What if my weights don’t add up to 100%?",
+          answer:
+            "Then the calculator treats the work you listed as the whole course and says so under the result. For an exact answer, add the missing work, often the final exam, with its weight.",
+        },
+        {
+          question: "Can I enter points instead of percentages?",
+          answer:
+            "Yes. Type a score as points, like 42/50, or as a percentage, like 84 or 84%. If none of your work has a weight, each piece counts by its points.",
+        },
+        {
+          question: "What do “secured” and “out of reach” mean?",
+          answer:
+            "Secured means you reach your target even with 0 on everything left. Out of reach means that even 100% on everything left falls short; the calculator then shows the best final grade you can still get.",
+        },
+        {
+          question: "Which grading scales does it support?",
+          answer:
+            "Percentages, US letter grades, the US 4.0 GPA, UK degree classes and German grades from 1.0 to 5.0. Schools set their own thresholds, so check yours; the grade tracker in StudyOS lets you change them.",
+        },
+        {
+          question: "Is what I type saved anywhere?",
+          answer:
+            "No. StudyOS doesn’t store anything you type here. Your numbers live only in the page address, which is what makes the link work for bookmarks and sharing.",
+        },
+      ],
+    },
   },
 
   // ---- Calendar subscription (ICS feed) ----------------------------------
@@ -1994,6 +3120,78 @@ export const en = {
       "Items you’ve marked done are left out of your calendar unless you include them. Change this before copying or adding the link.",
     instructions:
       "Paste this link into your calendar app’s “Subscribe from URL” option. Keep it private — anyone with the link can see your deadlines. Reset it anytime to revoke access.",
+  },
+
+  // ---- Import from Notion: the dialog, and what the import writes into the workspace ----
+  notionImport: {
+    homeButton: "Import from Notion",
+    paletteAction: "Import from Notion",
+    title: "Import from Notion",
+    description: "Bring your Notion pages and databases into a new workspace. It’s free: no credits used.",
+    stepsTitle: "First, export from Notion",
+    step1: "In Notion, open the page to bring over and choose ••• → Export (or Settings → Export all workspace content).",
+    step2: "Pick Markdown & CSV and turn on Include subpages.",
+    step3: "Upload the .zip Notion gives you here.",
+    dropTitle: "Drop your Notion export here",
+    choose: "Choose .zip file",
+    fileHint: ".zip, up to {size}",
+    selected: "Ready to import: {name}",
+    change: "Choose another file",
+    start: "Import",
+    uploading: "Uploading… {percent}",
+    building: "Building your workspace…",
+    cancel: "Cancel",
+    close: "Close",
+    doneTitle: "Your workspace is ready",
+    doneBody: "“{name}” is in your workspaces now.",
+    open: "Open workspace",
+    tables: { one: "{count} table", other: "{count} tables" } as PluralForms,
+    images: { one: "{count} image", other: "{count} images" } as PluralForms,
+    skippedTitle: "Not imported",
+    skippedHint: "These stay in your Notion export:",
+    reasons: {
+      page_limit: "Pages past the limit of {max}",
+      database_limit: "Tables past the limit of {max}",
+      row_limit: "Rows past {max} per table",
+      column_limit: "Columns past {max} per table",
+      size_limit: "Pages or rows past the {size} workspace size limit",
+      truncated: "Very long pages or cells, cut short",
+      image: "Images that couldn’t be stored",
+      attachment: "Attachments (PDFs and other files)",
+      nested_zip: "Zip files nested too deep",
+      unreadable: "Files that couldn’t be read",
+    },
+    errors: {
+      invalid: "Choose a .zip file to import.",
+      not_zip: "That file isn’t a .zip. In Notion, export as Markdown & CSV and upload the .zip it gives you.",
+      not_notion: "This zip has no Notion pages or databases in it. Export as Markdown & CSV, not HTML or PDF.",
+      too_large: "That export is too big. Upload up to {size}, or export fewer pages at a time.",
+      too_many_files: "That export has too many files (over {max}). Export a smaller part of your workspace.",
+      unsafe: "This zip can’t be imported safely. Export it again from Notion.",
+      encrypted: "This zip is password-protected. Export it again from Notion without a password.",
+      corrupt: "This zip is damaged. Download the export from Notion again.",
+      timeout: "That export took too long to read. Try a smaller part of your workspace.",
+      busy: "An import is already running. Try again in a moment.",
+      rate_limited: "That’s a lot of imports. Try again in an hour.",
+      network: "The upload didn’t go through. Check your connection and try again.",
+      failed: "Something went wrong with the import. Try again.",
+    },
+    content: {
+      workspaceName: "Notion import",
+      homeIntro: "Imported from Notion.",
+      untitled: "Untitled",
+      subpages: "Subpages",
+      rowPages: "Pages in {name}",
+      tableName: "Table from {page}",
+      column: "Column {n}",
+      viewTable: "Table",
+      viewBoard: "Board",
+      viewCalendar: "Calendar",
+      image: "Image",
+      imageNotImported: "Image not imported: {name}",
+      fileNotImported: "file not imported",
+      truncated: "The rest of this page was too long to import.",
+    },
   },
 
   // ---- Study material: study kits from the student's own slides and notes ----
@@ -2153,6 +3351,8 @@ export const en = {
         "open Calendar, choose “Import or export calendars”, then “Export calendar”. Pick “All events” and a time period, select “Get calendar URL” and copy it.",
       blackboard: "open Calendar, select the settings icon, choose “Share calendar” and copy the link.",
       brightspace: "open Calendar, select “Subscribe” below the calendar, choose all your courses and copy the link.",
+      ilias: "open the calendar, select “Abonnieren” (Subscribe) and copy the iCal URL that ILIAS shows.",
+      studip: "open “Planer”, then “Terminkalender”, choose “Kalender teilen” (Share calendar) and copy the address it creates.",
       google:
         "on a computer, open Settings, select your calendar (Google Classroom adds one per class) and under “Integrate calendar” copy the “Secret address in iCal format”.",
     },
@@ -2242,6 +3442,8 @@ export const en = {
       moodle: "Moodle",
       blackboard: "Blackboard",
       brightspace: "Brightspace",
+      ilias: "ILIAS",
+      studip: "Stud.IP",
       google: "Google Calendar",
       outlook: "Outlook",
       apple: "Apple Calendar",
@@ -2429,6 +3631,26 @@ export const en = {
     },
   },
 
+  // ---- Email reminders (the reminder email, the unsubscribe page) -----
+  email: {
+    open: "Open in StudyOS",
+    why: "You’re getting this because you turned on email reminders in StudyOS.",
+    manage: "Change what you get",
+    unsubscribe: "Unsubscribe",
+    testTitle: "Email reminders are on",
+    testBody: "This is how StudyOS reminders look in your inbox. Change what you get, or stop them, anytime in Settings.",
+    unsubTitle: "Stop reminder emails?",
+    unsubBody: "StudyOS will stop sending you reminder emails. Notifications on your devices stay as they are.",
+    unsubButton: "Unsubscribe",
+    unsubDoneTitle: "You’re unsubscribed",
+    unsubDoneBody: "You won’t get reminder emails from StudyOS anymore. You can turn them back on in Settings anytime.",
+    unsubInvalidTitle: "This link doesn’t work",
+    unsubInvalidBody: "It may have been cut off. To stop reminder emails, sign in to StudyOS and turn them off in Settings.",
+    unsubFailedTitle: "That didn’t work",
+    unsubFailedBody: "Your reminder emails are still on. Try again in a moment.",
+    unsubSettings: "Notification settings",
+  },
+
   // ---- Notifications (settings section, Today prompt, push messages) ---
   notifications: {
     title: "Notifications",
@@ -2476,6 +3698,9 @@ export const en = {
     leadDays: { one: "{count} day", other: "{count} days" } as PluralForms,
     streakLabel: "Streak reminder",
     streakHint: "One gentle note in the evening, only on a day your streak would otherwise end.",
+    weeklyLabel: "Weekly recap",
+    weeklyHint: "A short look back at your week, every {day} at {time}. Skipped when you took the week off.",
+    weeklyDayLabel: "Day",
     quietLabel: "Quiet hours",
     quietHint: "Nothing is sent in this window. A reminder that falls inside it waits until it ends.",
     quietFrom: "From",
@@ -2502,13 +3727,35 @@ export const en = {
     msgEffort: "About {time} of work",
     msgDeadlineNudge: "A little today keeps it light.",
     msgExamNudge: "Short reviews now beat cramming later.",
+    msgFormalityTomorrow: "{title} closes tomorrow",
+    msgFormalityIn: { one: "{title} closes in {count} day ({day})", other: "{title} closes in {count} days ({day})" } as PluralForms,
+    msgFormalityNudge: "An administrative deadline, not coursework: a few minutes, and it can’t be made up afterwards.",
     msgGroupTitle: { one: "{count} deadline coming up", other: "{count} deadlines coming up" } as PluralForms,
     msgGroupItem: "{title} ({day})",
     msgGroupMore: "and {count} more",
     msgStreakTitle: "Your {count}-day streak is still open today",
     msgStreakBody: "A few cards keep it going. And if today is a rest day, that’s fine too.",
+    msgWeeklyTitle: "Your week: {lead}",
+    msgWeeklyFocus: "{time} focused",
+    msgWeeklyCards: { one: "{count} card", other: "{count} cards" } as PluralForms,
+    msgWeeklyQuiz: { one: "{count} quiz answer", other: "{count} quiz answers" } as PluralForms,
+    msgWeeklyDays: { one: "{count} active day", other: "{count} active days" } as PluralForms,
+    msgWeeklyBody: "{details}. Nice work. See the whole week in Insights.",
     msgTestTitle: "Notifications are on",
     msgTestBody: "This is how StudyOS will reach you. Change what you get anytime in Settings.",
+    emailTitle: "Reminders by email",
+    emailLabel: "Send reminders by email to {address}",
+    emailLabelAlso: "Also send reminders by email to {address}",
+    emailHint: "The reminders you choose here, at the same times, never in quiet hours. Every email has a link to stop them.",
+    emailNoAddress: "Add an email address under “Manage account” above, then turn this on.",
+    emailUnverified: "Verify {address} under “Manage account” above, then turn this on.",
+    emailBounced: "Emails to {address} were refused, so they stopped. Check the address, then turn this on again.",
+    emailUnavailable: "Your email address can’t be checked right now. Try again in a moment.",
+    emailOn: "Email reminders are on.",
+    emailOff: "Email reminders are off.",
+    sendTestEmail: "Send a test email",
+    testEmailSent: "Sent to {address}. It should arrive within a minute or two.",
+    testEmailFailed: "The test email couldn’t be sent. Try again in a few minutes.",
   },
 };
 

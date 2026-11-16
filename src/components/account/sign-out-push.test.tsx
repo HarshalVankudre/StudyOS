@@ -78,11 +78,20 @@ describe("sign-out clears this device's notifications first", () => {
   });
 
   it("account deletion clears push before deleting", async () => {
-    vi.spyOn(window, "confirm").mockReturnValue(true);
     render(<DeleteAccountButton />);
     await userEvent.click(screen.getByRole("button", { name: en.settings.deleteAccountButton }));
+    await userEvent.click(screen.getByRole("button", { name: en.settings.deleteConfirmButton }));
     await waitFor(() => expect(m.del).toHaveBeenCalled());
     expect(m.order).toEqual(["clearPush", "delete"]);
+  });
+
+  it("account deletion that cannot reach the server says so instead of failing the page", async () => {
+    m.del.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    render(<DeleteAccountButton />);
+    await userEvent.click(screen.getByRole("button", { name: en.settings.deleteAccountButton }));
+    await userEvent.click(screen.getByRole("button", { name: en.settings.deleteConfirmButton }));
+    expect(await screen.findByText(en.safety.actionFailed)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: en.settings.deleteConfirmButton })).toBeEnabled();
   });
 
   it("a signed-out browser drops a leftover subscription; a signed-in one keeps it", () => {

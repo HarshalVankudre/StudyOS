@@ -18,7 +18,7 @@ const badgeVariants = cva(
           "border-border text-foreground [a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
         // `accent` in Tailwind is the neutral hover tint (--accent-bg), not the
         // brand teal, so this uses the lime/teal tokens: 6.0:1 dark, 4.6:1 light.
-        teal: "bg-lime-faint font-semibold text-lime-deep ring-1 ring-inset ring-lime/40",
+        teal: "bg-lime-faint font-semibold text-lime-deep ring-1 ring-inset ring-lime-deep/40",
         ghost: "[a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
         link: "text-primary underline-offset-4 [a&]:hover:underline",
       },

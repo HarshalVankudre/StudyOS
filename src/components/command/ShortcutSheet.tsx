@@ -49,7 +49,7 @@ export function ShortcutSheet({
             <section key={group} aria-labelledby={`shortcut-group-${group}`}>
               <h3
                 id={`shortcut-group-${group}`}
-                className="mb-2 font-mono text-[11px] font-semibold uppercase tracking-wide text-ink-faint"
+                className="mb-2 text-[11px] font-semibold text-ink-faint"
               >
                 {S.groups[group]}
               </h3>

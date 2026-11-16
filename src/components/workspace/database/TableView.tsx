@@ -75,7 +75,7 @@ export function TableView({ db, view, rows, actions, onOpen, onAdd, empty }: Vie
       <div className="overflow-x-auto overscroll-x-contain" data-testid="table-scroll">
         <table className="w-full border-separate border-spacing-0 text-sm">
           <thead>
-            <tr className="bg-surface text-start font-mono text-[10.5px] uppercase tracking-wide text-ink-faint">
+            <tr className="bg-surface text-start text-[11.5px] text-ink-faint">
               <th className={`${STICKY_HEAD} start-0 w-9 min-w-9 border-b border-line p-0`}>
                 <span className="sr-only">{dict.dbViews.rowDetails}</span>
               </th>
@@ -96,14 +96,14 @@ export function TableView({ db, view, rows, actions, onOpen, onAdd, empty }: Vie
                       type="button"
                       onClick={() => cycleSort(p.id)}
                       title={t(dict.dbViews.sortBy, { name: p.name })}
-                      className="flex min-h-9 w-full items-center gap-1 px-3 py-2 text-start uppercase hover:text-ink-soft"
+                      className="flex min-h-9 w-full items-center gap-1 px-3 py-2 text-start hover:text-ink-soft"
                     >
                       <span dir="auto" className="truncate">{p.name}</span>
                       {sort &&
                         (sort.direction === "desc" ? (
-                          <ArrowDown className="h-3 w-3 shrink-0 text-lime" aria-hidden />
+                          <ArrowDown className="h-3 w-3 shrink-0 text-lime-deep" aria-hidden />
                         ) : (
-                          <ArrowUp className="h-3 w-3 shrink-0 text-lime" aria-hidden />
+                          <ArrowUp className="h-3 w-3 shrink-0 text-lime-deep" aria-hidden />
                         ))}
                     </button>
                   </th>

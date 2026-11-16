@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Download, Layers, ListChecks, MoreHorizontal, Redo2, RotateCw, Search, Trash2, Undo2 } from "lucide-react";
+import { Download, Layers, ListChecks, MoreHorizontal, Redo2, RotateCw, Search, Share2, Trash2, Undo2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { PriceQuote } from "@/lib/price-list";
@@ -34,6 +34,7 @@ import { AgentChat } from "./AgentChat";
 import { DeepLinkProvider } from "./DeepLinkContext";
 import { FeedAutoSync } from "./feeds/FeedAutoSync";
 import { PageView } from "./PageView";
+import { OPEN_SHARE_EVENT, ShareButton } from "./ShareButton";
 import { StudyLauncher } from "./StudyLauncher";
 import { StudyKitHost } from "./materials/StudyKitHost";
 import { hasQuizzes } from "./quiz/QuizHub";
@@ -44,6 +45,7 @@ import type { MergeNotice, Notice, PendingField, UpdateOptions } from "./workspa
 import { describeValue } from "./mergeDetails";
 import { PendingFieldsContext } from "./editor/pendingFields";
 import { DraftInput } from "./editor/DraftInput";
+import { BrandMark } from "@/components/BrandMark";
 
 const TOAST_MS = 8000;
 
@@ -370,8 +372,8 @@ export function WorkspaceEditor({
               href="/app"
               className="flex items-center gap-1.5 font-display text-[15px] font-extrabold tracking-tight text-ink"
             >
+              <BrandMark />
               StudyOS
-              <span className="mb-1.5 h-1 w-1 rounded-full bg-lime" aria-hidden />
             </Link>
             <button
               ref={sidebarCloseRef}
@@ -455,11 +457,14 @@ export function WorkspaceEditor({
             {dict.editor.allWorkspaces}
           </Link>
 
-          <div className="flex min-h-12 items-center gap-2 border-t border-line px-3 py-2">
+          {/* The sidebar is 240px wide: the balance never wraps, the language
+              picker is its icon only, and a long balance pushes the two
+              buttons onto a second row instead of out of the sidebar. */}
+          <div className="flex min-h-12 flex-wrap items-center gap-2 border-t border-line px-3 py-2">
             <CreditMeter initial={initialCredits} />
-            <span className="ms-auto flex items-center gap-1">
+            <span className="ms-auto flex shrink-0 items-center gap-1.5">
               <ThemeToggle />
-              <LanguageSwitcher compact />
+              <LanguageSwitcher iconOnly menu="above" />
             </span>
           </div>
 
@@ -513,6 +518,7 @@ export function WorkspaceEditor({
               <GettingStarted onAskAi={openAi} nudgeContainer={nudgeSlot} />
               <StudyLauncher />
               <ExportMenu workspace={workspace} page={activePage} />
+              <ShareButton workspaceId={id} pageId={activePage?.id} />
               <button
                 onClick={() => (aiOpen ? closeAi() : openAi())}
                 aria-pressed={aiOpen}
@@ -525,7 +531,7 @@ export function WorkspaceEditor({
                 }
                 className={`flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-md border px-2 text-xs font-semibold transition sm:min-h-0 sm:min-w-0 sm:px-3.5 sm:py-1.5 ${
                   aiOpen
-                    ? "border-lime bg-lime-faint text-ink"
+                    ? "border-lime-deep bg-lime-faint text-ink"
                     : "border-line-strong bg-card text-ink hover:bg-hover"
                 }`}
               >
@@ -700,6 +706,10 @@ function MoreActions({
         <DropdownMenuItem className={ITEM} onSelect={later(OPEN_EXPORT_EVENT)}>
           <Download className="h-4 w-4" aria-hidden />
           {A.export}
+        </DropdownMenuItem>
+        <DropdownMenuItem className={ITEM} onSelect={later(OPEN_SHARE_EVENT)}>
+          <Share2 className="h-4 w-4" aria-hidden />
+          {dict.share.button}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

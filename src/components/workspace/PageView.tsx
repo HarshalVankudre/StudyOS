@@ -12,6 +12,7 @@ import {
 import { Plus } from "lucide-react";
 import type { Block, Database, Page, Workspace } from "@/lib/workspace/types";
 import { useI18n } from "@/lib/i18n/client";
+import { newGradesBlockSettings } from "@/lib/grades/modules";
 import { cn } from "@/lib/utils";
 import { BlockText, type BlockTextHandle } from "./BlockText";
 import { DatabaseView } from "./DatabaseView";
@@ -97,7 +98,7 @@ function PageEditor({
   onTitleFocused?: () => void;
 }) {
   const { update, workspace } = useWorkspace();
-  const { dict, t } = useI18n();
+  const { dict, t, locale } = useI18n();
   const pageId = page.id;
 
   const titleRef = useRef<HTMLInputElement>(null);
@@ -216,8 +217,9 @@ function PageEditor({
         case "quiz":
           return { block: { id, type: "quiz", title: dict.quiz.newQuizTitle, questions: [] } };
         case "grades":
-          // Unconfigured: the block's own setup step detects the columns.
-          return { block: { id, type: "grades", title: dict.grades.defaultTitle } };
+          // Unconfigured: the block's own setup step detects the columns. A
+          // German interface starts with German module grades.
+          return { block: { id, type: "grades", title: dict.grades.defaultTitle, ...newGradesBlockSettings(locale) } };
         case "linked":
           return {
             block: { id, type: "database_view", databaseId: action.databaseId, viewId: action.viewId },
@@ -591,7 +593,7 @@ function PageEditor({
         return s;
       },
     };
-  }, [update, pageId, dict]);
+  }, [update, pageId, dict, locale]);
 
   const numbers = useMemo(() => listNumbers(page.blocks), [page.blocks]);
 

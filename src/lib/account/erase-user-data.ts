@@ -7,6 +7,20 @@
  * this, so nothing can be granted or recreated while it runs), BillingEvent
  * rows (the audit trail of money movements) and BillingIntent rows (the
  * queued cancellation of the account's billing, retried until it succeeds).
+ * ErrorEvent rows (the operator console's error counts) hold no user id, so
+ * there is nothing of the user's in them to erase; they age out after 30 days.
+ * ReferralMailbox rows (lib/referral/mailbox.ts) hold no user id and no
+ * address either, only a keyed HMAC of a mailbox an invite credit went to and
+ * which side it was for: kept on purpose, so deleting an account and signing
+ * up again with the same mailbox can never earn the invite bonus twice. The
+ * invite the user came through is anonymised, not erased (see below).
+ * AccountDeletionReason rows (lib/account/deletion-reason.ts) hold no user id:
+ * the optional "why are you leaving?" answer, written after this runs.
+ * ContractNotice rows (withdrawals and cancellations the user declared with
+ * /withdraw or /cancel, lib/contract-notices) are legal records the operator
+ * needs to prove receipt and to refund or end the contract: they are kept
+ * with their link to the account (userId) cleared, and deleted three years
+ * after receipt (lib/ops/retention.ts).
  *
  * Asset rows whose bytes could not be deleted from storage (an outage, or
  * storage not configured) are KEPT, so the files are never orphaned: the
@@ -28,7 +42,15 @@ import { reportError } from "@/lib/ops/report-error";
  * Models eraseUserData keeps on purpose (see above). Every other model in
  * prisma/schema.prisma that holds a user's rows is erased; a test checks this.
  */
-export const ERASURE_KEPT_MODELS = ["DeletedAccount", "BillingEvent", "BillingIntent"] as const;
+export const ERASURE_KEPT_MODELS = [
+  "DeletedAccount",
+  "BillingEvent",
+  "BillingIntent",
+  "ErrorEvent",
+  "ReferralMailbox",
+  "AccountDeletionReason",
+  "ContractNotice",
+] as const;
 
 /**
  * Delete the stored bytes of `assets`. Returns the ids whose file is gone
@@ -82,13 +104,34 @@ export async function eraseUserData(userId: string): Promise<{ assetsPending: nu
     prisma.creditHold.deleteMany({ where: { userId } }),
     prisma.usageEvent.deleteMany({ where: { userId } }),
     prisma.studyDay.deleteMany({ where: { userId } }),
+    // Focus timer sessions (minutes focused per day).
+    prisma.focusSession.deleteMany({ where: { userId } }),
     prisma.calendarToken.deleteMany({ where: { userId } }),
     // Connected calendar feed links (credentials to the student's calendar).
     prisma.calendarFeed.deleteMany({ where: { userId } }),
-    // Notifications: device subscriptions (capability URLs), choices, sent-log.
+    // Notifications: device subscriptions (capability URLs), choices (the
+    // email switch and bounce record included), sent-log.
     prisma.pushSubscription.deleteMany({ where: { userId } }),
     prisma.notificationPreference.deleteMany({ where: { userId } }),
     prisma.notificationLog.deleteMany({ where: { userId } }),
+    // Messages sent with "Send feedback".
+    prisma.feedback.deleteMany({ where: { userId } }),
+    // Public page links and the reports visitors sent about them (reports
+    // first; they also go with their share by cascade).
+    prisma.shareReport.deleteMany({ where: { share: { userId } } }),
+    prisma.pageShare.deleteMany({ where: { userId } }),
+    // The invite link and the invites the student made. The invite the
+    // student came through, as the invited friend, is anonymised instead:
+    // its link to them (refereeId) goes, its status, outcome and dates stay,
+    // the operator console's evidence about the inviter. Credits the other
+    // side already got stay theirs; the inviter's caps count from their own
+    // ledger and the mailbox register (ReferralMailbox, kept: see above).
+    prisma.referralCode.deleteMany({ where: { userId } }),
+    prisma.referral.deleteMany({ where: { referrerId: userId } }),
+    prisma.referral.updateMany({ where: { refereeId: userId }, data: { refereeId: null } }),
+    // Withdrawal and cancellation notices: kept as legal records, unlinked
+    // from the account (see the header).
+    prisma.contractNotice.updateMany({ where: { userId }, data: { userId: null } }),
     prisma.subscription.deleteMany({ where: { userId } }),
   ]);
   return { assetsPending: failed };

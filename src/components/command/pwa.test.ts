@@ -12,8 +12,8 @@ describe("web app manifest", () => {
   const m = manifest();
   it("installs as a standalone app that starts in /app", () => {
     expect(m).toMatchObject({ name: "StudyOS", start_url: "/app", display: "standalone" });
-    expect(m.background_color).toBe("#0b0b0a");
-    expect(m.theme_color).toBe("#0b0b0a");
+    expect(m.background_color).toBe("#faf9f5");
+    expect(m.theme_color).toBe("#faf9f5");
   });
   it("points at icons that exist, including maskable ones", () => {
     for (const icon of m.icons ?? []) expect(existsSync(join(root, "public", icon.src))).toBe(true);

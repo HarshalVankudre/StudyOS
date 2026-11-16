@@ -6,11 +6,20 @@
  *    included, kept only for undo;
  *  - AgentTask: transport rows of a running agent task (they expire within
  *    minutes; their replies are in agentConversations);
- *  - DeletedAccount: the tombstone of an erased account (no live user has one).
+ *  - DeletedAccount: the tombstone of an erased account (no live user has one);
+ *  - ShareReport: reports other people sent about a shared page (their
+ *    messages, kept for moderation; erased with the account);
+ *  - ErrorEvent: server error counts for the operator console, grouped by
+ *    kind, with no user id (nothing in it belongs to any one student);
+ *  - ReferralMailbox: the invite program's register of keyed mailbox
+ *    hashes, with no user id or address (no row can be told to be anyone's
+ *    without the server key; lib/referral/mailbox.ts);
+ *  - AccountDeletionReason: why deleted accounts left, with no user id (a
+ *    live account has none).
  * Credentials are never exported: the calendar feed token is reported as
  * present/absent, connected feed links by host, push subscriptions as devices
- * (label and dates, never their endpoint or keys), Stripe ids only as "has a
- * customer".
+ * (label and dates, never their endpoint or keys), shared page links without
+ * their token, Stripe ids only as "has a customer".
  *
  * The document is STREAMED (streamUserDataExport): workspaces (up to 2 MB
  * each), study material (up to a few hundred KB each) and agent chat
@@ -21,6 +30,7 @@
 import "server-only";
 
 import { prisma } from "@/lib/db";
+import { claimWithinLimit } from "@/lib/usage-limits";
 
 export const EXPORT_FORMAT_VERSION = 1;
 
@@ -46,7 +56,15 @@ export const EXPORT_MATERIAL_BATCH = 5;
 export const EXPORT_CHAT_BATCH = 200;
 
 /** Models deliberately not in the export (see the header for why). */
-export const EXPORT_EXCLUDED_MODELS = ["WorkspaceChange", "AgentTask", "DeletedAccount"] as const;
+export const EXPORT_EXCLUDED_MODELS = [
+  "WorkspaceChange",
+  "AgentTask",
+  "DeletedAccount",
+  "ShareReport",
+  "ErrorEvent",
+  "ReferralMailbox",
+  "AccountDeletionReason",
+] as const;
 
 /**
  * The streamed collections. Each lists only ids first (cheap), then loads
@@ -210,6 +228,7 @@ async function loadExportSummary(userId: string, profile: ExportProfile, now: Da
     agentRuns,
     studyEvents,
     studyDays,
+    focusSessions,
     usageEvents,
     creditAccount,
     creditLedger,
@@ -223,6 +242,12 @@ async function loadExportSummary(userId: string, profile: ExportProfile, now: Da
     notificationPrefs,
     pushDevices,
     notificationLog,
+    feedback,
+    pageShares,
+    referralCode,
+    referralsMade,
+    invitedBy,
+    contractNotices,
   ] = await Promise.all([
     prisma.dailyStudyPlan.findMany({
       where: { userId },
@@ -253,6 +278,15 @@ async function loadExportSummary(userId: string, profile: ExportProfile, now: Da
         workspaceId: true, localDate: true, reviews: true, again: true, hard: true, good: true,
         easy: true, newCards: true, reviewTotal: true, reviewPassed: true, practice: true,
         quizAnswers: true, quizCorrect: true,
+      },
+    }),
+    // Focus timer sessions: what the student focused on, when and how long.
+    prisma.focusSession.findMany({
+      where: { userId },
+      orderBy: { startedAt: "asc" },
+      select: {
+        workspaceId: true, itemKey: true, label: true, localDate: true, startedAt: true, seconds: true,
+        completed: true, createdAt: true,
       },
     }),
     prisma.usageEvent.findMany({
@@ -316,7 +350,12 @@ async function loadExportSummary(userId: string, profile: ExportProfile, now: Da
       select: {
         timeZone: true, locale: true, dailyEnabled: true, dailyMinute: true, deadlineEnabled: true,
         deadlineMinute: true, deadlineLeads: true, examLeads: true, streakEnabled: true,
-        quietEnabled: true, quietStart: true, quietEnd: true, createdAt: true, updatedAt: true,
+        weeklyEnabled: true, weeklyDay: true, weeklyMinute: true,
+        quietEnabled: true, quietStart: true, quietEnd: true,
+        // The email switch and a recorded rejection; the address itself is
+        // never stored by StudyOS (it lives in the Clerk account).
+        emailEnabled: true, emailBouncedAt: true,
+        createdAt: true, updatedAt: true,
       },
     }),
     // The endpoint is a capability URL to the device: never exported.
@@ -330,6 +369,46 @@ async function loadExportSummary(userId: string, profile: ExportProfile, now: Da
       orderBy: { createdAt: "asc" },
       select: { kind: true, localDate: true, status: true, message: true, createdAt: true, sentAt: true },
     }),
+    // Messages the student sent with "Send feedback", and where each stands.
+    prisma.feedback.findMany({
+      where: { userId },
+      orderBy: { createdAt: "asc" },
+      select: { kind: true, message: true, pagePath: true, locale: true, contactOk: true, status: true, createdAt: true },
+    }),
+    // Pages the student shared with a link (the page is in its exported
+    // workspace). The token is the link itself, a credential: never exported.
+    prisma.pageShare.findMany({
+      where: { userId },
+      orderBy: { createdAt: "asc" },
+      select: { workspaceId: true, pageId: true, createdAt: true, revokedAt: true, viewCount: true, lastViewedAt: true },
+    }),
+    // Invites (lib/referral): the student's own link; the friends who joined
+    // through it by date only (never who they are, and never the attempts
+    // that were refused, which say something about the person who made
+    // them); and whether the student was invited (never by whom, nor the
+    // fraud check that refused it: only "not eligible").
+    prisma.referralCode.findUnique({ where: { userId }, select: { code: true, createdAt: true } }),
+    prisma.referral.findMany({
+      where: { referrerId: userId, status: { in: ["pending", "rewarded"] } },
+      orderBy: { createdAt: "asc" },
+      select: { createdAt: true, rewardedAt: true },
+    }),
+    prisma.referral.findUnique({
+      where: { refereeId: userId },
+      select: { status: true, createdAt: true, rewardedAt: true },
+    }),
+    // Withdrawals and cancellations the student declared while signed in
+    // (/withdraw, /cancel), as sent, and where each stands. Stripe ids are
+    // left out, like everywhere in the export.
+    prisma.contractNotice.findMany({
+      where: { userId },
+      orderBy: { receivedAt: "asc" },
+      select: {
+        kind: true, name: true, email: true, contractKind: true, details: true, cancelType: true, reason: true,
+        requestedEnd: true, locale: true, receivedAt: true, status: true, handledAt: true, ackStatus: true,
+        proEndsAt: true,
+      },
+    }),
   ]);
 
   return {
@@ -340,6 +419,7 @@ async function loadExportSummary(userId: string, profile: ExportProfile, now: Da
     study: {
       reviewDays: studyEvents.map((e) => e.createdAt),
       reviewsPerDay: studyDays,
+      focusSessions,
       dailyAgent: dailyAgentConfig,
       dailyPlans: dailyPlans.map((p) => ({ ...p, items: parseJson(p.items), details: parseJson(p.details) })),
       agentRuns,
@@ -362,6 +442,7 @@ async function loadExportSummary(userId: string, profile: ExportProfile, now: Da
         }
       : { status: "free", currentPeriodEnd: null, hasStripeCustomer: false, updatedAt: null },
     billing: { events: billingEvents, jobs: billingIntents },
+    contractNotices,
     assets,
     calendarFeed: { enabled: Boolean(calendarToken), createdAt: calendarToken?.createdAt ?? null },
     importedCalendars: importedFeeds.map((f) => ({
@@ -380,17 +461,30 @@ async function loadExportSummary(userId: string, profile: ExportProfile, now: Da
       devices: pushDevices,
       sent: notificationLog,
     },
+    feedback,
+    sharedPages: pageShares,
+    referrals: {
+      inviteCode: referralCode,
+      friendsInvited: referralsMade.length,
+      invited: referralsMade.map((r) => ({ joinedAt: r.createdAt, rewardedAt: r.rewardedAt })),
+      invitedBy: invitedBy
+        ? {
+            status: invitedBy.status === "rejected" ? "not_eligible" : invitedBy.status,
+            invitedAt: invitedBy.createdAt,
+            rewardedAt: invitedBy.rewardedAt,
+          }
+        : null,
+    },
     usageEvents,
   };
 }
 
-/** Count-then-record limiter on UsageEvent (same model as lib/usage-limits). */
-export async function allowDataExport(userId: string, now = new Date()): Promise<boolean> {
-  const since = new Date(now.getTime() - EXPORT_LIMIT.windowMs);
-  const used = await prisma.usageEvent.count({
-    where: { userId, kind: EXPORT_KIND, createdAt: { gte: since } },
-  });
-  if (used >= EXPORT_LIMIT.max) return false;
-  await prisma.usageEvent.create({ data: { userId, kind: EXPORT_KIND } }).catch(() => {});
-  return true;
+/**
+ * Exports allowed per user (EXPORT_LIMIT), counted and recorded atomically
+ * under the user's lock (lib/usage-limits claimWithinLimit): parallel
+ * requests cannot all pass the count before any of them records.
+ */
+export async function allowDataExport(userId: string): Promise<boolean> {
+  const claim = await claimWithinLimit(userId, EXPORT_KIND, EXPORT_LIMIT.max, EXPORT_LIMIT.windowMs);
+  return claim.allowed;
 }

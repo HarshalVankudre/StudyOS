@@ -21,6 +21,10 @@ const mocks = vi.hoisted(() => ({
   workspaceLimitReached: vi.fn(),
   saveNewWorkspace: vi.fn(),
   normalizeSourceText: vi.fn(),
+  rewardReferral: vi.fn(),
+  qualifyReferral: vi.fn(),
+  claimReferral: vi.fn(),
+  creditHoldCharge: vi.fn(),
   // The model the student's plan runs: the configured Haiku (real cost
   // within the list price) unless a test makes it an expensive one.
   model: "claude-haiku-5-5",
@@ -48,6 +52,7 @@ vi.mock("@/lib/credits", () => ({
   reserveCredits: mocks.reserveCredits,
   settleCreditHold: mocks.settleCreditHold,
   releaseCreditHold: mocks.releaseCreditHold,
+  creditHoldCharge: mocks.creditHoldCharge,
   getCreditBalance: mocks.getCreditBalance,
   // 1 credit per 100 tokens keeps the arithmetic visible in assertions,
   // and $0.0001 per credit of model spend.
@@ -66,6 +71,11 @@ vi.mock("@/lib/usage-limits", () => ({
 }));
 vi.mock("@/lib/i18n/server", () => ({ getLocale: vi.fn(async () => "en") }));
 vi.mock("@/lib/workspace/store", () => ({ saveNewWorkspace: mocks.saveNewWorkspace }));
+vi.mock("@/lib/referral/reward", () => ({
+  qualifyReferral: mocks.qualifyReferral,
+  rewardQualifiedReferral: mocks.rewardReferral,
+}));
+vi.mock("@/lib/referral/claim", () => ({ claimReferral: mocks.claimReferral }));
 
 import { POST } from "./route";
 import { POST as CANCEL } from "./cancel/route";
@@ -131,6 +141,15 @@ beforeEach(() => {
   mocks.releaseCreditHold.mockReset();
   mocks.releaseCreditHold.mockResolvedValue(true);
   mocks.saveNewWorkspace.mockResolvedValue("ws-new");
+  mocks.rewardReferral.mockReset();
+  mocks.rewardReferral.mockResolvedValue({ kind: "none" });
+  // Not an invited friend, unless a test says so.
+  mocks.qualifyReferral.mockReset();
+  mocks.qualifyReferral.mockResolvedValue(false);
+  mocks.claimReferral.mockReset();
+  mocks.claimReferral.mockResolvedValue(true);
+  mocks.creditHoldCharge.mockReset();
+  mocks.creditHoldCharge.mockResolvedValue(0);
   mocks.planWorkspace.mockImplementation(async () => {
     recordUsage({ prompt_tokens: 300, completion_tokens: 100 });
     return PLAN;
@@ -166,6 +185,21 @@ describe("POST /api/generate", () => {
     expect(mocks.claimOutcomeSlot.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.planWorkspace.mock.invocationCallOrder[0],
     );
+    expect(mocks.releaseOutcomeSlot).toHaveBeenCalledWith("slot-1");
+  });
+
+  it("a saved, charged build still completes when the balance cannot be read afterwards", async () => {
+    mocks.generateWorkspace.mockImplementation(async () => {
+      recordUsage({ prompt_tokens: 1500, completion_tokens: 500 });
+      return sampleWorkspace;
+    });
+    mocks.getCreditBalance.mockResolvedValueOnce(100).mockRejectedValueOnce(new Error("db down"));
+    const stream = await events(await POST(request({ prompt: "CS student" })));
+    const last = stream.at(-1);
+    expect(last).toMatchObject({ type: "complete", workspaceId: "ws-new", credits: 30 });
+    expect(last).not.toHaveProperty("balance");
+    expect(stream.some((e) => e.type === "error")).toBe(false);
+    // Not counted as a failed build: the claimed failure slot is given back.
     expect(mocks.releaseOutcomeSlot).toHaveBeenCalledWith("slot-1");
   });
 
@@ -455,5 +489,215 @@ describe("POST /api/generate", () => {
     );
     clock = (mocks.generateWorkspace.mock.calls[1][6] as { clock: StudentClock }).clock;
     expect(clock.timeZone).toBe("Europe/Berlin");
+  });
+});
+
+describe("the invite reward after a build (lib/referral/reward.ts)", () => {
+  const charged = () =>
+    mocks.generateWorkspace.mockImplementation(async () => {
+      recordUsage({ prompt_tokens: 1500, completion_tokens: 500 });
+      return sampleWorkspace;
+    });
+
+  /** Read a streamed response event by event (null at its end). */
+  function reader(response: Response) {
+    const body = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    const queued: GenerationEvent[] = [];
+    return async function next(): Promise<GenerationEvent | null> {
+      for (;;) {
+        if (queued.length > 0) return queued.shift()!;
+        const { value, done } = await body.read();
+        if (done) return null;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) if (line.trim()) queued.push(JSON.parse(line) as GenerationEvent);
+      }
+    };
+  }
+
+  /** A reward the test finishes by hand (a slow Clerk). */
+  function slowReward() {
+    let finish!: () => void;
+    mocks.rewardReferral.mockImplementation(
+      () => new Promise((resolve) => (finish = () => resolve({ kind: "rewarded", referrer: "granted" }))),
+    );
+    return () => finish();
+  }
+
+  it("a saved, charged build qualifies the invite, says it is complete at once, then tries the reward", async () => {
+    charged();
+    mocks.qualifyReferral.mockResolvedValue(true);
+    const finishReward = slowReward();
+    const next = reader(await POST(request({ prompt: "CS student" })));
+    let event: GenerationEvent | null;
+    while ((event = await next()) && event.type !== "complete");
+    // The student hears "complete" while the reward is still running.
+    expect(event).toEqual({ type: "complete", workspaceId: "ws-new", credits: 30, balance: 100, rewardPending: true });
+    expect(mocks.rewardReferral).toHaveBeenCalledTimes(1);
+    expect(mocks.rewardReferral).toHaveBeenCalledWith("user-1");
+    finishReward();
+    expect(await next()).toBeNull();
+    // Charge, then qualify, then the balance it reports, then the reward.
+    const qualifyAt = mocks.qualifyReferral.mock.invocationCallOrder[0];
+    expect(mocks.qualifyReferral).toHaveBeenCalledWith("user-1");
+    expect(mocks.settleCreditHold.mock.invocationCallOrder[0]).toBeLessThan(qualifyAt);
+    expect(mocks.getCreditBalance.mock.invocationCallOrder.at(-1)).toBeGreaterThan(qualifyAt);
+    expect(mocks.rewardReferral.mock.invocationCallOrder[0]).toBeGreaterThan(mocks.getCreditBalance.mock.invocationCallOrder.at(-1)!);
+  });
+
+  it("anyone not invited: one qualify check, no reward tried, nothing pending", async () => {
+    charged();
+    const stream = await events(await POST(request({ prompt: "CS student" })));
+    expect(stream.at(-1)).toEqual({ type: "complete", workspaceId: "ws-new", credits: 30, balance: 100 });
+    expect(mocks.qualifyReferral).toHaveBeenCalledTimes(1);
+    expect(mocks.rewardReferral).not.toHaveBeenCalled();
+  });
+
+  it("a Cancel during the reward wait never reads as stopped: the build is saved and paid for", async () => {
+    charged();
+    mocks.qualifyReferral.mockResolvedValue(true);
+    const finishReward = slowReward();
+    const next = reader(await POST(request({ prompt: "CS student", generationId: "gen-reward-01" })));
+    let event: GenerationEvent | null;
+    const seen: GenerationEvent[] = [];
+    while ((event = await next()) && event.type !== "complete") seen.push(event);
+    expect(event).toMatchObject({ type: "complete", workspaceId: "ws-new" });
+    // The student presses Cancel now (the run is still registered).
+    const cancelled = await CANCEL(
+      new Request("http://localhost/api/generate/cancel", {
+        method: "POST",
+        body: JSON.stringify({ generationId: "gen-reward-01" }),
+      }),
+    );
+    expect(await cancelled.json()).toEqual({ cancelled: true });
+    finishReward();
+    while ((event = await next())) seen.push(event);
+    expect(seen.some((e) => e.type === "cancelled" || e.type === "error")).toBe(false);
+    // Charged once, at its price; never re-settled as a stopped build.
+    expect(mocks.settleCreditHold).toHaveBeenCalledTimes(1);
+    expect(mocks.settleCreditHold).toHaveBeenCalledWith(HOLD, 30);
+  });
+
+  it("a Cancel that lands while the workspace is being saved still gets the complete event", async () => {
+    charged();
+    let saved!: (id: string) => void;
+    mocks.saveNewWorkspace.mockImplementation(() => new Promise((resolve) => (saved = resolve)));
+    const responsePromise = POST(request({ prompt: "CS student", generationId: "gen-save-0001" }));
+    const streamed = events(await responsePromise);
+    await vi.waitFor(() => expect(mocks.saveNewWorkspace).toHaveBeenCalled());
+    await CANCEL(
+      new Request("http://localhost/api/generate/cancel", {
+        method: "POST",
+        body: JSON.stringify({ generationId: "gen-save-0001" }),
+      }),
+    );
+    saved("ws-new");
+    const stream = await streamed;
+    expect(stream.at(-1)).toMatchObject({ type: "complete", workspaceId: "ws-new", credits: 30 });
+    expect(stream.some((e) => e.type === "cancelled")).toBe(false);
+  });
+
+  it("a failed build never tries it", async () => {
+    mocks.generateWorkspace.mockImplementation(async () => {
+      throw new GenerationFailedError("invalid_output");
+    });
+    await events(await POST(request({ prompt: "CS student" })));
+    expect(mocks.qualifyReferral).not.toHaveBeenCalled();
+    expect(mocks.rewardReferral).not.toHaveBeenCalled();
+  });
+
+  it("a build charged nothing (no model ran, or the charge could not be made) never qualifies", async () => {
+    charged();
+    mocks.settleCreditHold.mockResolvedValue(0);
+    const stream = await events(await POST(request({ prompt: "CS student" })));
+    expect(stream.at(-1)).toMatchObject({ type: "complete", credits: 0 });
+    expect(mocks.qualifyReferral).not.toHaveBeenCalled();
+    expect(mocks.rewardReferral).not.toHaveBeenCalled();
+  });
+
+  it("a settle that fails, whose charge the hold's release then completes, still counts as charged and qualifies", async () => {
+    charged();
+    mocks.qualifyReferral.mockResolvedValue(true);
+    mocks.settleCreditHold.mockRejectedValue(new Error("connection reset"));
+    // The release finds the charge the settle recorded and completes it.
+    mocks.releaseCreditHold.mockResolvedValue(false);
+    mocks.creditHoldCharge.mockResolvedValue(30);
+    const stream = await events(await POST(request({ prompt: "CS student" })));
+    expect(stream.at(-1)).toMatchObject({ type: "complete", credits: 30, rewardPending: true });
+    expect(mocks.releaseCreditHold).toHaveBeenCalledWith(HOLD);
+    expect(mocks.creditHoldCharge).toHaveBeenCalledWith(HOLD);
+    expect(mocks.releaseCreditHold.mock.invocationCallOrder[0]).toBeLessThan(mocks.creditHoldCharge.mock.invocationCallOrder[0]);
+    expect(mocks.creditHoldCharge.mock.invocationCallOrder[0]).toBeLessThan(mocks.qualifyReferral.mock.invocationCallOrder[0]);
+    expect(mocks.rewardReferral).toHaveBeenCalledWith("user-1");
+  });
+
+  it("a settle that fails before recording anything gives the hold back: nothing charged, nothing qualified", async () => {
+    charged();
+    mocks.settleCreditHold.mockRejectedValue(new Error("db down"));
+    mocks.creditHoldCharge.mockResolvedValue(0);
+    const stream = await events(await POST(request({ prompt: "CS student" })));
+    expect(stream.at(-1)).toMatchObject({ type: "complete", credits: 0 });
+    expect(mocks.qualifyReferral).not.toHaveBeenCalled();
+  });
+
+  it("a reward that fails never breaks the build", async () => {
+    charged();
+    mocks.qualifyReferral.mockResolvedValue(true);
+    mocks.rewardReferral.mockRejectedValue(new Error("db down"));
+    const stream = await events(await POST(request({ prompt: "CS student" })));
+    expect(stream.at(-1)).toMatchObject({ type: "complete", workspaceId: "ws-new", credits: 30 });
+    expect(stream.some((e) => e.type === "error")).toBe(false);
+    expect(mocks.releaseOutcomeSlot).toHaveBeenCalledWith("slot-1");
+  });
+});
+
+describe("an invited friend whose first stop is /generate (lib/referral/claim.ts)", () => {
+  afterEach(() => vi.unstubAllEnvs());
+  const withInvite = (name = "studyos_ref") => ({ cookie: `studyos_tz=UTC; ${name}=K7MPQ2XR.abc.sig` });
+
+  it("records the invite before anything else, so this very build can earn the reward, then clears the cookie", async () => {
+    mocks.generateWorkspace.mockImplementation(async () => {
+      recordUsage({ prompt_tokens: 1500, completion_tokens: 500 });
+      return sampleWorkspace;
+    });
+    mocks.qualifyReferral.mockResolvedValue(true);
+    const response = await POST(request({ prompt: "CS student" }, withInvite()));
+    expect(mocks.claimReferral).toHaveBeenCalledWith("user-1", "K7MPQ2XR.abc.sig");
+    const cleared = response.headers.get("set-cookie") ?? "";
+    expect(cleared).toMatch(/^studyos_ref=;/);
+    expect(cleared).toMatch(/Max-Age=0/);
+    expect(cleared).toMatch(/Path=\//);
+    await events(response);
+    expect(mocks.claimReferral.mock.invocationCallOrder[0]).toBeLessThan(mocks.reserveCredits.mock.invocationCallOrder[0]);
+    expect(mocks.claimReferral.mock.invocationCallOrder[0]).toBeLessThan(mocks.qualifyReferral.mock.invocationCallOrder[0]);
+    expect(mocks.rewardReferral).toHaveBeenCalledWith("user-1");
+  });
+
+  it("in production, reads the __Host- cookie and clears it Secure", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    mocks.generateWorkspace.mockResolvedValue(sampleWorkspace);
+    const response = await POST(request({ prompt: "CS student" }, withInvite("__Host-studyos_ref")));
+    expect(mocks.claimReferral).toHaveBeenCalledWith("user-1", "K7MPQ2XR.abc.sig");
+    expect(response.headers.get("set-cookie")).toMatch(/^__Host-studyos_ref=;.*Secure/i);
+    await events(response);
+  });
+
+  it("keeps the cookie when the invite could not be recorded (paused, or the database failed), and builds anyway", async () => {
+    mocks.generateWorkspace.mockResolvedValue(sampleWorkspace);
+    mocks.claimReferral.mockResolvedValue(false);
+    const response = await POST(request({ prompt: "CS student" }, withInvite()));
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect((await events(response)).at(-1)).toMatchObject({ type: "complete" });
+  });
+
+  it("without an invite cookie, nothing is claimed", async () => {
+    mocks.generateWorkspace.mockResolvedValue(sampleWorkspace);
+    const response = await POST(request({ prompt: "CS student" }, { cookie: "studyos_tz=UTC" }));
+    await events(response);
+    expect(mocks.claimReferral).not.toHaveBeenCalled();
+    expect(response.headers.get("set-cookie")).toBeNull();
   });
 });

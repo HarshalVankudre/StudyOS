@@ -240,7 +240,7 @@ function QuestionCard({
                 className={cn(
                   "min-h-11 rounded-lg border px-3 text-xs font-semibold transition",
                   q.kind === kind
-                    ? "border-lime bg-lime-faint text-ink"
+                    ? "border-lime-deep bg-lime-faint text-ink"
                     : "border-line bg-card text-ink-soft hover:bg-hover",
                 )}
               >

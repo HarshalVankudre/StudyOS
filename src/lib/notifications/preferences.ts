@@ -13,6 +13,9 @@ export const DEFAULT_DEADLINE_LEADS = [7, 2, 1];
 export const DEFAULT_EXAM_LEADS = [14, 7, 2, 1];
 /** At most this many notifications per local day, whatever is due. */
 export const DAILY_CAP = 4;
+/** The weekly recap's default: Sunday at 18:00 (off until the student turns it on). */
+export const DEFAULT_WEEKLY_DAY = 0;
+export const DEFAULT_WEEKLY_MINUTE = 18 * 60;
 
 export interface NotificationPreferences extends ScheduleSettings {
   locale: Locale;
@@ -30,12 +33,16 @@ export const DEFAULT_PREFERENCES: NotificationPreferences = {
   deadlineLeads: DEFAULT_DEADLINE_LEADS,
   examLeads: DEFAULT_EXAM_LEADS,
   streakEnabled: true,
+  weeklyEnabled: false,
+  weeklyDay: DEFAULT_WEEKLY_DAY,
+  weeklyMinute: DEFAULT_WEEKLY_MINUTE,
   quietEnabled: true,
   quietStart: 22 * 60,
   quietEnd: 7 * 60,
 };
 
 const minute = z.number().int().min(0).max(1439);
+const weekday = z.number().int().min(0).max(6);
 const leads = z
   .array(z.number().int())
   .max(LEAD_DAY_OPTIONS.length)
@@ -53,6 +60,9 @@ export const preferencesInputSchema = z
     deadlineLeads: leads,
     examLeads: leads,
     streakEnabled: z.boolean(),
+    weeklyEnabled: z.boolean(),
+    weeklyDay: weekday,
+    weeklyMinute: minute,
     quietEnabled: z.boolean(),
     quietStart: minute,
     quietEnd: minute,
@@ -78,6 +88,8 @@ function parseLeads(text: string | null | undefined, fallback: number[]): number
 
 const clampMinute = (n: number | undefined, fallback: number) =>
   typeof n === "number" && Number.isInteger(n) && n >= 0 && n <= 1439 ? n : fallback;
+const clampWeekday = (n: number | undefined, fallback: number) =>
+  typeof n === "number" && Number.isInteger(n) && n >= 0 && n <= 6 ? n : fallback;
 
 export interface PreferenceRow {
   timeZone: string;
@@ -89,6 +101,9 @@ export interface PreferenceRow {
   deadlineLeads: string;
   examLeads: string;
   streakEnabled: boolean;
+  weeklyEnabled: boolean;
+  weeklyDay: number;
+  weeklyMinute: number;
   quietEnabled: boolean;
   quietStart: number;
   quietEnd: number;
@@ -108,6 +123,10 @@ export function fromRow(row: PreferenceRow | null | undefined): NotificationPref
     deadlineLeads: parseLeads(row.deadlineLeads, d.deadlineLeads),
     examLeads: parseLeads(row.examLeads, d.examLeads),
     streakEnabled: row.streakEnabled,
+    // Opt-in: only an explicit true turns it on (a row from before the recap has none).
+    weeklyEnabled: row.weeklyEnabled === true,
+    weeklyDay: clampWeekday(row.weeklyDay, d.weeklyDay),
+    weeklyMinute: clampMinute(row.weeklyMinute, d.weeklyMinute),
     quietEnabled: row.quietEnabled,
     quietStart: clampMinute(row.quietStart, d.quietStart),
     quietEnd: clampMinute(row.quietEnd, d.quietEnd),

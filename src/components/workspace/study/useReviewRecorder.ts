@@ -27,7 +27,13 @@ export function useReviewRecorder(workspaceId: string): (event: StudyEvent) => v
     const batches = buffer.current?.drain() ?? [];
     if (batches.length === 0) return;
     try {
-      await recordReviewsAction(batches);
+      const result = await recordReviewsAction(batches);
+      if (!result?.ok) {
+        // Not recorded (the server writes all of them or none): try again
+        // with the next batch.
+        buffer.current?.restore(batches);
+        return;
+      }
       window.dispatchEvent(new CustomEvent(STUDIED_EVENT));
     } catch {
       buffer.current?.restore(batches); // offline: try again with the next batch

@@ -5,19 +5,10 @@
  * agrees with the plan and the database views: a row marked done gets no
  * reminder, and an exam is whatever the planner treats as an exam.
  */
-import {
-  classifyExam,
-  estimateEffortMinutes,
-  rowCourse,
-  rowDueDate,
-  rowTitle,
-  rowWeight,
-  cleanText,
-} from "@/lib/agents/daily-study/classify";
+import { cleanText, datedRows, estimateEffortMinutes, rowCourse } from "@/lib/agents/daily-study/classify";
 import { gradesWeightResolver } from "@/lib/agents/daily-study/grades-hook";
-import { pageForDatabase } from "@/lib/workspace/deep-link";
 import type { Workspace } from "@/lib/workspace/types";
-import { completionField, dayDiff, isRowComplete } from "@/lib/workspace/view-logic";
+import { dayDiff } from "@/lib/workspace/view-logic";
 import type { DeadlineReminder } from "./content";
 
 export interface LeadSettings {
@@ -26,8 +17,18 @@ export interface LeadSettings {
 }
 
 /**
+ * Administrative deadlines (registrations, re-registration, fees) are also
+ * reminded this many days before, whatever lead times the student chose for
+ * assignments: they take minutes and cannot be made up afterwards.
+ */
+export const FORMALITY_LEADS = [7, 3, 1] as const;
+
+/**
  * Reminders due on `localDate`: open rows whose due day is exactly one of the
- * chosen lead times away. Nearest first.
+ * chosen lead times away. A formality uses the assignment lead times plus
+ * FORMALITY_LEADS, and only while the student wants assignment reminders at
+ * all (some assignment lead chosen; the deadline switch itself is checked by
+ * the schedule). Nearest first.
  */
 export function deadlineRemindersFor(
   workspaces: Workspace[],
@@ -36,40 +37,30 @@ export function deadlineRemindersFor(
 ): DeadlineReminder[] {
   const deadlineLeads = new Set(leads.deadlineLeads);
   const examLeads = new Set(leads.examLeads);
+  const formalityLeads = new Set(deadlineLeads.size > 0 ? [...deadlineLeads, ...FORMALITY_LEADS] : []);
   if (deadlineLeads.size === 0 && examLeads.size === 0) return [];
   const weightOf = gradesWeightResolver();
   const out: DeadlineReminder[] = [];
 
   for (const workspace of workspaces) {
     for (const database of workspace.databases) {
-      if (!database.properties.some((p) => p.type === "date")) continue;
-      const field = completionField(database);
-      const pageId = pageForDatabase(workspace, database.id);
-      for (const row of database.rows) {
-        if (isRowComplete(database, row, field)) continue;
-        const due = rowDueDate(database, row);
-        if (!due) continue;
-        const days = dayDiff(localDate, due);
+      // Open rows with a due day, read the planner's way (lib/agents/daily-study/classify).
+      for (const item of datedRows(workspace, database, { weightOf })) {
+        const days = dayDiff(localDate, item.due);
         if (days < 1) continue;
-        const title = rowTitle(database, row) ?? cleanText(database.name);
-        if (!title) continue;
-        const weight = weightOf(workspace, database, row) ?? rowWeight(database, row);
-        const exam = classifyExam(database, row, title, weight).isExam;
-        if (!(exam ? examLeads : deadlineLeads).has(days)) continue;
+        const exam = item.exam.isExam;
+        const formality = item.formality;
+        if (!(formality ? formalityLeads : exam ? examLeads : deadlineLeads).has(days)) continue;
         out.push({
-          key: `deadline:${workspace.id}:${database.id}:${row.id}:${due}:${days}`,
-          title,
-          context: rowCourse(workspace, database, row) ?? cleanText(workspace.name),
-          dueDate: due,
+          key: `deadline:${item.ledgerKey}:${item.due}:${days}`,
+          title: item.title,
+          context: rowCourse(workspace, database, item.row) ?? cleanText(workspace.name),
+          dueDate: item.due,
           daysLeft: days,
           exam,
-          effortMinutes: exam ? null : estimateEffortMinutes(database, row, title, weight),
-          target: {
-            workspaceId: workspace.id,
-            ...(pageId ? { pageId } : {}),
-            databaseId: database.id,
-            rowId: row.id,
-          },
+          ...(formality ? { formality: true } : {}),
+          effortMinutes: exam || formality ? null : estimateEffortMinutes(database, item.row, item.title, item.weight),
+          target: item.target,
         });
       }
     }

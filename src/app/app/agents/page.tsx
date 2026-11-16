@@ -35,6 +35,8 @@ import {
   runDailyStudyAgentAction,
   saveDailyStudyAgentConfigAction,
 } from "./actions";
+import { BrandMark } from "@/components/BrandMark";
+import { AppNav } from "@/components/AppNav";
 
 export async function generateMetadata(): Promise<Metadata> {
   const { dict } = await getI18n();
@@ -65,8 +67,8 @@ export default async function AgentCenterPage() {
             href="/app"
             className="flex shrink-0 items-center gap-1.5 font-display text-lg font-extrabold tracking-tight"
           >
+            <BrandMark />
             StudyOS
-            <span className="mb-2 h-1.5 w-1.5 rounded-full bg-lime" aria-hidden />
           </Link>
           <div className="flex items-center gap-2">
             <div className="hidden sm:block">
@@ -77,6 +79,9 @@ export default async function AgentCenterPage() {
             </div>
             <AccountMenu variant="header" />
           </div>
+        </div>
+        <div className="mx-auto max-w-6xl px-4 pb-3 sm:px-7">
+          <AppNav />
         </div>
       </header>
 
@@ -90,7 +95,7 @@ export default async function AgentCenterPage() {
 
         <section className="mt-6 flex flex-col gap-6 border-b border-line pb-8 sm:flex-row sm:items-end sm:justify-between">
           <div className="max-w-3xl">
-            <div className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.16em] text-ink-faint">
+            <div className="flex items-center gap-2 text-[11px] text-ink-faint">
               <Bot className="h-3.5 w-3.5" aria-hidden />
               {A.eyebrow}
             </div>
@@ -100,7 +105,7 @@ export default async function AgentCenterPage() {
               </h1>
               <Badge variant={config.enabled ? "teal" : "outline"}>
                 <span
-                  className={`h-1.5 w-1.5 rounded-full ${config.enabled ? "bg-lime-deep" : "bg-ink-faint"}`}
+                  className={`h-1.5 w-1.5 rounded-full ${config.enabled ? "bg-lime-hover" : "bg-ink-faint"}`}
                   aria-hidden
                 />
                 {config.enabled ? A.enabled : A.paused}
@@ -160,7 +165,7 @@ export default async function AgentCenterPage() {
                     <select
                       name="dailyMinutes"
                       defaultValue={config.dailyMinutes}
-                      className="h-10 w-full rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none transition focus:border-lime-deep focus:ring-2 focus:ring-lime/20"
+                      className="h-10 w-full rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none transition focus:border-lime-deep focus:ring-2 focus:ring-lime-deep/20"
                     >
                       {DAILY_MINUTES_OPTIONS.map((minutes) => (
                         <option key={minutes} value={minutes}>

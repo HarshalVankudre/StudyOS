@@ -21,11 +21,30 @@
  * Existing subscribers keep the Stripe price they subscribed at: nothing here
  * changes what they are charged.
  *
- * Credit packs are priced in lib/price-list.ts (CREDIT_PACK_PRICE_USD),
- * which is also what their checkout charges.
+ * The credit pack (getCreditPackPricing) costs CREDIT_PACK_PRICE_USD
+ * (lib/price-list.ts), charged as an inline USD price, unless
+ * STRIPE_PRICE_CREDIT_PACK names a Stripe one-time Price: then that Price's
+ * amount and currency are shown and charged, and the pack is sold only while
+ * it is an active, flat, one-time price (the same rule as Pro).
+ *
+ * Two more rules keep what a page says true for every Stripe Price (Pro,
+ * annual, pack); a Price that breaks one is not offered, like an invalid one,
+ * and the owner is told once:
+ *  - one currency: a Price with extra currencies (currency_options) could be
+ *    charged in a currency the page does not show;
+ *  - with Stripe Tax on, its tax behavior (its own, else the Stripe Tax
+ *    settings' default, read and cached like the Prices) must be
+ *    STRIPE_TAX_BEHAVIOR, which the pages state; one that differs, or that
+ *    cannot be told, would make the VAT note wrong. (The inline pack price is
+ *    created with STRIPE_TAX_BEHAVIOR, so it always agrees.)
  */
+import { pricesTaxBehavior, type TaxBehavior } from "@/lib/checkout-config";
 import { reportError } from "@/lib/ops/report-error";
-import { PRO_FALLBACK_ANNUAL_USD, PRO_FALLBACK_MONTHLY_USD } from "@/lib/price-list";
+import {
+  CREDIT_PACK_PRICE_USD,
+  PRO_FALLBACK_ANNUAL_USD,
+  PRO_FALLBACK_MONTHLY_USD,
+} from "@/lib/price-list";
 
 type Env = Record<string, string | undefined>;
 
@@ -118,6 +137,15 @@ export interface StripePriceLike {
   currency: string;
   unit_amount: number | null;
   recurring: { interval: string; interval_count?: number | null } | null;
+  /** "inclusive", "exclusive" or "unspecified" (the account's default from Stripe Tax settings applies). */
+  tax_behavior?: string | null;
+  /** The Price's amounts in other currencies, by currency code (present when read with expand: ["currency_options"]). */
+  currency_options?: Record<string, unknown> | null;
+}
+
+/** The fields of the Stripe Tax settings this module reads. */
+export interface TaxSettingsLike {
+  defaults?: { tax_behavior?: string | null } | null;
 }
 
 /** An amount in major units (5 = $5.00, 800 = ¥800) and its ISO currency. */
@@ -138,8 +166,23 @@ function minorUnitDigits(currency: string): number {
  */
 export function amountOfStripePrice(price: StripePriceLike, interval: "month" | "year"): PriceAmount | null {
   if (!price.active || price.type !== "recurring") return null;
-  if (price.billing_scheme && price.billing_scheme !== "per_unit") return null;
   if (price.recurring?.interval !== interval || (price.recurring.interval_count ?? 1) !== 1) return null;
+  return flatAmount(price);
+}
+
+/**
+ * What a Stripe one-time Price charges, or null when it cannot be sold as
+ * the credit pack: inactive, recurring, or not a flat per-unit amount
+ * (tiered, or an amount the customer chooses).
+ */
+export function amountOfOneTimePrice(price: StripePriceLike): PriceAmount | null {
+  if (!price.active || price.type !== "one_time") return null;
+  return flatAmount(price);
+}
+
+/** A flat per-unit amount above zero, in major units of its currency. */
+function flatAmount(price: StripePriceLike): PriceAmount | null {
+  if (price.billing_scheme && price.billing_scheme !== "per_unit") return null;
   if (typeof price.unit_amount !== "number" || price.unit_amount <= 0) return null;
   const currency = price.currency.toUpperCase();
   return { amount: price.unit_amount / 10 ** minorUnitDigits(currency), currency };
@@ -167,12 +210,16 @@ export const PRICE_CACHE_MS = 10 * 60 * 1000;
 const PRICE_RETRY_MS = 60 * 1000;
 
 type PriceFetcher = (id: string) => Promise<StripePriceLike>;
+type TaxSettingsFetcher = () => Promise<TaxSettingsLike>;
 const priceCache = new Map<string, { price: StripePriceLike | null; at: number; ttl: number }>();
+/** The Stripe Tax settings' default tax behavior: null = none set; undefined = never read. */
+let taxDefaultCache: { value: string | null | undefined; at: number; ttl: number } | null = null;
 const reported = new Set<string>();
 
-/** Forget cached Stripe Prices (tests; a price change takes effect at once). */
+/** Forget cached Stripe Prices and tax settings (tests; a price change takes effect at once). */
 export function clearProPriceCache(): void {
   priceCache.clear();
+  taxDefaultCache = null;
   reported.clear();
 }
 
@@ -201,8 +248,97 @@ async function cachedPrice(id: string, fetchPrice: PriceFetcher, now: number): P
 
 const defaultFetcher: PriceFetcher = async (id) => {
   const { stripe } = await import("@/lib/stripe");
-  return (await stripe.prices.retrieve(id)) as unknown as StripePriceLike;
+  // currency_options is returned only when expanded (sellable() reads it).
+  return (await stripe.prices.retrieve(id, { expand: ["currency_options"] })) as unknown as StripePriceLike;
 };
+
+const defaultTaxSettingsFetcher: TaxSettingsFetcher = async () => {
+  const { stripe } = await import("@/lib/stripe");
+  return (await stripe.tax.settings.retrieve()) as unknown as TaxSettingsLike;
+};
+
+/** The Stripe Tax settings' default tax behavior, cached like the Prices (undefined: never read). */
+async function cachedTaxDefault(fetchSettings: TaxSettingsFetcher, now: number): Promise<string | null | undefined> {
+  const hit = taxDefaultCache;
+  if (hit && now - hit.at < hit.ttl) return hit.value;
+  try {
+    const settings = await fetchSettings();
+    const value = settings.defaults?.tax_behavior ?? null;
+    taxDefaultCache = { value, at: now, ttl: PRICE_CACHE_MS };
+    return value;
+  } catch (err) {
+    reportOnce("fetch:tax_settings", err);
+    // Keep the last answer Stripe gave, if any; retry in a minute.
+    taxDefaultCache = { value: hit?.value, at: now, ttl: PRICE_RETRY_MS };
+    return hit?.value;
+  }
+}
+
+/**
+ * Whether a Stripe Price's amount includes tax at checkout: its own
+ * tax_behavior when it has one, else the Stripe Tax settings' default. Null
+ * when that cannot be told: no default set, the default could not be read,
+ * or "inferred_by_currency" (Stripe then decides by currency, by a rule the
+ * SDK's types do not state, so it is not guessed here).
+ */
+export function effectiveTaxBehavior(
+  own: string | null | undefined,
+  accountDefault: string | null | undefined,
+): TaxBehavior | null {
+  if (own === "inclusive" || own === "exclusive") return own;
+  if (accountDefault === "inclusive" || accountDefault === "exclusive") return accountDefault;
+  return null;
+}
+
+/** The currencies a Price charges in besides its own (from currency_options), upper case. */
+export function extraCurrencies(price: StripePriceLike): string[] {
+  const own = price.currency.toLowerCase();
+  return Object.keys(price.currency_options ?? {})
+    .map((c) => c.toLowerCase())
+    .filter((c) => c !== own)
+    .map((c) => c.toUpperCase());
+}
+
+interface SellContext {
+  env: Env;
+  now: number;
+  fetchTaxSettings: TaxSettingsFetcher;
+}
+
+/**
+ * Can a valid Stripe Price be sold as the pages show it? Not when it has
+ * extra currencies (the page shows one, Checkout could charge another), nor,
+ * with Stripe Tax on, when its tax behavior is not STRIPE_TAX_BEHAVIOR or
+ * cannot be told (the VAT note would be wrong). Each problem is reported once.
+ */
+async function sellable(price: StripePriceLike, setting: string, ctx: SellContext): Promise<boolean> {
+  const extra = extraCurrencies(price);
+  if (extra.length > 0) {
+    reportOnce(
+      `currencies:${price.id}`,
+      new Error(
+        `${setting} ${price.id} also charges in ${extra.join(", ")} (currency_options): it is not offered, since the pages show ${price.currency.toUpperCase()} and Checkout could charge another currency. Use a single-currency Price.`,
+      ),
+    );
+    return false;
+  }
+  const expected = pricesTaxBehavior(ctx.env);
+  if (!expected) return true; // Stripe Tax off: no tax is charged and nothing is said about it.
+  const own = price.tax_behavior;
+  const specified = own === "inclusive" || own === "exclusive";
+  const accountDefault = specified ? undefined : await cachedTaxDefault(ctx.fetchTaxSettings, ctx.now);
+  const effective = effectiveTaxBehavior(own, accountDefault);
+  if (effective === expected) return true;
+  reportOnce(
+    `tax:${price.id}:${effective ?? "unknown"}`,
+    new Error(
+      effective
+        ? `${setting} ${price.id} has tax behavior ${effective}${specified ? "" : " (the Stripe Tax default)"} but STRIPE_TAX_BEHAVIOR is ${expected}: it is not offered, since the pricing pages would state VAT wrongly for it. Give the Price tax behavior ${expected}.`
+        : `${setting} ${price.id} has no tax behavior of its own and the Stripe Tax default is ${accountDefault === undefined ? "unreadable" : (accountDefault ?? "not set")}, so whether it includes VAT cannot be told: it is not offered. Give the Price tax behavior ${expected}.`,
+    ),
+  );
+  return false;
+}
 
 /** Round to the currency's minor unit. */
 const roundTo = (amount: number, currency: string) => {
@@ -210,17 +346,25 @@ const roundTo = (amount: number, currency: string) => {
   return Math.round(amount * f) / f;
 };
 
+/** What the price readers take (tests pass fakes; the defaults ask Stripe). */
+export interface PricingOptions {
+  env?: Env;
+  fetchPrice?: PriceFetcher;
+  fetchTaxSettings?: TaxSettingsFetcher;
+  now?: number;
+}
+
 /**
  * The Pro prices to show and sell (see the header). Server-only. With
  * billing configured, the Stripe Prices decide: an interval whose price
- * cannot be read or is not exactly that interval is not offered (and a
- * misconfigured price is reported to the owner once).
+ * cannot be read, is not exactly that interval, or cannot be sold as shown
+ * (sellable) is not offered (and a misconfigured price is reported to the
+ * owner once).
  */
-export async function getProPricing(
-  opts: { env?: Env; fetchPrice?: PriceFetcher; now?: number } = {},
-): Promise<DisplayedProPricing> {
+export async function getProPricing(opts: PricingOptions = {}): Promise<DisplayedProPricing> {
   const env = opts.env ?? process.env;
   const now = opts.now ?? Date.now();
+  const ctx: SellContext = { env, now, fetchTaxSettings: opts.fetchTaxSettings ?? defaultTaxSettingsFetcher };
   const configured = proPricing(env);
   const fallback: DisplayedProPricing = {
     monthly: { amount: configured.monthlyUsd, currency: "USD" },
@@ -250,13 +394,15 @@ export async function getProPricing(
     }
     return fallback;
   }
+  if (!(await sellable(monthlyPrice!, "STRIPE_PRICE_PRO", ctx))) return fallback;
 
   const annualId = env.STRIPE_PRICE_PRO_ANNUAL;
   const annualPrice = annualId ? await cachedPrice(annualId, fetchPrice, now) : null;
-  const yearly = annualPrice ? amountOfStripePrice(annualPrice, "year") : null;
+  let yearly = annualPrice ? amountOfStripePrice(annualPrice, "year") : null;
   if (annualPrice && !yearly) {
     reportOnce(`invalid:${annualId}`, new Error(`STRIPE_PRICE_PRO_ANNUAL ${annualId} is not an active flat yearly price: annual is not offered`));
   }
+  if (annualPrice && yearly && !(await sellable(annualPrice, "STRIPE_PRICE_PRO_ANNUAL", ctx))) yearly = null;
   const annual: DisplayedAnnual | null = yearly
     ? {
         total: yearly,
@@ -265,4 +411,53 @@ export async function getProPricing(
       }
     : null;
   return { monthly, annual, offered: { month: true, year: annual !== null }, source: "stripe" };
+}
+
+// ---- The credit pack -----------------------------------------------------------
+
+export interface DisplayedPackPricing {
+  /** What one pack costs: shown on every page that names the price, and charged by its checkout. */
+  price: PriceAmount;
+  /** The Stripe Price checkout charges (STRIPE_PRICE_CREDIT_PACK), or null: CREDIT_PACK_PRICE_USD as an inline price. */
+  priceId: string | null;
+  /** Checkout sells the pack at this price right now (billing on, and a configured Stripe Price is valid). */
+  offered: boolean;
+  /** "stripe": read from the Stripe Price; "configured": the price list's USD price. */
+  source: "stripe" | "configured";
+}
+
+/**
+ * The credit pack's price to show and sell (see the header). Server-only.
+ * Without STRIPE_PRICE_CREDIT_PACK nothing changes: CREDIT_PACK_PRICE_USD,
+ * sold whenever billing is on (its inline price carries STRIPE_TAX_BEHAVIOR,
+ * so it always matches what the pages say about VAT). With it, the Stripe
+ * Price decides; while it cannot be read, is not an active flat one-time
+ * price, or cannot be sold as shown (sellable), the pack is not sold (and a
+ * misconfigured price is reported to the owner once).
+ */
+export async function getCreditPackPricing(opts: PricingOptions = {}): Promise<DisplayedPackPricing> {
+  const env = opts.env ?? process.env;
+  const now = opts.now ?? Date.now();
+  const ctx: SellContext = { env, now, fetchTaxSettings: opts.fetchTaxSettings ?? defaultTaxSettingsFetcher };
+  // The same switch as lib/stripe isBillingConfigured.
+  const billingOn = Boolean(env.STRIPE_SECRET_KEY && env.STRIPE_PRICE_PRO);
+  const configured = {
+    price: { amount: CREDIT_PACK_PRICE_USD, currency: "USD" },
+    priceId: null,
+    source: "configured" as const,
+  };
+  const id = env.STRIPE_PRICE_CREDIT_PACK?.trim();
+  if (!billingOn) return { ...configured, offered: false };
+  if (!id) return { ...configured, offered: true };
+
+  const stripePrice = await cachedPrice(id, opts.fetchPrice ?? defaultFetcher, now);
+  const amount = stripePrice ? amountOfOneTimePrice(stripePrice) : null;
+  if (!stripePrice || !amount) {
+    if (stripePrice) {
+      reportOnce(`invalid:${id}`, new Error(`STRIPE_PRICE_CREDIT_PACK ${id} is not an active flat one-time price: the credit pack is not offered`));
+    }
+    return { ...configured, offered: false };
+  }
+  if (!(await sellable(stripePrice, "STRIPE_PRICE_CREDIT_PACK", ctx))) return { ...configured, offered: false };
+  return { price: amount, priceId: id, offered: true, source: "stripe" };
 }

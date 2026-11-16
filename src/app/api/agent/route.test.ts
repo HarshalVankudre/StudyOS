@@ -188,6 +188,19 @@ describe("a turn that runs", () => {
     expect(stored[1]).toMatchObject({ role: "assistant", content: "Added.", changeNote: "added row [r1]", changeId: "chg_1" });
   });
 
+  it("an applied, charged turn is still a result when the balance cannot be read afterwards", async () => {
+    m.runLoop.mockResolvedValue({ reply: "Added.", changed: true, workspace: sampleWorkspace });
+    m.apply.mockResolvedValue({ workspace: sampleWorkspace, version: 8, changeId: "chg_1" });
+    m.balance.mockResolvedValueOnce(150).mockRejectedValueOnce(new Error("db down"));
+    const out = await events(await POST(request({})));
+    const result = out.find((e) => e.type === "result");
+    expect(result.response).toMatchObject({ changeId: "chg_1", creditsCost: 3 });
+    expect(result.response).not.toHaveProperty("creditsBalance");
+    expect(out.some((e) => e.type === "error")).toBe(false);
+    expect(m.markDone).toHaveBeenCalledOnce();
+    expect(m.markError).not.toHaveBeenCalled();
+  });
+
   it("a cancelled turn is charged for the tokens it used", async () => {
     m.runLoop.mockImplementation(async () => {
       recordUsage({ input_tokens: 2_000, output_tokens: 100 }, "claude-haiku-5-5");

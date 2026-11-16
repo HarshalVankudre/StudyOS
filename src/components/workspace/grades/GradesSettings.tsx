@@ -1,30 +1,70 @@
 "use client";
 
+import { useId } from "react";
 import { RotateCcw } from "lucide-react";
 import { useI18n } from "@/lib/i18n/client";
-import type { GradeBand, GradeScalePreset } from "@/lib/workspace/types";
+import type { GradeBand, GradeScalePreset, GradesBlock } from "@/lib/workspace/types";
 import { GRADE_SCALE_PRESETS, parseLocaleNumber, type ScaleDefinition } from "@/lib/grades";
 import { DraftInput } from "../editor/DraftInput";
 import { ScoreInput } from "./ScoreInput";
 import { TargetPicker } from "./TargetPicker";
 
 const FIELD =
-  "h-11 w-full min-w-0 rounded-lg border border-line-strong bg-paper px-2 text-sm text-ink outline-none focus:border-lime focus:ring-2 focus:ring-lime/30";
+  "h-11 w-full min-w-0 rounded-lg border border-line-strong bg-paper px-2 text-sm text-ink outline-none focus:border-lime-deep focus:ring-2 focus:ring-lime-deep/30";
+
+type Entry = NonNullable<GradesBlock["entry"]>;
+
+/**
+ * With German grades: module grades typed directly (one module per row) or
+ * percentages and points mapped to grades. A radio pair, so the choice reads
+ * as a sentence on a phone.
+ */
+export function EntryChoice({ value, onChange }: { value: Entry; onChange: (entry: Entry) => void }) {
+  const { dict } = useI18n();
+  const M = dict.grades.modules;
+  const name = useId();
+  return (
+    <fieldset className="flex min-w-0 flex-col gap-2 text-sm">
+      <legend className="mb-1 font-semibold text-ink">{M.entryLegend}</legend>
+      {(["grade", "percent"] as const).map((entry) => (
+        <label
+          key={entry}
+          className="flex min-h-11 cursor-pointer items-center gap-3 rounded-lg border border-line-strong bg-card px-3 py-2 text-ink transition hover:bg-hover has-[:checked]:border-lime-deep has-[:checked]:bg-lime-faint"
+        >
+          <input
+            type="radio"
+            name={name}
+            value={entry}
+            checked={value === entry}
+            onChange={() => onChange(entry)}
+            className="size-4 shrink-0 accent-lime-deep"
+          />
+          <span className="min-w-0">{entry === "grade" ? M.entryGrade : M.entryPercent}</span>
+        </label>
+      ))}
+    </fieldset>
+  );
+}
 
 /**
  * Grading scale (with editable thresholds, since schools differ), the default
- * target, and a way back into column setup.
+ * target, and a way back into column setup. With German grades, how grades
+ * are entered; module grades have no thresholds and no percentage target.
  */
 export function GradesSettings({
   scale,
   customBands,
   defaultTarget,
+  entry,
   onScale,
   onBands,
   onDefaultTarget,
+  onEntry,
   onEditColumns,
 }: {
   scale: ScaleDefinition;
+  /** How grades are entered (only offered with German grades). */
+  entry: Entry;
   /** True when the block stores its own thresholds. */
   customBands: boolean;
   defaultTarget: number | null;
@@ -32,6 +72,7 @@ export function GradesSettings({
   /** New thresholds, or null to go back to the preset's. */
   onBands: (bands: GradeBand[] | null) => void;
   onDefaultTarget: (target: number | null) => void;
+  onEntry: (entry: Entry) => void;
   onEditColumns: () => void;
 }) {
   const { dict, t, locale } = useI18n();
@@ -40,6 +81,8 @@ export function GradesSettings({
 
   const editBand = (index: number, patch: Partial<GradeBand>) =>
     onBands(scale.bands.map((b, i) => (i === index ? { ...b, ...patch } : b)));
+  const german = scale.preset === "de_grade";
+  const modules = german && entry === "grade";
 
   return (
     <div className="flex flex-col gap-4 border-b border-line bg-hover/40 px-3 py-4 sm:px-4">
@@ -58,18 +101,22 @@ export function GradesSettings({
             ))}
           </select>
         </label>
-        <div className="flex min-w-0 flex-col gap-1 text-sm">
-          <span className="font-semibold text-ink">{g.defaultTarget}</span>
-          <TargetPicker
-            scale={scale}
-            value={defaultTarget}
-            label={g.defaultTarget}
-            onChange={onDefaultTarget}
-          />
-        </div>
+        {!modules && (
+          <div className="flex min-w-0 flex-col gap-1 text-sm">
+            <span className="font-semibold text-ink">{g.defaultTarget}</span>
+            <TargetPicker
+              scale={scale}
+              value={defaultTarget}
+              label={g.defaultTarget}
+              onChange={onDefaultTarget}
+            />
+          </div>
+        )}
       </div>
 
-      {scale.bands.length > 0 && (
+      {german && <EntryChoice value={entry} onChange={onEntry} />}
+
+      {!modules && scale.bands.length > 0 && (
         <fieldset className="flex flex-col gap-2">
           <legend className="text-sm font-semibold text-ink">{g.thresholds}</legend>
           <p className="text-xs text-ink-soft">{g.thresholdsHint}</p>
@@ -83,7 +130,7 @@ export function GradesSettings({
                     onCommit={(value) => editBand(i, { label: value.slice(0, 40) })}
                     maxLength={40}
                     aria-label={t(g.bandLabelAria, { index: i + 1 })}
-                    className="h-11 w-24 min-w-0 rounded-lg border border-line-strong bg-paper px-2 text-sm font-semibold text-ink outline-none focus:border-lime"
+                    className="h-11 w-24 min-w-0 rounded-lg border border-line-strong bg-paper px-2 text-sm font-semibold text-ink outline-none focus:border-lime-deep"
                   />
                   <span className="text-xs text-ink-soft">≥</span>
                   {/* The lowest band starts at 0: everything below the others. */}

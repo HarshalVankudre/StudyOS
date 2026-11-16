@@ -56,12 +56,15 @@ describe("rejectCrossSite", () => {
 });
 
 describe("every state-changing API route checks the origin", () => {
-  // Signed by the sender (webhooks) or authenticated by a bearer secret (ops).
+  // Signed by the sender (webhooks), authenticated by a bearer secret (ops),
+  // or by a signed token in the URL: one-click email unsubscribe (RFC 8058) is
+  // POSTed by mail providers from their own servers, with no Origin header.
   const EXEMPT = new Set([
     "src/app/api/stripe/webhook/route.ts",
     "src/app/api/clerk/webhook/route.ts",
     "src/app/api/ops/maintenance/route.ts",
     "src/app/api/ops/notifications/route.ts",
+    "src/app/api/notifications/unsubscribe/route.ts",
   ]);
 
   it("calls the shared check in each POST, PUT, PATCH and DELETE handler", async () => {

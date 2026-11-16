@@ -67,7 +67,7 @@ export function CreditChip({
             dir === "rtl" ? "left-0" : "right-0"
           }`}
         >
-          <p className="text-xs font-medium uppercase tracking-wide text-ink-soft">
+          <p className="text-xs font-medium text-ink-soft">
             {dict.credits.label}
           </p>
           <p className="mt-1 font-display text-2xl font-extrabold text-ink">

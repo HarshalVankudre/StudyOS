@@ -54,7 +54,7 @@ export function ScoreInput({
         }
       }}
       className={cn(
-        "h-11 w-20 rounded-lg border border-line-strong bg-paper px-2 text-end font-mono text-sm tabular-nums text-ink outline-none transition placeholder:text-ink-faint focus:border-lime focus:ring-2 focus:ring-lime/30",
+        "h-11 w-20 rounded-lg border border-line-strong bg-paper px-2 text-end font-mono text-sm tabular-nums text-ink outline-none transition placeholder:text-ink-faint focus:border-lime-deep focus:ring-2 focus:ring-lime-deep/30",
         className,
       )}
     />

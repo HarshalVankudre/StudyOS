@@ -146,6 +146,7 @@ describe("WorkspaceEditor responsive navigation", () => {
       "Redo",
       "Show the getting-started guide",
       "Export or print…",
+      "Share",
     ]);
   });
 

@@ -79,7 +79,9 @@ export function InstallHint() {
     const visits = countVisit();
     const env = { standalone, phone, ios, dismissed, visits };
 
-    const timer = setTimeout(() => setMode(installHintMode({ ...env, canPrompt: false })), 1500);
+    // Only when the browser's install offer has not arrived first: Chromium
+    // often fires it within the first second, and this must not hide it.
+    const timer = setTimeout(() => setMode((mode) => mode ?? installHintMode({ ...env, canPrompt: false })), 1500);
     const onPrompt = (e: Event) => {
       e.preventDefault();
       setDeferred(e as BeforeInstallPromptEvent);
@@ -135,7 +137,7 @@ export function InstallHint() {
           <button
             type="button"
             onClick={install}
-            className="mt-2 min-h-11 rounded-md bg-lime px-3.5 text-xs font-semibold text-lime-on transition hover:bg-lime-deep"
+            className="mt-2 min-h-11 rounded-md bg-lime px-3.5 text-xs font-semibold text-lime-on transition hover:bg-lime-hover"
           >
             {I.install}
           </button>

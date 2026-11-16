@@ -72,22 +72,23 @@ export async function recordReviewsAction(batches: ReviewBatch[]): Promise<{ ok:
     ).map((w) => w.id),
   );
 
-  try {
-    for (const b of valid) {
-      if (!owned.has(b.workspaceId)) continue;
+  // All batches in one transaction: either every one is counted or none is,
+  // so the client can send them all again after { ok: false } without
+  // counting any twice. Two tabs creating the same day at once fail this
+  // write; the retry then finds the row and adds to it.
+  const writes = valid
+    .filter((b) => owned.has(b.workspaceId))
+    .map((b) => {
       const key = { userId, workspaceId: b.workspaceId, localDate: b.localDate };
-      const increment = Object.fromEntries(COUNT_KEYS.map((k) => [k, { increment: b.counts[k] }]));
-      try {
-        await prisma.studyDay.upsert({
-          where: { userId_workspaceId_localDate: key },
-          create: { ...key, ...b.counts },
-          update: increment,
-        });
-      } catch {
-        // Two tabs creating the same day at once: the row exists now.
-        await prisma.studyDay.update({ where: { userId_workspaceId_localDate: key }, data: increment });
-      }
-    }
+      return prisma.studyDay.upsert({
+        where: { userId_workspaceId_localDate: key },
+        create: { ...key, ...b.counts },
+        update: Object.fromEntries(COUNT_KEYS.map((k) => [k, { increment: b.counts[k] }])),
+      });
+    });
+  if (writes.length === 0) return { ok: true };
+  try {
+    await prisma.$transaction(writes);
     return { ok: true };
   } catch {
     return { ok: false };

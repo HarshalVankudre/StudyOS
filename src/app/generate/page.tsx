@@ -1,9 +1,13 @@
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 import { auth } from "@clerk/nextjs/server";
+import { ReferralClaim } from "@/components/referral/ReferralClaim";
 import { modelForPlan } from "@/lib/ai/plans";
 import { getUserPlan } from "@/lib/billing";
 import { getCreditBalance } from "@/lib/credits";
 import { buildQuote, TRIAL_CREDITS } from "@/lib/price-list";
+import { referralsEnabled } from "@/lib/referral/config";
+import { referralCookieName } from "@/lib/referral/cookie";
 import { isBillingConfigured } from "@/lib/stripe";
 import { getI18n } from "@/lib/i18n/server";
 import { GeneratorClient } from "./GeneratorClient";
@@ -32,16 +36,23 @@ export default async function GeneratePage({
   const build = buildQuote(model);
   const balance = userId ? await getCreditBalance(userId).catch(() => null) : null;
   const outOfCredits = balance !== null && balance < build.price;
+  // A friend whose first stop after sign-up is the generator (not /app):
+  // record their invite here too (the build route also does, before its
+  // reward, lib/referral/claim.ts).
+  const invited = userId && referralsEnabled() ? (await cookies()).has(referralCookieName()) : false;
 
   return (
-    <GeneratorClient
-      initialPrompt={initialPrompt}
-      outOfCredits={outOfCredits}
-      minCredits={build.price}
-      costs={{ build: build.price, buildMax: build.max }}
-      balance={balance}
-      signupCredits={TRIAL_CREDITS}
-      billing={isBillingConfigured()}
-    />
+    <>
+      <GeneratorClient
+        initialPrompt={initialPrompt}
+        outOfCredits={outOfCredits}
+        minCredits={build.price}
+        costs={{ build: build.price, buildMax: build.max }}
+        balance={balance}
+        signupCredits={TRIAL_CREDITS}
+        billing={isBillingConfigured()}
+      />
+      {invited && <ReferralClaim />}
+    </>
   );
 }

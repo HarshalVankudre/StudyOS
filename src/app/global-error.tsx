@@ -6,13 +6,14 @@ import { sendClientErrorReport } from "@/lib/ops/client-report";
 /**
  * Last-resort boundary: replaces the ENTIRE root layout, so no providers
  * (theme, i18n) exist here. Self-contained styles, English only.
+ *
+ * The button reloads the page, as its label says: the root layout itself
+ * failed, so everything has to be fetched again.
  */
 export default function GlobalError({
   error,
-  reset,
 }: {
   error: Error & { digest?: string };
-  reset: () => void;
 }) {
   useEffect(() => {
     console.error("[StudyOS] global error:", error);
@@ -26,8 +27,8 @@ export default function GlobalError({
           minHeight: "100vh",
           display: "grid",
           placeItems: "center",
-          background: "#0b0b0a",
-          color: "#f4f3ef",
+          background: "#faf9f5",
+          color: "#141413",
           fontFamily:
             "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif",
           textAlign: "center",
@@ -35,20 +36,20 @@ export default function GlobalError({
         }}
       >
         <div>
-          <h1 style={{ fontSize: 32, margin: 0 }}>Something went wrong</h1>
-          <p style={{ color: "#a8a89e", maxWidth: 420, lineHeight: 1.6 }}>
+          <h1 style={{ fontSize: 34, fontWeight: 700, letterSpacing: "-0.015em", margin: 0, fontFamily: "Georgia, 'Times New Roman', serif" }}>Something went wrong</h1>
+          <p style={{ color: "#4d4c48", maxWidth: 420, lineHeight: 1.6 }}>
             An unexpected error occurred. Your work is autosaved — reloading
             usually fixes it.
           </p>
           <button
-            onClick={reset}
+            onClick={() => window.location.reload()}
             style={{
               marginTop: 16,
               padding: "12px 24px",
-              borderRadius: 8,
+              borderRadius: 999,
               border: "none",
-              background: "#2dd4bf",
-              color: "#0b0b0a",
+              background: "#c8f24a",
+              color: "#141413",
               fontWeight: 600,
               cursor: "pointer",
             }}

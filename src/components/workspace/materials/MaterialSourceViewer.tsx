@@ -83,7 +83,7 @@ export function MaterialSourceViewer({ source, onClose }: { source: SourceRef; o
         </DialogDescription>
 
         {source.quote && (
-          <figure className="rounded-lg border-s-4 border-lime bg-lime-faint px-3 py-2">
+          <figure className="rounded-lg border-s-4 border-lime-deep bg-lime-faint px-3 py-2">
             <figcaption className="text-[11px] font-semibold text-ink-soft">{M.viewerQuote}</figcaption>
             <blockquote className="text-sm text-ink" dir="auto">
               “{source.quote}”
@@ -125,7 +125,7 @@ export function MaterialSourceViewer({ source, onClose }: { source: SourceRef; o
                     {load.page.text.slice(0, match.start)}
                     <mark
                       ref={markRef}
-                      className="rounded-sm bg-lime/40 px-0.5 text-ink ring-1 ring-lime dark:bg-lime/30"
+                      className="rounded-sm bg-lime/40 px-0.5 text-ink ring-1 ring-lime-deep dark:bg-lime/30"
                     >
                       {load.page.text.slice(match.start, match.end)}
                     </mark>

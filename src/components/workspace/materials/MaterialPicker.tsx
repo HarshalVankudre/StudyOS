@@ -116,7 +116,7 @@ export function MaterialPicker({
                 key={material.id}
                 className={cn(
                   "rounded-lg border bg-card transition",
-                  selected ? "border-lime ring-1 ring-lime" : "border-line",
+                  selected ? "border-lime-deep ring-1 ring-lime-deep" : "border-line",
                 )}
               >
                 <div className="flex items-center gap-1">
@@ -216,7 +216,7 @@ export function MaterialPicker({
               type="button"
               onClick={() => void addPasted()}
               disabled={locked || pasteText.trim().length === 0}
-              className="min-h-11 rounded-lg bg-lime px-4 text-sm font-semibold text-lime-on transition hover:bg-lime-deep disabled:opacity-40"
+              className="min-h-11 rounded-lg bg-lime px-4 text-sm font-semibold text-lime-on transition hover:bg-lime-hover disabled:opacity-40"
             >
               {M.addPasted}
             </button>

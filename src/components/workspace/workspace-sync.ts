@@ -519,6 +519,17 @@ function opKey(op: Op): string {
   return `${pathKey(op.path)}#${op.op === "mov" ? op.id : op.item.id}`;
 }
 
+/**
+ * The same, for telling whether a change still stands over several segments
+ * (see rebaseOnto). A move is about the order of its list, not about the item:
+ * which items a diff reports as moved depends on the two orders it compares,
+ * so the moves of one segment and those of all segments together can name
+ * different items for the same reordering. ("@" never follows a path key.)
+ */
+function netKey(op: Op): string {
+  return op.op === "mov" ? `${pathKey(op.path)}@order` : opKey(op);
+}
+
 /** Run `fn` on a copy-on-write draft of `doc` (a JSON clone if the draft cannot take part). */
 function edit(doc: Workspace, fn: Mutator): Workspace {
   try {
@@ -922,7 +933,10 @@ export class WorkspaceSync {
     if (this.needsPull && !(await this.pullStep())) return;
     if (this.halted || this.conflict || this.paused) return;
     if (this.segments.length === 0 && !evenIfClean) {
-      if (this.status === "saving") {
+      // Nothing is unsaved. Also after a failed save that changed nothing (made
+      // only to settle a closed tab's saves, see mergeClaims): its outcome is
+      // still read from the server later, but no edit is waiting on it.
+      if (this.status === "saving" || this.status === "error" || this.status === "offline") {
         this.status = "saved";
         this.emit();
       }
@@ -1326,11 +1340,11 @@ export class WorkspaceSync {
     // first half could turn out to be nothing and the second half an edit.
     const net =
       segments.length > 1
-        ? diff(segments[0].before, segments[segments.length - 1].after).map(opKey)
+        ? diff(segments[0].before, segments[segments.length - 1].after).map(netKey)
         : null;
     const stands = (op: Op) => {
       if (!net) return true;
-      const key = opKey(op);
+      const key = netKey(op);
       // (A change inside something inserted or removed as a whole counts with it.)
       return net.some((k) => k.startsWith(key) || key.startsWith(k));
     };
@@ -2261,11 +2275,19 @@ export class WorkspaceSync {
     return "merged";
   }
 
-  /** (Re)start after mount: mark the tab alive and recover drafts once. */
+  /**
+   * (Re)start after mount: mark the tab alive, recover drafts once, and check
+   * the server's version. The document the editor opened with can be older
+   * than the server's (browser back/forward shows the page as it was first
+   * rendered), and nothing else reads the server until the next poll. A draft
+   * being merged reads the server first anyway; the check is then left out.
+   * (Both go through the network queue, so they never overlap.)
+   */
   start() {
     this.disposed = false;
     this.heartbeat();
     this.recoverDraft();
+    if (!this.merging) void this.checkRemote();
   }
 
   /**

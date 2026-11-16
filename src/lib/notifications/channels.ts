@@ -8,22 +8,15 @@
  * malformed record) is deleted after MAX_REJECTIONS in a row; temporary
  * failures (429, 5xx, network) are left alone.
  *
- * EMAIL (not implemented; the seam): the owner has no mail provider account
- * yet. An email channel is one more NotificationChannel:
- *   - reachable(userId): the student opted in to email AND has a verified
- *     address (from Clerk, `currentUser().emailAddresses`, fetched server-side
- *     with the Clerk backend SDK since the dispatch has no session);
- *   - deliver(userId, message): send `message.title` / `message.body` plus an
- *     absolute link (APP_URL + message.url), with a one-click unsubscribe
- *     (RFC 8058 `List-Unsubscribe` + `List-Unsubscribe-Post` headers pointing
- *     at a signed, unauthenticated opt-out route), through the provider.
- * It also needs: an "Email" switch in the settings section (and a column on
- * NotificationPreference), bounce/complaint handling to stop sending to dead
- * or complaining addresses, and SPF/DKIM/DMARC on the sending domain. Plain
- * SMTP would avoid choosing a vendor, but it still needs a client library
- * (nodemailer) or a hand-written SMTP/STARTTLS client, and the unsubscribe
- * and bounce parts are provider-specific, so it was left for when the
- * provider is chosen. Register the new channel in `defaultChannels()`.
+ * EMAIL (email-channel.ts): plain SMTP (lib/email), so no provider is tied
+ * in. On when SMTP_URL and MAIL_FROM are set; the student opts in with the
+ * "Also send reminders by email" switch, and the verified primary address is
+ * read from Clerk at send time. Every email has a one-click unsubscribe
+ * (RFC 8058) to a signed, unauthenticated route; a permanent rejection of
+ * the address stops email to that address. Rejections a provider reports
+ * later (a bounce email or webhook, spam complaints) are provider-specific
+ * and not handled here: the provider's own suppression list covers them.
+ * The sending domain needs SPF, DKIM and DMARC set up with the provider.
  */
 import "server-only";
 
@@ -32,6 +25,7 @@ import { reportError } from "@/lib/ops/report-error";
 import { pushConfigured, vapidConfig } from "./config";
 import { pushPayload, topicFor, type NotificationMessage } from "./content";
 import type { DeliveryResult, NotificationChannel } from "./dispatch";
+import { configuredEmailChannel, createDormantEmailChannel, prismaEmailPreferenceStore } from "./email-channel";
 import { isAllowedPushEndpoint } from "./endpoint";
 import { sendWebPush, type PushOutcome, type VapidKeys } from "./webpush";
 
@@ -42,6 +36,8 @@ const TTL_SECONDS: Record<NotificationMessage["kind"], number> = {
   daily: 4 * 60 * 60,
   deadline: 12 * 60 * 60,
   streak: 2 * 60 * 60,
+  // A look back at the week still reads right the next morning.
+  weekly: 12 * 60 * 60,
   test: 10 * 60,
 };
 
@@ -160,9 +156,28 @@ export const prismaSubscriptionStore: SubscriptionStore = {
   },
 };
 
-/** The channels in use: push when VAPID keys are configured. */
+/** The channels in use: push when VAPID keys are configured, email when SMTP is. */
 export function defaultChannels(): NotificationChannel[] {
+  const channels: NotificationChannel[] = [];
   const vapid = vapidConfig();
-  if (!vapid || !pushConfigured()) return [];
-  return [createPushChannel({ subscriptions: prismaSubscriptionStore, vapid })];
+  if (vapid && pushConfigured()) channels.push(createPushChannel({ subscriptions: prismaSubscriptionStore, vapid }));
+  const email = configuredEmailChannel();
+  if (email) channels.push(email);
+  return channels;
+}
+
+/**
+ * The dispatch's channels: those in use, plus, while email is not configured
+ * (and push is), a stand-in that keeps students who turned email on on their
+ * schedule (createDormantEmailChannel), so a short gap in the SMTP settings
+ * does not drop email-only students from the dispatch for good. Empty when
+ * nothing is configured: the dispatch then does not run at all, and every
+ * schedule stays as it is.
+ */
+export function dispatchChannels(): NotificationChannel[] {
+  const channels = defaultChannels();
+  if (channels.length > 0 && !channels.some((c) => c.name === "email")) {
+    channels.push(createDormantEmailChannel(prismaEmailPreferenceStore));
+  }
+  return channels;
 }

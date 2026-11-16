@@ -69,11 +69,17 @@ export interface ResolvedColumns {
   maxScore?: DatabaseProperty;
   weight?: DatabaseProperty;
   due?: DatabaseProperty;
+  /** A module's credits (module-grade entry only reads it). */
+  credits?: DatabaseProperty;
 }
 
 export type GradeColumnKey = keyof ResolvedColumns;
 
+/** The columns of weighted work (what the percent setup asks for). */
 export const GRADE_COLUMN_KEYS: readonly GradeColumnKey[] = ["course", "score", "maxScore", "weight", "due"];
+
+/** Every column a block can name, the credits of module-grade entry included. */
+export const ALL_GRADE_COLUMN_KEYS: readonly GradeColumnKey[] = [...GRADE_COLUMN_KEYS, "credits"];
 
 /** Property types each column may have. */
 export const GRADE_COLUMN_TYPES: Record<GradeColumnKey, readonly DatabaseProperty["type"][]> = {
@@ -82,6 +88,7 @@ export const GRADE_COLUMN_TYPES: Record<GradeColumnKey, readonly DatabasePropert
   maxScore: ["number"],
   weight: ["number"],
   due: ["date"],
+  credits: ["number"],
 };
 
 /** Whether `prop` may serve as column `key` of `db` (the title is never a course). */
@@ -120,8 +127,9 @@ export function detectGradeColumns(db: Database): ResolvedColumns {
 
   const dates = db.properties.filter((p) => p.type === "date");
   const due = dates.find((p) => DUE_NAME.test(p.name)) ?? dates[0];
+  const credits = pick(numbers.filter((p) => CREDITS_NAME.test(p.name)));
 
-  return { course, score, maxScore, weight, due };
+  return { course, score, maxScore, weight, due, ...(credits ? { credits } : {}) };
 }
 
 /**
@@ -133,7 +141,7 @@ export function resolveGradeColumns(db: Database, configured: GradesColumns | un
   const out: ResolvedColumns = {};
   const used = new Set<string>();
   // Explicit choices first, so detection never steals a column the student picked.
-  for (const key of GRADE_COLUMN_KEYS) {
+  for (const key of ALL_GRADE_COLUMN_KEYS) {
     const id = configured?.[key];
     if (typeof id !== "string") continue;
     const prop = db.properties.find((p) => p.id === id);
@@ -142,7 +150,7 @@ export function resolveGradeColumns(db: Database, configured: GradesColumns | un
       used.add(prop.id);
     }
   }
-  for (const key of GRADE_COLUMN_KEYS) {
+  for (const key of ALL_GRADE_COLUMN_KEYS) {
     if (out[key] || configured?.[key] === null) continue;
     const prop = detected[key];
     if (prop && !used.has(prop.id)) {
@@ -242,7 +250,7 @@ export function courseKeyForLabel(workspace: Workspace, db: Database, columns: R
 }
 
 /** The course a row belongs to, as {key, label, color}, or null (no course). */
-function rowCourse(
+export function rowCourse(
   workspace: Workspace,
   prop: DatabaseProperty,
   row: DatabaseRow,
@@ -262,6 +270,27 @@ function rowCourse(
   }
   const option = prop.options?.find((o) => o.id === id);
   return option ? { key: id, label: option.label, color: option.color } : null;
+}
+
+/** A column named like course credits ("ECTS", "CP", "Credits", "Leistungspunkte"). */
+export function isCreditsColumnName(name: string): boolean {
+  return CREDITS_NAME.test(name);
+}
+
+/**
+ * Credits of the course a row belongs to: a credits column on the row itself,
+ * else its course's row in a courses table (`courseCredits`). Null when
+ * neither says. Used by the daily planner to size module exam preparation.
+ */
+export function rowCredits(workspace: Workspace, db: Database, row: DatabaseRow): number | null {
+  const own = db.properties.find((p) => p.type === "number" && CREDITS_NAME.test(p.name));
+  const value = own ? num(row.cells[own.id]) : null;
+  if (value !== null) return value > 0 ? value : null;
+  const prop = detectGradeColumns(db).course;
+  const course = prop ? rowCourse(workspace, prop, row) : null;
+  if (!prop || !course) return null;
+  const credits = courseCredits(workspace, db, prop, [course]).get(course.key);
+  return credits !== undefined && credits > 0 ? credits : null;
 }
 
 /** Credits per course key, from a courses database when the workspace has one. */

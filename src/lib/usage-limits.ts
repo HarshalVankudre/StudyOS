@@ -10,6 +10,7 @@
  * at the boundary: each sees the events the others recorded.
  */
 import { prisma } from "@/lib/db";
+import { subscriptionGrantsPro } from "@/lib/credits";
 import { userLockKey, withKeyLock } from "@/lib/db-lock";
 import { USAGE_LIMITS, type LimitedKind } from "@/lib/price-list";
 
@@ -33,9 +34,14 @@ export async function workspaceLimitReached(userId: string): Promise<boolean> {
 /** Max simultaneously running agent tasks per user (see AgentTask). */
 export const MAX_CONCURRENT_AGENT_TASKS = 3;
 
+// Pro limits follow Pro itself: not while a dispute holds it, nor once the
+// paid period (plus its grace) is over.
 async function isProUser(userId: string): Promise<boolean> {
-  const sub = await prisma.subscription.findUnique({ where: { userId } });
-  return sub?.status === "active";
+  const sub = await prisma.subscription.findUnique({
+    where: { userId },
+    select: { status: true, currentPeriodEnd: true, disputeId: true },
+  });
+  return subscriptionGrantsPro(sub);
 }
 
 /**
@@ -49,8 +55,10 @@ export async function checkUsageLimit(
   kind: LimitedKind,
 ): Promise<{ allowed: boolean; remaining: number }> {
   const cfg = USAGE_LIMITS[kind];
-  const limit = (await isProUser(userId)) ? cfg.pro : cfg.free;
   try {
+    // The plan lookup is inside the try too: a database hiccup there must
+    // fail open like the count.
+    const limit = (await isProUser(userId)) ? cfg.pro : cfg.free;
     return await claimWithinLimit(userId, kind, limit, cfg.windowMs);
   } catch {
     // Fail open on a database hiccup: the limit is a throttle, and an outage
@@ -108,8 +116,8 @@ export async function claimOutcomeSlot(
   kind: LimitedKind,
 ): Promise<{ allowed: boolean; slot: string | null }> {
   const cfg = USAGE_LIMITS[kind];
-  const limit = (await isProUser(userId)) ? cfg.pro : cfg.free;
   try {
+    const limit = (await isProUser(userId)) ? cfg.pro : cfg.free;
     return await withKeyLock(userLockKey(`usage:${kind}`, userId), async (tx) => {
       const used = await tx.usageEvent.count({
         where: { userId, kind, createdAt: { gte: new Date(Date.now() - cfg.windowMs) } },
